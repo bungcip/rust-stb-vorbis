@@ -4,9 +4,10 @@
 #![allow(non_camel_case_types)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
+#![allow(unused_parens)]
 #![allow(non_upper_case_globals)]
 
-#![feature(question_mark, custom_derive)]
+#![feature(question_mark, custom_derive, box_syntax)]
 
 /// straight port from stb_vorbis
 /// Ogg Vorbis audio decoder - v1.09 - public domain
@@ -19,6 +20,7 @@ use std::io::prelude::*;
 use std::path::Path;
 use std::ptr;
 use std::mem;
+
 
 
 pub type codetype = f32;
@@ -62,6 +64,14 @@ pub struct stb_vorbis_alloc
 //     6 (5.1 audio), or 2 (stereo only).
 pub const STB_VORBIS_MAX_CHANNELS: usize = 16; // enough for anyone?  
 
+// STB_VORBIS_FAST_HUFFMAN_LENGTH [number]
+//     sets the log size of the huffman-acceleration table.  Maximum
+//     supported value is 24. with larger numbers, more decodings are O(1),
+//     but the table size is larger so worse cache missing, so you'll have
+//     to probe (and try multiple ogg vorbis files) to find the sweet spot.
+pub const STB_VORBIS_FAST_HUFFMAN_LENGTH : u8 = 10;
+
+
 ////////   ERROR CODES
 
 #[repr(C, i32)]
@@ -101,19 +111,20 @@ pub enum STBVorbisError
 }
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct Codebook
 {
    dimensions: i32, entries: i32,
-   codeword_lengths: *const u8,
+   codeword_lengths: Vec<u8>,
    minimum_value: f32,
      delta_value: f32,
      value_bits: u8,
      lookup_type: u8,
      sequence_p: u8,
-     sparse: u8,
+     sparse: bool,
     lookup_values: u32,
     multiplicands: *const codetype,
-    codewords: *const u32,
+    codewords: Vec<u32>,
 //    #ifdef STB_VORBIS_FAST_HUFFMAN_SHORT
 //     i16  fast_huffman: [i16; FAST_HUFFMAN_TABLE_SIZE],
 //    #else
@@ -123,6 +134,18 @@ pub struct Codebook
    sorted_values: *const i32,
    sorted_entries: i32,
 }
+
+impl Default for Codebook {
+    fn default() -> Self {
+        let mut instance : Codebook = unsafe{ mem::zeroed() };
+        
+        instance.codeword_lengths = Vec::new();
+        instance.codewords = Vec::new();
+        
+        instance
+    }
+}
+
 
 #[repr(C)]
 pub struct Floor0
@@ -265,7 +288,7 @@ pub struct stb_vorbis {
    
    
    codebook_count: i32,
-   codebooks: *const Codebook,
+   codebooks: Vec<Codebook>,
    floor_count: i32,
    floor_types: [i32; 64],  // varies
    floor_config: *const Floor,
@@ -336,6 +359,75 @@ pub struct stb_vorbis {
 }
 
 
+// this is a weird definition of log2() for which log2(1) = 1, log2(2) = 2, log2(4) = 3
+// as required by the specification. fast(?) implementation from stb.h
+// @OPTIMIZE: called multiple times per-packet with "constants"; move to setup
+fn ilog(n: i32) -> i32
+{
+//    static signed char log2_4[16] = { 0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4 };
+    static log2_4: [i8; 16] = [0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];
+
+    let n = n as usize;
+
+    // 2 compares if n < 16, 3 compares otherwise (4 if signed or n > 1<<29)
+    let result = if (n < (1 << 14)) {
+        if (n < (1 << 4)) {
+            0 + log2_4[n]
+        }
+        else if (n < (1 << 9)) {
+            5 + log2_4[n >> 5]
+        }
+        else {
+            10 + log2_4[n >> 10]
+        }
+    }
+    else if (n < (1 << 24)) {
+        if (n < (1 << 19)) {
+            15 + log2_4[n >> 15]
+        }
+        else {
+            20 + log2_4[n >> 20]
+        }
+    }
+    else if (n < (1 << 29)) {
+        25 + log2_4[n >> 25]
+    }
+    else if (n < (1 << 31)) {
+        30 + log2_4[n >> 30]
+    }
+    else {
+        0 // signed n returns 0
+    };
+    
+    result as i32
+       
+}
+
+
+// code length assigned to a value with no huffman encoding
+const  NO_CODE : u8 = 255;
+
+const  CRC32_POLY : u32 = 0x04c11db7;   // from spec
+
+//FIXME: change to lazy_init! macro
+static mut crc_table: [u32; 256] = [0; 256];
+
+fn crc32_init()
+{
+    unsafe {
+        for i in 0 .. 256 {
+            let mut s : u32 = i << 24;
+            let mut j = 0;
+            while j < 8 {
+                s = (s << 1) ^ (if s >= (1u32<<31) {CRC32_POLY }else{0} );
+                j += 1;
+            }
+            crc_table[i as usize] = s;
+            
+        }
+    }
+}
+
 fn error(f: &mut stb_vorbis, e: STBVorbisError) -> bool
 {
    f.error = e;
@@ -350,7 +442,7 @@ fn get8(z: &mut stb_vorbis) -> u8
     use std::io::Read;
     
     unsafe {
-        if z.stream.is_null() == false && z.stream >= z.stream_end {
+        if z.stream.is_null() == false {
             if z.stream >= z.stream_end { z.eof = true; return 0; }
             z.stream = z.stream.offset(1);
             return *(z.stream);
@@ -391,7 +483,7 @@ fn get32(f: &mut stb_vorbis) -> u32
 fn getn(z: &mut stb_vorbis, data: &mut [u8], n: i32) -> bool
 {    
     unsafe {
-        if z.stream.is_null() == false && z.stream >= z.stream_end {
+        if z.stream.is_null() == false {
             if z.stream >= z.stream_end { z.eof = true; return false; }
             ptr::copy_nonoverlapping(z.stream, data.as_mut_ptr(), n as usize);
             z.stream = z.stream.offset(n as isize);
@@ -465,23 +557,90 @@ fn next_segment(f: &mut stb_vorbis) -> i32
    return len as i32;
 }
 
+const EOP : i32 = (-1);
+const INVALID_BITS : i32 = (-1);
+
+fn get8_packet_raw(f: &mut stb_vorbis) -> i32
+{
+   if f.bytes_in_seg == 0 {  // CLANG!
+      if f.last_seg {
+        return EOP;  
+      } else if next_segment(f) == 0 {
+          return EOP;
+      }
+   }
+   
+   debug_assert!(f.bytes_in_seg > 0);
+   
+   f.bytes_in_seg -= 1;
+   f.packet_bytes += 1;
+   
+   return get8(f) as i32;
+}
+
+fn get8_packet(f: &mut stb_vorbis) -> i32
+{
+   let x = get8_packet_raw(f);
+   f.valid_bits = 0;
+   return x;
+}
+
+fn flush_packet(f: &mut stb_vorbis)
+{
+   while get8_packet_raw(f) != EOP {}
+}
+
+// @OPTIMIZE: this is the secondary bit decoder, so it's probably not as important
+// as the huffman decoder?
+fn get_bits(f: &mut stb_vorbis, n: i32) -> u32
+{
+   let mut z : u32;
+
+   if f.valid_bits < 0 { return 0};
+   if f.valid_bits < n {
+      if n > 24 {
+         // the accumulator technique below would not work correctly in this case
+         z = get_bits(f, 24);
+         z += get_bits(f, n-24) << 24;
+         return z;
+      }
+      if f.valid_bits == 0 {
+          f.acc = 0;
+      } 
+      while f.valid_bits < n {
+         let z = get8_packet_raw(f);
+         if z == EOP {
+            f.valid_bits = INVALID_BITS;
+            return 0;
+         }
+         f.acc += (z << f.valid_bits) as u32;
+         f.valid_bits += 8;
+      }
+   }
+   if f.valid_bits < 0 { return 0; }
+   z = f.acc & ((1 << n)-1);
+   f.acc >>= n;
+   f.valid_bits -= n;
+   return z;
+}
 
 
 fn capture_pattern(f: &mut stb_vorbis) -> bool
 {
-    let pattern : [u8; 4] = [0x4f, 0x67, 0x67, 0x53];
-    for &i in pattern.iter() {
-        let ch = get8(f);
-        if ch != i {
-            println!("capture_pattern(): wrong, {:#x} != {:#x}", ch, i);
-            return false;
-        }
-    }
-//    if 0x4f != get8(f) {return false};
-//    if 0x67 != get8(f) {return false};
-//    if 0x67 != get8(f) {return false};
-//    if 0x53 != get8(f) {return false};
-    println!("capture_pattern(): true");
+    // for debugging....
+    // let pattern : [u8; 4] = [0x4f, 0x67, 0x67, 0x53];
+    // for &i in pattern.iter() {
+    //     let ch = get8(f);
+    //     if ch != i {
+    //         // println!("capture_pattern(): wrong, {:#x} != {:#x}", ch, i);
+    //         return false;
+    //     }
+    // }
+   if 0x4f != get8(f) {return false};
+   if 0x67 != get8(f) {return false};
+   if 0x67 != get8(f) {return false};
+   if 0x53 != get8(f) {return false};
+    // println!("capture_pattern(): true");
    return true;
 }
 
@@ -733,9 +892,7 @@ fn start_decoder(f: &mut stb_vorbis) -> bool {
    }{}
    
    // third packet!
-   println!("check problem...");
    if !start_packet(f){return false;}
-       println!(" mantap!!");
    if f.push_mode {
       if !is_whole_packet_present(f, true) {
          // convert error in ogg header to write type
@@ -745,6 +902,287 @@ fn start_decoder(f: &mut stb_vorbis) -> bool {
          return false;
       }
    }
+   
+   crc32_init(); // always init it, to avoid multithread race conditions
+
+   if get8_packet(f) != VORBIS_packet_setup as i32 {
+       return error(f, VORBIS_invalid_setup);
+   }
+   for i in 0 .. 6 {
+     header[i] = get8_packet(f) as u8;  
+   } 
+   if !vorbis_validate(&header){
+       return error(f, VORBIS_invalid_setup);
+   }                    
+
+   // codebooks
+
+   f.codebook_count = (get_bits(f,8) + 1) as i32;
+   f.codebooks.resize(f.codebook_count as usize, Codebook::default());
+//    memset(f->codebooks, 0, sizeof(*f->codebooks) * f->codebook_count);
+   
+   for i in 0 .. f.codebook_count {
+    //   uint32 *values;
+    //   int ordered, sorted_count;
+    //   int total=0;
+    let mut total = 0;
+    
+    //   Codebook *c = f->codebooks+i;
+    
+    //   CHECK(f);
+      let mut c : Codebook = Codebook::default();
+    // let c = &mut f.codebooks[i as usize];
+      
+    //   println!("sinikah");
+      let x = get_bits(f, 8); if x != 0x42            {return error(f, VORBIS_invalid_setup);}
+      let x = get_bits(f, 8); if x != 0x43            {return error(f, VORBIS_invalid_setup);}
+      let x = get_bits(f, 8); if x != 0x56            {return error(f, VORBIS_invalid_setup);}
+      let x = get_bits(f, 8);
+    //   println!("lol");
+      
+      c.dimensions = ((get_bits(f, 8)<<8) + x) as i32;
+      let x = get_bits(f, 8);
+      let y = get_bits(f, 8);
+      c.entries = ((get_bits(f, 8)<<16) + (y<<8) + x) as i32;
+      let ordered = get_bits(f,1);
+      c.sparse = if ordered != 0 { 
+          false
+       }else{
+          get_bits(f,1) != 0
+       };
+
+      
+      if c.dimensions == 0 && c.entries != 0    {return error(f, VORBIS_invalid_setup);}
+
+    //   uint8 *lengths;
+      let mut length_in_stacks : Vec<u8> = Vec::new();
+      let lengths: *mut u8;
+      if c.sparse {
+          length_in_stacks.resize(c.entries as usize, 0);
+          lengths = length_in_stacks.as_mut_slice().as_mut_ptr();
+      }else{
+         c.codeword_lengths.resize(c.entries as usize, 0);
+         lengths = c.codeword_lengths.as_mut_slice().as_mut_ptr();
+      }
+
+      // NOTE: rust dont have OOM
+    //   if (!lengths) return error(f, VORBIS_outofmem);
+
+      if ordered != 0 {
+         let mut current_entry = 0;
+         let mut current_length = get_bits(f,5) + 1;
+         while current_entry < c.entries {
+            let limit = c.entries - current_entry;
+            let n = get_bits(f, ilog(limit));
+            if current_entry + n as i32 > c.entries as i32 { return error(f, VORBIS_invalid_setup); }
+            
+            unsafe {
+                // NOTE: maybe order is wrong??? 
+                ptr::write_bytes(lengths.offset(current_entry as isize), current_length as u8, n as usize);
+                // memset(lengths + current_entry, current_length, n);
+                
+            }
+            
+            current_entry += n as i32;
+            current_length += 1 ;
+         }
+      } else {
+         for j in 0 .. c.entries {
+             let j = j as isize;
+             
+            let present = if c.sparse  { get_bits(f,1) } else {1 } ;
+            if present != 0 {
+                unsafe {
+                   *lengths.offset(j) = (get_bits(f, 5) + 1) as u8;
+                    total += 1;
+                    if *lengths.offset(j) == 32 {
+                        return error(f, VORBIS_invalid_setup);
+                    }
+                }
+            } else {
+                unsafe {
+                   *lengths.offset(j) = NO_CODE;
+                    
+                }
+            }
+         }
+      }
+      
+      if c.sparse  && (total >= c.entries >> 2) {
+         // convert sparse items to non-sparse!
+         if c.entries > f.setup_temp_memory_required as i32 {
+            f.setup_temp_memory_required = c.entries as u32;
+         }
+
+         c.codeword_lengths.resize(c.entries as usize, 0);
+         c.sparse = false;
+
+        //  c.codeword_lengths = (uint8 *) setup_malloc(f, c.entries);
+        //  if (c.codeword_lengths == NULL) return error(f, VORBIS_outofmem);
+        //  memcpy(c.codeword_lengths, lengths, c.entries);
+        //  setup_temp_free(f, lengths, c.entries); // note this is only safe if there have been no intervening temp mallocs!
+        //  lengths = c.codeword_lengths;
+        //  c.sparse = 0;
+      }
+
+      // compute the size of the sorted tables
+      let mut sorted_count : i32;
+      if c.sparse  {
+         sorted_count = total;
+      } else {
+         sorted_count = 0;
+        //  #ifndef STB_VORBIS_NO_HUFFMAN_BINARY_SEARCH
+        for j in 0 .. c.entries {
+            unsafe {
+                let l = *lengths.offset(j as isize);
+                if l > STB_VORBIS_FAST_HUFFMAN_LENGTH && l != NO_CODE {
+                    sorted_count += 1;
+                }
+            }
+        }
+        //  #endif
+      }
+
+      c.sorted_entries = sorted_count;
+      let mut values : Vec<u32>;
+
+//       CHECK(f);
+      if c.sparse == false {
+          c.codewords.resize(c.entries as usize, 0);
+         // NOTE: rust don't have OOM
+        //  if (!c.codewords)                  return error(f, VORBIS_outofmem);
+      } else {
+         if c.sorted_entries != 0 {
+             c.codeword_lengths.resize(c.sorted_entries as usize, 0);
+            // if (!c.codeword_lengths)           return error(f, VORBIS_outofmem);
+            c.codewords.resize(c.sorted_entries as usize, 0);
+            // c.codewords = (uint32 *) setup_temp_malloc(f, sizeof(*c.codewords) * c.sorted_entries);
+            // if (!c.codewords)                  return error(f, VORBIS_outofmem);
+            values = vec![0; c.sorted_entries as usize];
+            // values = (uint32 *) setup_temp_malloc(f, sizeof(*values) * c.sorted_entries);
+            // if (!values)                        return error(f, VORBIS_outofmem);
+         }
+         
+         let size = c.entries as usize + (mem::size_of::<u32>() + mem::size_of::<u32>()) * c.sorted_entries as usize;
+         if (size > f.setup_temp_memory_required as usize){
+            f.setup_temp_memory_required = size as u32;
+         }
+      }
+
+
+      unimplemented!();
+
+
+//       if (!compute_codewords(c, lengths, c.entries, values)) {
+//          if (c.sparse) setup_temp_free(f, values, 0);
+//          return error(f, VORBIS_invalid_setup);
+//       }
+
+//       if (c.sorted_entries) {
+//          // allocate an extra slot for sentinels
+//          c.sorted_codewords = (uint32 *) setup_malloc(f, sizeof(*c.sorted_codewords) * (c.sorted_entries+1));
+//          if (c.sorted_codewords == NULL) return error(f, VORBIS_outofmem);
+//          // allocate an extra slot at the front so that c.sorted_values[-1] is defined
+//          // so that we can catch that case without an extra if
+//          c.sorted_values    = ( int   *) setup_malloc(f, sizeof(*c.sorted_values   ) * (c.sorted_entries+1));
+//          if (c.sorted_values == NULL) return error(f, VORBIS_outofmem);
+//          ++c.sorted_values;
+//          c.sorted_values[-1] = -1;
+//          compute_sorted_huffman(c, lengths, values);
+//       }
+
+//       if (c.sparse) {
+//          setup_temp_free(f, values, sizeof(*values)*c.sorted_entries);
+//          setup_temp_free(f, c.codewords, sizeof(*c.codewords)*c.sorted_entries);
+//          setup_temp_free(f, lengths, c.entries);
+//          c.codewords = NULL;
+//       }
+
+//       compute_accelerated_huffman(c);
+
+//       CHECK(f);
+//       c.lookup_type = get_bits(f, 4);
+//       if (c.lookup_type > 2) return error(f, VORBIS_invalid_setup);
+//       if (c.lookup_type > 0) {
+//          uint16 *mults;
+//          c.minimum_value = float32_unpack(get_bits(f, 32));
+//          c.delta_value = float32_unpack(get_bits(f, 32));
+//          c.value_bits = get_bits(f, 4)+1;
+//          c.sequence_p = get_bits(f,1);
+//          if (c.lookup_type == 1) {
+//             c.lookup_values = lookup1_values(c.entries, c.dimensions);
+//          } else {
+//             c.lookup_values = c.entries * c.dimensions;
+//          }
+//          if (c.lookup_values == 0) return error(f, VORBIS_invalid_setup);
+//          mults = (uint16 *) setup_temp_malloc(f, sizeof(mults[0]) * c.lookup_values);
+//          if (mults == NULL) return error(f, VORBIS_outofmem);
+//          for (j=0; j < (int) c.lookup_values; ++j) {
+//             int q = get_bits(f, c.value_bits);
+//             if (q == EOP) { setup_temp_free(f,mults,sizeof(mults[0])*c.lookup_values); return error(f, VORBIS_invalid_setup); }
+//             mults[j] = q;
+//          }
+
+// #ifndef STB_VORBIS_DIVIDES_IN_CODEBOOK
+//          if (c.lookup_type == 1) {
+//             int len, sparse = c.sparse;
+//             float last=0;
+//             // pre-expand the lookup1-style multiplicands, to avoid a divide in the inner loop
+//             if (sparse) {
+//                if (c.sorted_entries == 0) goto skip;
+//                c.multiplicands = (codetype *) setup_malloc(f, sizeof(c.multiplicands[0]) * c.sorted_entries * c.dimensions);
+//             } else
+//                c.multiplicands = (codetype *) setup_malloc(f, sizeof(c.multiplicands[0]) * c.entries        * c.dimensions);
+//             if (c.multiplicands == NULL) { setup_temp_free(f,mults,sizeof(mults[0])*c.lookup_values); return error(f, VORBIS_outofmem); }
+//             len = sparse ? c.sorted_entries : c.entries;
+//             for (j=0; j < len; ++j) {
+//                unsigned int z = sparse ? c.sorted_values[j] : j;
+//                unsigned int div=1;
+//                for (k=0; k < c.dimensions; ++k) {
+//                   int off = (z / div) % c.lookup_values;
+//                   float val = mults[off];
+//                   val = mults[off]*c.delta_value + c.minimum_value + last;
+//                   c.multiplicands[j*c.dimensions + k] = val;
+//                   if (c.sequence_p)
+//                      last = val;
+//                   if (k+1 < c.dimensions) {
+//                      if (div > UINT_MAX / (unsigned int) c.lookup_values) {
+//                         setup_temp_free(f, mults,sizeof(mults[0])*c.lookup_values);
+//                         return error(f, VORBIS_invalid_setup);
+//                      }
+//                      div *= c.lookup_values;
+//                   }
+//                }
+//             }
+//             c.lookup_type = 2;
+//          }
+//          else
+// #endif
+//          {
+//             float last=0;
+//             CHECK(f);
+//             c.multiplicands = (codetype *) setup_malloc(f, sizeof(c.multiplicands[0]) * c.lookup_values);
+//             if (c.multiplicands == NULL) { setup_temp_free(f, mults,sizeof(mults[0])*c.lookup_values); return error(f, VORBIS_outofmem); }
+//             for (j=0; j < (int) c.lookup_values; ++j) {
+//                float val = mults[j] * c.delta_value + c.minimum_value + last;
+//                c.multiplicands[j] = val;
+//                if (c.sequence_p)
+//                   last = val;
+//             }
+//          }
+// #ifndef STB_VORBIS_DIVIDES_IN_CODEBOOK
+//         skip:;
+// #endif
+//          setup_temp_free(f, mults, sizeof(mults[0])*c.lookup_values);
+
+//          CHECK(f);
+//       }
+//       CHECK(f);
+
+        f.codebooks[i as usize] = c.clone();
+   }
+
+
    unimplemented!();
    
 }
@@ -753,223 +1191,8 @@ fn start_decoder(f: &mut stb_vorbis) -> bool {
 //    int len,i,j,k, max_submaps = 0;
 //    int longest_floorlist=0;
 
-//    crc32_init(); // always init it, to avoid multithread race conditions
 
-//    if (get8_packet(f) != VORBIS_packet_setup)       return error(f, VORBIS_invalid_setup);
-//    for (i=0; i < 6; ++i) header[i] = get8_packet(f);
-//    if (!vorbis_validate(header))                    return error(f, VORBIS_invalid_setup);
 
-//    // codebooks
-
-//    f->codebook_count = get_bits(f,8) + 1;
-//    f->codebooks = (Codebook *) setup_malloc(f, sizeof(*f->codebooks) * f->codebook_count);
-//    if (f->codebooks == NULL)                        return error(f, VORBIS_outofmem);
-//    memset(f->codebooks, 0, sizeof(*f->codebooks) * f->codebook_count);
-//    for (i=0; i < f->codebook_count; ++i) {
-//       uint32 *values;
-//       int ordered, sorted_count;
-//       int total=0;
-//       uint8 *lengths;
-//       Codebook *c = f->codebooks+i;
-//       CHECK(f);
-//       x = get_bits(f, 8); if (x != 0x42)            return error(f, VORBIS_invalid_setup);
-//       x = get_bits(f, 8); if (x != 0x43)            return error(f, VORBIS_invalid_setup);
-//       x = get_bits(f, 8); if (x != 0x56)            return error(f, VORBIS_invalid_setup);
-//       x = get_bits(f, 8);
-//       c->dimensions = (get_bits(f, 8)<<8) + x;
-//       x = get_bits(f, 8);
-//       y = get_bits(f, 8);
-//       c->entries = (get_bits(f, 8)<<16) + (y<<8) + x;
-//       ordered = get_bits(f,1);
-//       c->sparse = ordered ? 0 : get_bits(f,1);
-
-//       if (c->dimensions == 0 && c->entries != 0)    return error(f, VORBIS_invalid_setup);
-
-//       if (c->sparse)
-//          lengths = (uint8 *) setup_temp_malloc(f, c->entries);
-//       else
-//          lengths = c->codeword_lengths = (uint8 *) setup_malloc(f, c->entries);
-
-//       if (!lengths) return error(f, VORBIS_outofmem);
-
-//       if (ordered) {
-//          int current_entry = 0;
-//          int current_length = get_bits(f,5) + 1;
-//          while (current_entry < c->entries) {
-//             int limit = c->entries - current_entry;
-//             int n = get_bits(f, ilog(limit));
-//             if (current_entry + n > (int) c->entries) { return error(f, VORBIS_invalid_setup); }
-//             memset(lengths + current_entry, current_length, n);
-//             current_entry += n;
-//             ++current_length;
-//          }
-//       } else {
-//          for (j=0; j < c->entries; ++j) {
-//             int present = c->sparse ? get_bits(f,1) : 1;
-//             if (present) {
-//                lengths[j] = get_bits(f, 5) + 1;
-//                ++total;
-//                if (lengths[j] == 32)
-//                   return error(f, VORBIS_invalid_setup);
-//             } else {
-//                lengths[j] = NO_CODE;
-//             }
-//          }
-//       }
-
-//       if (c->sparse && total >= c->entries >> 2) {
-//          // convert sparse items to non-sparse!
-//          if (c->entries > (int) f->setup_temp_memory_required)
-//             f->setup_temp_memory_required = c->entries;
-
-//          c->codeword_lengths = (uint8 *) setup_malloc(f, c->entries);
-//          if (c->codeword_lengths == NULL) return error(f, VORBIS_outofmem);
-//          memcpy(c->codeword_lengths, lengths, c->entries);
-//          setup_temp_free(f, lengths, c->entries); // note this is only safe if there have been no intervening temp mallocs!
-//          lengths = c->codeword_lengths;
-//          c->sparse = 0;
-//       }
-
-//       // compute the size of the sorted tables
-//       if (c->sparse) {
-//          sorted_count = total;
-//       } else {
-//          sorted_count = 0;
-//          #ifndef STB_VORBIS_NO_HUFFMAN_BINARY_SEARCH
-//          for (j=0; j < c->entries; ++j)
-//             if (lengths[j] > STB_VORBIS_FAST_HUFFMAN_LENGTH && lengths[j] != NO_CODE)
-//                ++sorted_count;
-//          #endif
-//       }
-
-//       c->sorted_entries = sorted_count;
-//       values = NULL;
-
-//       CHECK(f);
-//       if (!c->sparse) {
-//          c->codewords = (uint32 *) setup_malloc(f, sizeof(c->codewords[0]) * c->entries);
-//          if (!c->codewords)                  return error(f, VORBIS_outofmem);
-//       } else {
-//          unsigned int size;
-//          if (c->sorted_entries) {
-//             c->codeword_lengths = (uint8 *) setup_malloc(f, c->sorted_entries);
-//             if (!c->codeword_lengths)           return error(f, VORBIS_outofmem);
-//             c->codewords = (uint32 *) setup_temp_malloc(f, sizeof(*c->codewords) * c->sorted_entries);
-//             if (!c->codewords)                  return error(f, VORBIS_outofmem);
-//             values = (uint32 *) setup_temp_malloc(f, sizeof(*values) * c->sorted_entries);
-//             if (!values)                        return error(f, VORBIS_outofmem);
-//          }
-//          size = c->entries + (sizeof(*c->codewords) + sizeof(*values)) * c->sorted_entries;
-//          if (size > f->setup_temp_memory_required)
-//             f->setup_temp_memory_required = size;
-//       }
-
-//       if (!compute_codewords(c, lengths, c->entries, values)) {
-//          if (c->sparse) setup_temp_free(f, values, 0);
-//          return error(f, VORBIS_invalid_setup);
-//       }
-
-//       if (c->sorted_entries) {
-//          // allocate an extra slot for sentinels
-//          c->sorted_codewords = (uint32 *) setup_malloc(f, sizeof(*c->sorted_codewords) * (c->sorted_entries+1));
-//          if (c->sorted_codewords == NULL) return error(f, VORBIS_outofmem);
-//          // allocate an extra slot at the front so that c->sorted_values[-1] is defined
-//          // so that we can catch that case without an extra if
-//          c->sorted_values    = ( int   *) setup_malloc(f, sizeof(*c->sorted_values   ) * (c->sorted_entries+1));
-//          if (c->sorted_values == NULL) return error(f, VORBIS_outofmem);
-//          ++c->sorted_values;
-//          c->sorted_values[-1] = -1;
-//          compute_sorted_huffman(c, lengths, values);
-//       }
-
-//       if (c->sparse) {
-//          setup_temp_free(f, values, sizeof(*values)*c->sorted_entries);
-//          setup_temp_free(f, c->codewords, sizeof(*c->codewords)*c->sorted_entries);
-//          setup_temp_free(f, lengths, c->entries);
-//          c->codewords = NULL;
-//       }
-
-//       compute_accelerated_huffman(c);
-
-//       CHECK(f);
-//       c->lookup_type = get_bits(f, 4);
-//       if (c->lookup_type > 2) return error(f, VORBIS_invalid_setup);
-//       if (c->lookup_type > 0) {
-//          uint16 *mults;
-//          c->minimum_value = float32_unpack(get_bits(f, 32));
-//          c->delta_value = float32_unpack(get_bits(f, 32));
-//          c->value_bits = get_bits(f, 4)+1;
-//          c->sequence_p = get_bits(f,1);
-//          if (c->lookup_type == 1) {
-//             c->lookup_values = lookup1_values(c->entries, c->dimensions);
-//          } else {
-//             c->lookup_values = c->entries * c->dimensions;
-//          }
-//          if (c->lookup_values == 0) return error(f, VORBIS_invalid_setup);
-//          mults = (uint16 *) setup_temp_malloc(f, sizeof(mults[0]) * c->lookup_values);
-//          if (mults == NULL) return error(f, VORBIS_outofmem);
-//          for (j=0; j < (int) c->lookup_values; ++j) {
-//             int q = get_bits(f, c->value_bits);
-//             if (q == EOP) { setup_temp_free(f,mults,sizeof(mults[0])*c->lookup_values); return error(f, VORBIS_invalid_setup); }
-//             mults[j] = q;
-//          }
-
-// #ifndef STB_VORBIS_DIVIDES_IN_CODEBOOK
-//          if (c->lookup_type == 1) {
-//             int len, sparse = c->sparse;
-//             float last=0;
-//             // pre-expand the lookup1-style multiplicands, to avoid a divide in the inner loop
-//             if (sparse) {
-//                if (c->sorted_entries == 0) goto skip;
-//                c->multiplicands = (codetype *) setup_malloc(f, sizeof(c->multiplicands[0]) * c->sorted_entries * c->dimensions);
-//             } else
-//                c->multiplicands = (codetype *) setup_malloc(f, sizeof(c->multiplicands[0]) * c->entries        * c->dimensions);
-//             if (c->multiplicands == NULL) { setup_temp_free(f,mults,sizeof(mults[0])*c->lookup_values); return error(f, VORBIS_outofmem); }
-//             len = sparse ? c->sorted_entries : c->entries;
-//             for (j=0; j < len; ++j) {
-//                unsigned int z = sparse ? c->sorted_values[j] : j;
-//                unsigned int div=1;
-//                for (k=0; k < c->dimensions; ++k) {
-//                   int off = (z / div) % c->lookup_values;
-//                   float val = mults[off];
-//                   val = mults[off]*c->delta_value + c->minimum_value + last;
-//                   c->multiplicands[j*c->dimensions + k] = val;
-//                   if (c->sequence_p)
-//                      last = val;
-//                   if (k+1 < c->dimensions) {
-//                      if (div > UINT_MAX / (unsigned int) c->lookup_values) {
-//                         setup_temp_free(f, mults,sizeof(mults[0])*c->lookup_values);
-//                         return error(f, VORBIS_invalid_setup);
-//                      }
-//                      div *= c->lookup_values;
-//                   }
-//                }
-//             }
-//             c->lookup_type = 2;
-//          }
-//          else
-// #endif
-//          {
-//             float last=0;
-//             CHECK(f);
-//             c->multiplicands = (codetype *) setup_malloc(f, sizeof(c->multiplicands[0]) * c->lookup_values);
-//             if (c->multiplicands == NULL) { setup_temp_free(f, mults,sizeof(mults[0])*c->lookup_values); return error(f, VORBIS_outofmem); }
-//             for (j=0; j < (int) c->lookup_values; ++j) {
-//                float val = mults[j] * c->delta_value + c->minimum_value + last;
-//                c->multiplicands[j] = val;
-//                if (c->sequence_p)
-//                   last = val;
-//             }
-//          }
-// #ifndef STB_VORBIS_DIVIDES_IN_CODEBOOK
-//         skip:;
-// #endif
-//          setup_temp_free(f, mults, sizeof(mults[0])*c->lookup_values);
-
-//          CHECK(f);
-//       }
-//       CHECK(f);
-//    }
 
 //    // time domain transfers (notused)
 
@@ -1246,7 +1469,7 @@ fn vorbis_init(z: *const stb_vorbis_alloc) -> stb_vorbis
     p.eof = false;
     p.error = STBVorbisError::VORBIS__no_error;
     p.stream = ptr::null_mut();
-    p.codebooks = ptr::null();
+    p.codebooks = Vec::new();
     p.page_crc_tests = -1;
     p.close_on_free = false;
     p.f = None;
@@ -1262,46 +1485,46 @@ fn vorbis_init(z: *const stb_vorbis_alloc) -> stb_vorbis
 }
 
 fn vorbis_deinit(p: stb_vorbis){
-   if p.residue_config != ptr::null() {
-       for i in 0.. p.residue_count {
-           unsafe {
-                let ref r = *p.residue_config.offset(i as isize);
-                if r.classdata != ptr::null() {
-                    let ref codebook =  *p.codebooks.offset(r.classbook as isize);
-                    for j in 0 .. codebook.entries {
-                        //FIXME: check it again later...
-                        //    drop(r.classdata[j]);
-                    }
-                }
-                    //FIXME: check it again later...
-                    // drop(r.residue_books);
+//    if p.residue_config != ptr::null() {
+//        for i in 0.. p.residue_count {
+//            unsafe {
+//                 let ref r = *p.residue_config.offset(i as isize);
+//                 if r.classdata != ptr::null() {
+//                     let ref codebook =  *p.codebooks.offset(r.classbook as isize);
+//                     for j in 0 .. codebook.entries {
+//                         //FIXME: check it again later...
+//                         //    drop(r.classdata[j]);
+//                     }
+//                 }
+//                     //FIXME: check it again later...
+//                     // drop(r.residue_books);
                 
-           }
-       }
-   }
+//            }
+//        }
+//    }
    
-   if p.codebooks != ptr::null() {
-        unsafe {
-            debug_assert!(p.channel_buffers.offset(1) != ptr::null());
-        }
+//    if p.codebooks != ptr::null() {
+//         unsafe {
+//             debug_assert!(p.channel_buffers.offset(1) != ptr::null());
+//         }
        
-        for i in 0 .. p.codebook_count {
-            unsafe {
-                let ref c = *p.codebooks.offset(i as isize);
-                //FIXME: check it again later...
-                // drop(c.codeword_lengths);
-                // drop(c.multiplicands);
-                // drop(c.codewords);
-                // drop(c.sorted_codewords);
-                // // c.sorted_values[-1] is the first entry in the array
-                // if c.sorted_values { 
-                //     drop(c.sorted_values.offset(-1));
-                // }
-            }
-        }
-        //FIXME: check it again later...
-        // drop(p.codebooks);
-   }
+//         for i in 0 .. p.codebook_count {
+//             unsafe {
+//                 let ref c = *p.codebooks.offset(i as isize);
+//                 //FIXME: check it again later...
+//                 // drop(c.codeword_lengths);
+//                 // drop(c.multiplicands);
+//                 // drop(c.codewords);
+//                 // drop(c.sorted_codewords);
+//                 // // c.sorted_values[-1] is the first entry in the array
+//                 // if c.sorted_values { 
+//                 //     drop(c.sorted_values.offset(-1));
+//                 // }
+//             }
+//         }
+//         //FIXME: check it again later...
+//         // drop(p.codebooks);
+//    }
    
     // unimplemented!();
 
@@ -1394,8 +1617,6 @@ fn vorbis_finish_frame(f: &mut stb_vorbis, len: i32, left: i32, right: i32) -> i
 
 
 pub fn stb_vorbis_get_frame_short_interleaved(f: &mut stb_vorbis, num_c: i32, buffer: &mut [i16]) -> i32{
-    // unreachable!();    
-    
 //    int len;
    if num_c == 1 {
        return stb_vorbis_get_frame_short(f,num_c, &buffer, buffer.len() as i32);
