@@ -1,3 +1,4 @@
 target
 Cargo.lock
 examples/018.ogg
+examples/output.bin

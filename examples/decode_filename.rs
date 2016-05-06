@@ -16,7 +16,15 @@ fn test_decode_filename(mut f: File, filename: &Path)
 {
    let mut channels : i32 = 0;
    let mut sample_rate : u32 = 0;
-   let decoded = stb_vorbis::stb_vorbis_decode_filename(filename, &mut channels, &mut sample_rate).unwrap();
+   let decoded = stb_vorbis::stb_vorbis_decode_filename(filename, &mut channels, &mut sample_rate);
+   let decoded = match decoded {
+       Err(why) => {
+           println!("cannot parse file '{}', reason: {:?}", filename.display(), why);
+           return;
+        },
+       Ok(d) => d
+   };
+   
    
    let bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(

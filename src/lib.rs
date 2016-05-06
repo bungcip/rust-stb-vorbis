@@ -6,6 +6,8 @@
 #![allow(unused_imports)]
 #![allow(non_upper_case_globals)]
 
+#![feature(question_mark, custom_derive)]
+
 /// straight port from stb_vorbis
 /// Ogg Vorbis audio decoder - v1.09 - public domain
 /// http://nothings.org/stb_vorbis/
@@ -63,7 +65,7 @@ pub const STB_VORBIS_MAX_CHANNELS: usize = 16; // enough for anyone?
 ////////   ERROR CODES
 
 #[repr(C, i32)]
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum STBVorbisError
 {
    VORBIS__no_error,
@@ -361,12 +363,18 @@ fn get8(z: &mut stb_vorbis) -> u8
     };
 
     let mut buf : [u8; 1] = [0u8; 1];
-    match f.read_exact(&mut buf){
-        Err(_) => {
+    match f.read(&mut buf){
+        Err(why) => {
+            // debug
+            // println!("why: {}", why);
+            
             z.eof = true;
         },
         Ok(_) => ()
     }
+    
+    // println!("ch: {}", buf[0]);
+    
     return buf[0];
 }
 
@@ -439,8 +447,10 @@ fn next_segment(f: &mut stb_vorbis) -> i32
           return 0;
       }
    }
-   f.next_seg += 1;
+
    let len = f.segments[f.next_seg as usize];
+   f.next_seg += 1;
+   
    if len < 255 {
       f.last_seg = true;
       f.last_seg_which = f.next_seg-1;
@@ -459,10 +469,19 @@ fn next_segment(f: &mut stb_vorbis) -> i32
 
 fn capture_pattern(f: &mut stb_vorbis) -> bool
 {
-   if 0x4f != get8(f) {return false};
-   if 0x67 != get8(f) {return false};
-   if 0x67 != get8(f) {return false};
-   if 0x53 != get8(f) {return false};
+    let pattern : [u8; 4] = [0x4f, 0x67, 0x67, 0x53];
+    for &i in pattern.iter() {
+        let ch = get8(f);
+        if ch != i {
+            println!("capture_pattern(): wrong, {:#x} != {:#x}", ch, i);
+            return false;
+        }
+    }
+//    if 0x4f != get8(f) {return false};
+//    if 0x67 != get8(f) {return false};
+//    if 0x67 != get8(f) {return false};
+//    if 0x53 != get8(f) {return false};
+    println!("capture_pattern(): true");
    return true;
 }
 
@@ -710,11 +729,13 @@ fn start_decoder(f: &mut stb_vorbis) -> bool {
       skip(f, len);
       f.bytes_in_seg = 0;
       
-      len > 0
+      len != 0
    }{}
    
    // third packet!
+   println!("check problem...");
    if !start_packet(f){return false;}
+       println!(" mantap!!");
    if f.push_mode {
       if !is_whole_packet_present(f, true) {
          // convert error in ogg header to write type
@@ -1279,10 +1300,10 @@ fn vorbis_deinit(p: stb_vorbis){
             }
         }
         //FIXME: check it again later...
-        drop(p.codebooks);
+        // drop(p.codebooks);
    }
    
-    unimplemented!();
+    // unimplemented!();
 
 
 //    setup_free(p, p.floor_config);
@@ -1415,7 +1436,6 @@ pub fn stb_vorbis_open_file_section(mut file: File, close_on_free: bool, error: 
     
     use std::io::SeekFrom;
     
-    // unreachable!();
     let mut p = vorbis_init(alloc);
     p.f_start = file.seek(SeekFrom::Current(0)).unwrap();
     p.stream_len = len as u32; // FIXME: check if convertion is right or not...
@@ -1423,10 +1443,15 @@ pub fn stb_vorbis_open_file_section(mut file: File, close_on_free: bool, error: 
 
     p.f = Some(file);
     
+    println!("soto?");
     if start_decoder(&mut p) {
+        println!("bakso?");
         vorbis_pump_first_frame(&mut p);
+        println!("mie ayam?");
         return Ok(p);
     }
+    println!("sini lancar?");
+    
     
     let e = p.error;
     
@@ -1486,16 +1511,12 @@ pub fn stb_vorbis_open_filename(filename: &Path, error: &mut i32, alloc: *const 
 // FIXME: rename function name to more rust friendly
 // FIXME: use u32 for param
 // NOTE: different from stb_vorbis c, sample_rate is required
-pub fn stb_vorbis_decode_filename(filename: &Path, channels: &mut i32, sample_rate: &mut u32) -> Option<Vec<i16>>
+pub fn stb_vorbis_decode_filename(filename: &Path, channels: &mut i32, sample_rate: &mut u32) -> Result<Vec<i16>, STBVorbisError>
 {
     let mut error: i32 = 0;
     
     let v = stb_vorbis_open_filename(filename, &mut error, ptr::null());
-    let mut v = match v {
-        Err(_) => return None,
-        Ok(f) => f
-    };
-    
+    let mut v = v?;
     
     let limit : usize = (v.channels * 4096) as usize;
     *channels = v.channels;
@@ -1507,6 +1528,7 @@ pub fn stb_vorbis_decode_filename(filename: &Path, channels: &mut i32, sample_ra
     
     let mut data : Vec<i16> = Vec::with_capacity(total);
     data.resize(total, 0);
+    
     
     loop {
         let n = {
@@ -1532,5 +1554,5 @@ pub fn stb_vorbis_decode_filename(filename: &Path, channels: &mut i32, sample_ra
     data.resize(data_len, 0);
     stb_vorbis_close(v);
     
-    return Some(data);
+    return Ok(data);
 }
