@@ -86,6 +86,48 @@ pub extern fn float32_unpack(x: u32) -> f32
    return f64::ldexp(res, (exp as i32 - 788 ) as isize) as f32;
 }
 
+// this is a weird definition of log2() for which log2(1) = 1, log2(2) = 2, log2(4) = 3
+// as required by the specification. fast(?) implementation from stb.h
+// @OPTIMIZE: called multiple times per-packet with "constants"; move to setup
+#[no_mangle]
+pub extern fn ilog(n: i32) -> i32
+{
+    static log2_4: [i8; 16] = [0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];
+
+    let n = n as usize;
+
+    // 2 compares if n < 16, 3 compares otherwise (4 if signed or n > 1<<29)
+    let result = if n < (1 << 14) {
+        if n < (1 << 4) {
+            0 + log2_4[n]
+        } else if n < (1 << 9) {
+            5 + log2_4[n >> 5]
+        } else {
+            10 + log2_4[n >> 10]
+        }
+    }
+    else if n < (1 << 24) {
+        if n < (1 << 19) {
+            15 + log2_4[n >> 15]
+        }
+        else {
+            20 + log2_4[n >> 20]
+        }
+    }
+    else if n < (1 << 29) {
+        25 + log2_4[n >> 25]
+    }
+    else if n < (1 << 31) {
+        30 + log2_4[n >> 30]
+    }
+    else {
+        0 // signed n returns 0
+    };
+    
+    result as i32
+       
+}
+
 
 
 // Below is function that still live in C code

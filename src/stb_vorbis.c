@@ -975,25 +975,8 @@ static unsigned int bit_reverse(unsigned int n)
 /// NOTE: moved to rust
 extern float square(float x);
 
-// this is a weird definition of log2() for which log2(1) = 1, log2(2) = 2, log2(4) = 3
-// as required by the specification. fast(?) implementation from stb.h
-// @OPTIMIZE: called multiple times per-packet with "constants"; move to setup
-static int ilog(int32 n)
-{
-   static signed char log2_4[16] = { 0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4 };
-
-   // 2 compares if n < 16, 3 compares otherwise (4 if signed or n > 1<<29)
-   if (n < (1 << 14))
-        if (n < (1 <<  4))        return     0 + log2_4[n      ];
-        else if (n < (1 <<  9))      return  5 + log2_4[n >>  5];
-             else                     return 10 + log2_4[n >> 10];
-   else if (n < (1 << 24))
-             if (n < (1 << 19))      return 15 + log2_4[n >> 15];
-             else                     return 20 + log2_4[n >> 20];
-        else if (n < (1 << 29))      return 25 + log2_4[n >> 25];
-             else if (n < (1 << 31)) return 30 + log2_4[n >> 30];
-                  else                return 0; // signed n returns 0
-}
+/// NOTE: moved to rust
+extern int ilog(int32 n);
 
 #ifndef M_PI
   #define M_PI  3.14159265358979323846264f  // from CRC
