@@ -974,10 +974,6 @@ static unsigned int bit_reverse(unsigned int n)
 
 /// NOTE: moved to rust
 extern float square(float x);
-// static float square(float x)
-// {
-//    return x*x;
-// }
 
 // this is a weird definition of log2() for which log2(1) = 1, log2(2) = 2, log2(4) = 3
 // as required by the specification. fast(?) implementation from stb.h
@@ -1011,15 +1007,8 @@ static int ilog(int32 n)
 // these functions are only called at setup, and only a few times
 // per file
 
-static float float32_unpack(uint32 x)
-{
-   // from the specification
-   uint32 mantissa = x & 0x1fffff;
-   uint32 sign = x & 0x80000000;
-   uint32 exp = (x & 0x7fe00000) >> 21;
-   double res = sign ? -(double)mantissa : (double)mantissa;
-   return (float) ldexp((float)res, exp-788);
-}
+/// NOTE: moved to Rust
+extern float float32_unpack(uint32 x);
 
 
 // zlib & jpeg huffman tables assume that the output symbols
