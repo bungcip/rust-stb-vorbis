@@ -1081,7 +1081,6 @@ static void compute_accelerated_huffman(Codebook *c)
 #define STBV_CDECL
 #endif
 
-
 /// NOTE: moved to rust
 extern STBV_CDECL uint32_compare(const void *p, const void *q);
 
@@ -1151,17 +1150,8 @@ static void compute_sorted_huffman(Codebook *c, uint8 *lengths, uint32 *values)
 /// NOTE: moved to rust
 extern int vorbis_validate(uint8 *data);
 
-// called from setup only, once per code book
-// (formula implied by specification)
-static int lookup1_values(int entries, int dim)
-{
-   int r = (int) floor(exp((float) log((float) entries) / dim));
-   if ((int) floor(pow((float) r+1, dim)) <= entries)   // (int) cast for MinGW warning;
-      ++r;                                              // floor() to avoid _ftol() when non-CRT
-   assert(pow((float) r+1, dim) > entries);
-   assert((int) floor(pow((float) r, dim)) <= entries); // (int),floor() as above
-   return r;
-}
+/// NOTE: moved to rust
+extern int lookup1_values(int entries, int dim);
 
 // called twice per file
 static void compute_twiddle_factors(int n, float *A, float *B, float *C)

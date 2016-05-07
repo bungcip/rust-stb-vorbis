@@ -177,6 +177,19 @@ pub extern fn vorbis_validate(data: *const u8) -> c_int
     }
 }
 
+// called from setup only, once per code book
+// (formula implied by specification)
+#[no_mangle]
+pub extern fn lookup1_values(entries: c_int, dim: c_int) -> c_int
+{
+    let mut r =  f64::floor(f64::exp(f64::ln(entries as f64) / dim as f64)) as c_int;
+    if f64::floor(f64::powi( (r+1) as f64, dim)) as c_int <= entries {
+       r += 1;
+    }
+    assert!(f64::powi((r+1) as f64, dim) > entries as f64);
+    assert!(f64::powi(r as f64, dim) as c_int <= entries);
+    return r;
+}
 
 
 
