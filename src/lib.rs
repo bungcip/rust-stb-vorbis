@@ -143,6 +143,25 @@ pub extern fn ilog(n: i32) -> i32
        
 }
 
+#[no_mangle]
+pub extern fn uint32_compare(p: *const c_void, q: *const c_void) -> c_int
+{
+    unsafe {
+        let x = std::ptr::read(p as *const u32);        
+        let y = std::ptr::read(q as *const u32);
+        if x < y {
+            return -1;
+        }else{
+            if x > y {
+                return 1;
+            }else{
+                return 0
+            }
+        }
+    }
+}
+
+
 // only run while parsing the header (3 times)
 #[no_mangle]
 pub extern fn vorbis_validate(data: *const u8) -> c_int

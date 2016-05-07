@@ -1081,12 +1081,9 @@ static void compute_accelerated_huffman(Codebook *c)
 #define STBV_CDECL
 #endif
 
-static int STBV_CDECL uint32_compare(const void *p, const void *q)
-{
-   uint32 x = * (uint32 *) p;
-   uint32 y = * (uint32 *) q;
-   return x < y ? -1 : x > y;
-}
+
+/// NOTE: moved to rust
+extern STBV_CDECL uint32_compare(const void *p, const void *q);
 
 static int include_in_sort(Codebook *c, uint8 len)
 {
