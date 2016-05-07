@@ -1,6 +1,6 @@
 // temporary disable lint for now...
 #![allow(non_snake_case)]
-#![allow(dead_code)]
+// #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 // #![allow(unused_variables)]
 // #![allow(unused_imports)]
@@ -63,6 +63,18 @@ pub enum STBVorbisError
 
 
 // Converted function is here
+
+// used in setup, and for huffman that doesn't go fast path
+#[no_mangle]
+pub extern fn bit_reverse(n: c_uint) -> c_uint 
+{
+  let n = ((n & 0xAAAAAAAA) >>  1) | ((n & 0x55555555) << 1);
+  let n = ((n & 0xCCCCCCCC) >>  2) | ((n & 0x33333333) << 2);
+  let n = ((n & 0xF0F0F0F0) >>  4) | ((n & 0x0F0F0F0F) << 4);
+  let n = ((n & 0xFF00FF00) >>  8) | ((n & 0x00FF00FF) << 8);
+  return (n >> 16) | (n << 16);
+}
+
 
 #[no_mangle]
 pub extern fn square(x: f32) -> f32{
