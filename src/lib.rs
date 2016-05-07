@@ -254,7 +254,7 @@ impl Default for Floor {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Residue
 {
    begin: u32, 
@@ -262,20 +262,22 @@ pub struct Residue
    part_size: u32,
    classifications: u8,
    classbook: u8,
-   classdata: *const (*const u8),
-   residue_books: [*const i16; 8], 
+   classdata: Vec<Vec<u8>>,
+   residue_books: Vec<[i16; 8]>, 
 }
 
 impl Default for Residue {
     fn default() -> Self {
-        let instance : Residue = unsafe { mem::zeroed() };
+        let mut instance : Residue = unsafe { mem::zeroed() };
+        
+        instance.residue_books = Vec::new();
         
         instance        
     }
 }
 
 #[repr(C)]
-// #[derive(Copy)]
+#[derive(Copy, Clone)]
 pub struct MappingChannel
 {
    magnitude: u8,
@@ -284,7 +286,7 @@ pub struct MappingChannel
 }
 
 #[repr(C)]
-// #[derive(Copy)]
+#[derive(Copy, Clone)]
 pub struct Mapping
 {
    coupling_steps: u16,
@@ -292,6 +294,17 @@ pub struct Mapping
    submaps: u8,
    submap_floor: [u8; 15], // varies
    submap_residue: [u8; 15], // varies
+}
+
+impl Default for Mapping {
+    fn default() -> Self {
+        let mut instance : Mapping = unsafe { mem::zeroed() };
+        
+        // instance.residue_books = Vec::new();
+        
+        instance        
+    }
+    
 } 
 
 #[repr(C)]
@@ -376,7 +389,7 @@ pub struct stb_vorbis {
    residue_types: [u16; 64], // varies
    residue_config: Vec<Residue>,
    mapping_count: i32,
-   mapping: *const Mapping,
+   mapping: Vec<Mapping>,
    mode_count: i32,
    mode_config: [Mode; 64],  // varies
    
@@ -1449,6 +1462,7 @@ fn start_decoder(f: &mut stb_vorbis) -> bool {
             }
          }
 // #ifndef STB_VORBIS_DIVIDES_IN_CODEBOOK
+         break;
         } // NOTE: replaced with labeled break
 // #endif
 //          setup_temp_free(f, mults, sizeof(mults[0])*c.lookup_values);
@@ -1582,52 +1596,119 @@ fn start_decoder(f: &mut stb_vorbis) -> bool {
 //    if (f.residue_config == NULL) return error(f, VORBIS_outofmem);
 //    memset(f.residue_config, 0, f.residue_count * sizeof(f.residue_config[0]));
    for i in 0 .. f.residue_count {
+       let i = i as usize;
 //       uint8 residue_cascade[64];
-//       Residue *r = f.residue_config+i;
-//       f.residue_types[i] = get_bits(f, 16);
-//       if (f.residue_types[i] > 2) return error(f, VORBIS_invalid_setup);
-//       r.begin = get_bits(f, 24);
-//       r.end = get_bits(f, 24);
-//       if (r.end < r.begin) return error(f, VORBIS_invalid_setup);
-//       r.part_size = get_bits(f,24)+1;
-//       r.classifications = get_bits(f,6)+1;
-//       r.classbook = get_bits(f,8);
-//       if (r.classbook >= f.codebook_count) return error(f, VORBIS_invalid_setup);
-//       for (j=0; j < r.classifications; ++j) {
-//          uint8 high_bits=0;
-//          uint8 low_bits=get_bits(f,3);
-//          if (get_bits(f,1))
-//             high_bits = get_bits(f,5);
-//          residue_cascade[j] = high_bits*8 + low_bits;
-//       }
-//       r.residue_books = (short (*)[8]) setup_malloc(f, sizeof(r.residue_books[0]) * r.classifications);
+      let mut residue_cascade: [u8; 64] = [0; 64];
+      
+      // NOTE: fighting borrow check for now...
+      //       refactor it to safe code after the port is done
+    //   Residue *r = f.residue_config+i;
+      let r : &mut Residue = unsafe { 
+          let r : &mut Residue = &mut f.residue_config[i];
+          let r = r as *mut Residue;
+          mem::transmute(r)
+      };
+      
+      f.residue_types[i] = get_bits(f, 16) as u16;
+      if f.residue_types[i] > 2 {return error(f, VORBIS_invalid_setup);}
+      r.begin = get_bits(f, 24);
+      r.end = get_bits(f, 24);
+      if r.end < r.begin {return error(f, VORBIS_invalid_setup);}
+      r.part_size = (get_bits(f,24)+1) as u32;
+      r.classifications = (get_bits(f,6)+1) as u8;
+      r.classbook = get_bits(f,8) as u8;
+      if (r.classbook as i32 >= f.codebook_count) {return error(f, VORBIS_invalid_setup);}
+      for j in 0 .. r.classifications {
+          let j = j as usize;
+         let mut high_bits : u8 = 0;
+         let low_bits = get_bits(f,3) as u8;
+         if get_bits(f,1) != 0{
+            high_bits = get_bits(f,5) as u8;
+         }
+         residue_cascade[j] = high_bits * 8 + low_bits ;
+      }
+      r.residue_books.resize(r.classifications as usize, [0; 8]);
 //       if (r.residue_books == NULL) return error(f, VORBIS_outofmem);
-//       for (j=0; j < r.classifications; ++j) {
-//          for (k=0; k < 8; ++k) {
-//             if (residue_cascade[j] & (1 << k)) {
-//                r.residue_books[j][k] = get_bits(f, 8);
-//                if (r.residue_books[j][k] >= f.codebook_count) return error(f, VORBIS_invalid_setup);
-//             } else {
-//                r.residue_books[j][k] = -1;
-//             }
+      for j in 0 .. r.classifications {
+         let j = j as usize;          
+         for k in 0 .. 8 {
+             let k = k as usize;
+            if (residue_cascade[j] & (1 << k)) != 0 {
+               r.residue_books[j][k] = get_bits(f, 8) as i16;
+               if r.residue_books[j][k] >= f.codebook_count as i16 {return error(f, VORBIS_invalid_setup); }
+            } else {
+               r.residue_books[j][k] = -1;
+            }
+         }
+      }
+      // precompute the classifications[] array to avoid inner-loop mod/divide
+      // call it 'classdata' since we already have r.classifications
+      r.classdata.resize(f.codebooks[r.classbook as usize].entries as usize, Vec::new());
+      
+      for j in 0 .. f.codebooks[r.classbook as usize].entries {
+         let classwords : i32 = f.codebooks[r.classbook as usize].dimensions;
+         let mut temp : i32 = j;
+         
+         let j = j as usize;
+         r.classdata[j].resize(classwords as usize, 0);
+        //  if (r.classdata[j] == NULL) return error(f, VORBIS_outofmem);
+        
+         let mut k = classwords - 1;
+         while k >= 0 {
+            r.classdata[j][k as usize] = (temp % (r.classifications as i32)) as u8;
+            temp /= r.classifications as i32;
+            k -= 1;
+         }
+      }
+   }
+   
+      f.mapping_count = (get_bits(f,6)+1) as i32;
+      f.mapping.resize(f.mapping_count as usize, Mapping::default());
+   for i in 0 .. f.mapping_count {
+//       Mapping *m = f.mapping + i;      
+//       int mapping_type = get_bits(f,16);
+//       if (mapping_type != 0) return error(f, VORBIS_invalid_setup);
+//       m.chan = (MappingChannel *) setup_malloc(f, f.channels * sizeof(*m.chan));
+//       if (m.chan == NULL) return error(f, VORBIS_outofmem);
+//       if (get_bits(f,1))
+//          m.submaps = get_bits(f,4)+1;
+//       else
+//          m.submaps = 1;
+//       if (m.submaps > max_submaps)
+//          max_submaps = m.submaps;
+//       if (get_bits(f,1)) {
+//          m.coupling_steps = get_bits(f,8)+1;
+//          for (k=0; k < m.coupling_steps; ++k) {
+//             m.chan[k].magnitude = get_bits(f, ilog(f.channels-1));
+//             m.chan[k].angle = get_bits(f, ilog(f.channels-1));
+//             if (m.chan[k].magnitude >= f.channels)        return error(f, VORBIS_invalid_setup);
+//             if (m.chan[k].angle     >= f.channels)        return error(f, VORBIS_invalid_setup);
+//             if (m.chan[k].magnitude == m.chan[k].angle)   return error(f, VORBIS_invalid_setup);
 //          }
-//       }
-//       // precompute the classifications[] array to avoid inner-loop mod/divide
-//       // call it 'classdata' since we already have r.classifications
-//       r.classdata = (uint8 **) setup_malloc(f, sizeof(*r.classdata) * f.codebooks[r.classbook].entries);
-//       if (!r.classdata) return error(f, VORBIS_outofmem);
-//       memset(r.classdata, 0, sizeof(*r.classdata) * f.codebooks[r.classbook].entries);
-//       for (j=0; j < f.codebooks[r.classbook].entries; ++j) {
-//          int classwords = f.codebooks[r.classbook].dimensions;
-//          int temp = j;
-//          r.classdata[j] = (uint8 *) setup_malloc(f, sizeof(r.classdata[j][0]) * classwords);
-//          if (r.classdata[j] == NULL) return error(f, VORBIS_outofmem);
-//          for (k=classwords-1; k >= 0; --k) {
-//             r.classdata[j][k] = temp % r.classifications;
-//             temp /= r.classifications;
+//       } else
+//          m.coupling_steps = 0;
+
+//       // reserved field
+//       if (get_bits(f,2)) return error(f, VORBIS_invalid_setup);
+//       if (m.submaps > 1) {
+//          for (j=0; j < f.channels; ++j) {
+//             m.chan[j].mux = get_bits(f, 4);
+//             if (m.chan[j].mux >= m.submaps)                return error(f, VORBIS_invalid_setup);
 //          }
+//       } else
+//          // @SPECIFICATION: this case is missing from the spec
+//          for (j=0; j < f.channels; ++j)
+//             m.chan[j].mux = 0;
+
+//       for (j=0; j < m.submaps; ++j) {
+//          get_bits(f,8); // discard
+//          m.submap_floor[j] = get_bits(f,8);
+//          m.submap_residue[j] = get_bits(f,8);
+//          if (m.submap_floor[j] >= f.floor_count)      return error(f, VORBIS_invalid_setup);
+//          if (m.submap_residue[j] >= f.residue_count)  return error(f, VORBIS_invalid_setup);
 //       }
    }
+
 
    unimplemented!();
    
@@ -1639,54 +1720,6 @@ fn start_decoder(f: &mut stb_vorbis) -> bool {
 
 
 
-//    f->mapping_count = get_bits(f,6)+1;
-//    f->mapping = (Mapping *) setup_malloc(f, f->mapping_count * sizeof(*f->mapping));
-//    if (f->mapping == NULL) return error(f, VORBIS_outofmem);
-//    memset(f->mapping, 0, f->mapping_count * sizeof(*f->mapping));
-//    for (i=0; i < f->mapping_count; ++i) {
-//       Mapping *m = f->mapping + i;      
-//       int mapping_type = get_bits(f,16);
-//       if (mapping_type != 0) return error(f, VORBIS_invalid_setup);
-//       m->chan = (MappingChannel *) setup_malloc(f, f->channels * sizeof(*m->chan));
-//       if (m->chan == NULL) return error(f, VORBIS_outofmem);
-//       if (get_bits(f,1))
-//          m->submaps = get_bits(f,4)+1;
-//       else
-//          m->submaps = 1;
-//       if (m->submaps > max_submaps)
-//          max_submaps = m->submaps;
-//       if (get_bits(f,1)) {
-//          m->coupling_steps = get_bits(f,8)+1;
-//          for (k=0; k < m->coupling_steps; ++k) {
-//             m->chan[k].magnitude = get_bits(f, ilog(f->channels-1));
-//             m->chan[k].angle = get_bits(f, ilog(f->channels-1));
-//             if (m->chan[k].magnitude >= f->channels)        return error(f, VORBIS_invalid_setup);
-//             if (m->chan[k].angle     >= f->channels)        return error(f, VORBIS_invalid_setup);
-//             if (m->chan[k].magnitude == m->chan[k].angle)   return error(f, VORBIS_invalid_setup);
-//          }
-//       } else
-//          m->coupling_steps = 0;
-
-//       // reserved field
-//       if (get_bits(f,2)) return error(f, VORBIS_invalid_setup);
-//       if (m->submaps > 1) {
-//          for (j=0; j < f->channels; ++j) {
-//             m->chan[j].mux = get_bits(f, 4);
-//             if (m->chan[j].mux >= m->submaps)                return error(f, VORBIS_invalid_setup);
-//          }
-//       } else
-//          // @SPECIFICATION: this case is missing from the spec
-//          for (j=0; j < f->channels; ++j)
-//             m->chan[j].mux = 0;
-
-//       for (j=0; j < m->submaps; ++j) {
-//          get_bits(f,8); // discard
-//          m->submap_floor[j] = get_bits(f,8);
-//          m->submap_residue[j] = get_bits(f,8);
-//          if (m->submap_floor[j] >= f->floor_count)      return error(f, VORBIS_invalid_setup);
-//          if (m->submap_residue[j] >= f->residue_count)  return error(f, VORBIS_invalid_setup);
-//       }
-//    }
 
 //    // Modes
 //    f->mode_count = get_bits(f, 6)+1;
