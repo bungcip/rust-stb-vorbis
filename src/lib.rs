@@ -8,6 +8,9 @@
 #![allow(non_upper_case_globals)]
 
 #![feature(question_mark, custom_derive, box_syntax, float_extras)]
+#![feature(alloc_system)]
+
+extern crate alloc_system;
 
 extern crate libc;
 
