@@ -128,6 +128,22 @@ pub extern fn ilog(n: i32) -> i32
        
 }
 
+// only run while parsing the header (3 times)
+#[no_mangle]
+pub extern fn vorbis_validate(data: *const u8) -> c_int
+{
+    static vorbis: &'static [u8; 6] = b"vorbis";
+    unsafe {
+        let result = libc::memcmp(data as *const c_void, vorbis.as_ptr() as *const c_void, 6) == 0;    
+        if result {
+            return 1;
+        }else{
+            return 0;
+        }
+    }
+}
+
+
 
 
 // Below is function that still live in C code

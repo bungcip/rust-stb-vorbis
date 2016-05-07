@@ -1158,12 +1158,8 @@ static void compute_sorted_huffman(Codebook *c, uint8 *lengths, uint32 *values)
    }
 }
 
-// only run while parsing the header (3 times)
-static int vorbis_validate(uint8 *data)
-{
-   static uint8 vorbis[6] = { 'v', 'o', 'r', 'b', 'i', 's' };
-   return memcmp(data, vorbis, 6) == 0;
-}
+/// NOTE: moved to rust
+extern int vorbis_validate(uint8 *data);
 
 // called from setup only, once per code book
 // (formula implied by specification)
