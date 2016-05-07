@@ -972,10 +972,12 @@ static unsigned int bit_reverse(unsigned int n)
   return (n >> 16) | (n << 16);
 }
 
-static float square(float x)
-{
-   return x*x;
-}
+/// NOTE: moved to rust
+extern float square(float x);
+// static float square(float x)
+// {
+//    return x*x;
+// }
 
 // this is a weird definition of log2() for which log2(1) = 1, log2(2) = 2, log2(4) = 3
 // as required by the specification. fast(?) implementation from stb.h

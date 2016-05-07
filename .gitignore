@@ -2,3 +2,12 @@ target
 Cargo.lock
 examples/018.ogg
 examples/output.bin
+tests/c_output/[decode_filename]_048.out
+tests/c_output/[decode_filename]_018.out
+tests/c_output/[decode_filename]_044.out
+tests/ogg/018.ogg
+tests/ogg/044.ogg
+tests/ogg/048.ogg
+tests/rust_output/[decode_filename]_018.out
+tests/rust_output/[decode_filename]_044.out
+tests/rust_output/[decode_filename]_048.out

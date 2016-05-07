@@ -1,0 +1,7 @@
+NOTE:
+~~ this folder is not empty.
+
+There is some ogg but I cannot commit it to repository because the ogg
+contain copyrighted material.
+
+need to find free ogg now...

@@ -3,5 +3,11 @@ name = "stb_vorbis"
 version = "0.0.1"
 authors = ["Gigih Aji Ibrahim <bungcip@gmail.com>"]
 description = "A straight translation of the stb_vorbis.c from C to Rust."
+build = "build.rs"
+links = "libstb_vorbis"
 
 [dependencies]
+libc = "*"
+
+[build-dependencies]
+gcc = "*"
