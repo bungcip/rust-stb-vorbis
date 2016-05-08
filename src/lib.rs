@@ -377,6 +377,38 @@ impl PartialOrd for Point {
 
 // Converted function is here
 
+#[no_mangle]
+pub unsafe extern fn setup_malloc(f: &mut vorb, sz: c_int) -> *mut c_void
+{
+   let sz = (sz+3) & !3;
+   f.setup_memory_required += sz as u32;
+   if f.alloc.alloc_buffer.is_null() == false {
+      let p = f.alloc.alloc_buffer.offset(f.setup_offset as isize);
+      if f.setup_offset + sz > f.temp_offset {
+          return std::ptr::null_mut();
+      }
+      f.setup_offset += sz as i32;
+      return p as *mut c_void;
+   }
+   
+   if sz!= 0 {
+       return libc::malloc(sz as usize);
+   }else{
+       return std::ptr::null_mut();
+   }
+}
+
+#[no_mangle]
+pub unsafe extern fn setup_free(f: &mut vorb, p: *mut c_void)
+{
+   if f.alloc.alloc_buffer.is_null() == false {
+       return; // do nothing; setup mem is a stack
+   }
+   libc::free(p);
+}
+
+
+
 // used in setup, and for huffman that doesn't go fast path
 #[no_mangle]
 pub extern fn bit_reverse(n: c_uint) -> c_uint 
