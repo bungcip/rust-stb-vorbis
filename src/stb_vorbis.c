@@ -1011,24 +1011,6 @@ static void compute_sorted_huffman(Codebook *c, uint8 *lengths, uint32 *values)
 extern int vorbis_validate(uint8 *data);
 extern int lookup1_values(int entries, int dim);
 
-// called twice per file
-void compute_twiddle_factors(int n, float *A, float *B, float *C)
-{
-   int n4 = n >> 2, n8 = n >> 3;
-   int k,k2;
-
-   for (k=k2=0; k < n4; ++k,k2+=2) {
-      A[k2  ] = (float)  cos(4*k*M_PI/n);
-      A[k2+1] = (float) -sin(4*k*M_PI/n);
-      B[k2  ] = (float)  cos((k2+1)*M_PI/n/2) * 0.5f;
-      B[k2+1] = (float)  sin((k2+1)*M_PI/n/2) * 0.5f;
-   }
-   for (k=k2=0; k < n8; ++k,k2+=2) {
-      C[k2  ] = (float)  cos(2*(k2+1)*M_PI/n);
-      C[k2+1] = (float) -sin(2*(k2+1)*M_PI/n);
-   }
-}
-
 void compute_window(int n, float *window)
 {
    int n2 = n >> 1, i;

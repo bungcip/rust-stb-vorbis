@@ -732,6 +732,53 @@ pub extern fn lookup1_values(entries: c_int, dim: c_int) -> c_int
     return r;
 }
 
+// from CRC
+const M_PI : f32 = 3.14159265358979323846264;
+
+// called twice per file
+#[no_mangle]
+pub extern fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32)
+{
+    use std::f32;
+    
+    let n4 = n >> 2;
+    let n8 = n >> 3;
+
+    let mut k = 0;
+    let mut k2 = 0;
+    
+    while k < n4 {
+        unsafe {
+            let x1 = (4*k) as f32 * M_PI / n as f32;
+            *A.offset(k2 as isize)     = f32::cos(x1) as f32;
+            *A.offset((k2+1) as isize) =  -f32::sin(x1) as f32;
+            
+            let x2 = (k2+1) as f32 * M_PI / n as f32 / 2.0;
+            *B.offset(k2 as isize)     = (f32::cos(x2) * 0.5) as f32;
+            *B.offset((k2+1) as isize) = (f32::sin(x2) * 0.5) as f32;
+        }
+        
+        k += 1; k2 += 2;
+    }
+
+    let mut k = 0;
+    let mut k2 = 0;
+    
+    while k < n8 {
+        unsafe {
+            let x1 = (2*(k2+1)) as f32 * M_PI / n as f32;
+            *C.offset(k2) = f32::cos(x1) as f32;
+            
+            let x2 = (2*(k2+1)) as f32 * M_PI / n as f32;
+            *C.offset(k2+1) = -f32::sin(x2) as f32;
+        }
+        
+        k += 1; k2 += 2;
+    }
+
+}
+
+
 
 #[no_mangle]
 pub extern fn neighbors(x: *mut u16, n: c_int, plow: *mut c_int, phigh: *mut c_int)
@@ -2081,7 +2128,6 @@ extern {
     pub fn compute_stereo_samples(output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
 
     pub fn compute_window(n: c_int, window: *mut f32);
-    pub fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32);
 
     // Real API
     pub fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: c_uint) -> c_int;
