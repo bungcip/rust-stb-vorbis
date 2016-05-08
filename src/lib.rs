@@ -192,6 +192,25 @@ pub extern fn lookup1_values(entries: c_int, dim: c_int) -> c_int
 }
 
 
+#[no_mangle]
+pub extern fn neighbors(x: *mut u16, n: c_int, plow: *mut c_int, phigh: *mut c_int)
+{
+    let mut low : i32 = -1;
+    let mut high : i32 = 65536;
+    
+    for i in 0 .. n {
+        unsafe {
+            if (*x.offset(i as isize) as i32) > low && (*x.offset(i as isize) as i32) < (*x.offset(n as isize) as i32) { 
+                *plow = i;
+                low = *x.offset(i as isize) as i32; 
+            }
+            if (*x.offset(i as isize) as i32) < high && (*x.offset(i as isize) as i32) > (*x.offset(n as isize) as i32) { 
+                *phigh = i; 
+                high = *x.offset(i as isize) as i32;
+            }
+        }
+    }
+}
 
 // Below is function that still live in C code
 extern {
