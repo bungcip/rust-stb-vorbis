@@ -1,6 +1,6 @@
 // temporary disable lint for now...
 #![allow(non_snake_case)]
-// #![allow(dead_code)]
+#![allow(dead_code)]
 #![allow(non_camel_case_types)]
 // #![allow(unused_variables)]
 // #![allow(unused_imports)]
@@ -16,12 +16,297 @@ extern crate libc;
 
 use libc::*;
 
+
+// STB_VORBIS_MAX_CHANNELS [number]
+//     globally define this to the maximum number of channels you need.
+//     The spec does not put a restriction on channels except that
+//     the count is stored in a byte, so 255 is the hard limit.
+//     Reducing this saves about 16 bytes per value, so using 16 saves
+//     (255-16)*16 or around 4KB. Plus anything other memory usage
+//     I forgot to account for. Can probably go as low as 8 (7.1 audio),
+//     6 (5.1 audio), or 2 (stereo only).
+const STB_VORBIS_MAX_CHANNELS : i32 = 16;  // enough for anyone?
+
+// STB_VORBIS_PUSHDATA_CRC_COUNT [number]
+//     after a flush_pushdata(), stb_vorbis begins scanning for the
+//     next valid page, without backtracking. when it finds something
+//     that looks like a page, it streams through it and verifies its
+//     CRC32. Should that validation fail, it keeps scanning. But it's
+//     possible that _while_ streaming through to check the CRC32 of
+//     one candidate page, it sees another candidate page. This #define
+//     determines how many "overlapping" candidate pages it can search
+//     at once. Note that "real" pages are typically ~4KB to ~8KB, whereas
+//     garbage pages could be as big as 64KB, but probably average ~16KB.
+//     So don't hose ourselves by scanning an apparent 64KB page and
+//     missing a ton of real ones in the interim; so minimum of 2
+const STB_VORBIS_PUSHDATA_CRC_COUNT : i32 = 4;
+
+// STB_VORBIS_FAST_HUFFMAN_LENGTH [number]
+//     sets the log size of the huffman-acceleration table.  Maximum
+//     supported value is 24. with larger numbers, more decodings are O(1),
+//     but the table size is larger so worse cache missing, so you'll have
+//     to probe (and try multiple ogg vorbis files) to find the sweet spot.
+const STB_VORBIS_FAST_HUFFMAN_LENGTH : i32 = 10;
+
+
 #[repr(C)]
 pub struct stb_vorbis_alloc
 {
    alloc_buffer: *const u8,
    alloc_buffer_length_in_bytes: i32,
 }
+
+type codetype = f32;
+
+// @NOTE
+//
+// Some arrays below are tagged "//varies", which means it's actually
+// a variable-sized piece of data, but rather than malloc I assume it's
+// small enough it's better to just allocate it all together with the
+// main thing
+//
+// Most of the variables are specified with the smallest size I could pack
+// them into. It might give better performance to make them all full-sized
+// integers. It should be safe to freely rearrange the structures or change
+// the sizes larger--nothing relies on silently truncating etc., nor the
+// order of variables.
+
+const FAST_HUFFMAN_TABLE_SIZE : i32 =   (1 << STB_VORBIS_FAST_HUFFMAN_LENGTH);
+const FAST_HUFFMAN_TABLE_MASK : i32 =   (FAST_HUFFMAN_TABLE_SIZE - 1);
+
+#[repr(C)] 
+struct Codebook
+{
+   dimensions: c_int, entries: c_int,
+   codeword_lengths: *mut u8,
+   minimum_value: f32,
+   delta_value: f32,
+   value_bits: u8,
+   lookup_type: u8,
+   sequence_p: u8,
+   sparse: u8,
+   lookup_values: u32,
+   multiplicands: *mut codetype,
+   codewords: *mut u32,
+//    #ifdef STB_VORBIS_FAST_HUFFMAN_SHORT
+    fast_huffman: [i16; FAST_HUFFMAN_TABLE_SIZE as usize],
+//    #else
+    // i32  fast_huffman[FAST_HUFFMAN_TABLE_SIZE],
+//    #endif
+   sorted_codewords: *mut u32,
+   sorted_values: *mut c_int,
+   sorted_entries: c_int,
+} 
+
+#[repr(C)]
+struct  Floor0
+{
+   order: u8,
+   rate: u16,
+   bark_map_size: u16,
+   amplitude_bits: u8,
+   amplitude_offset: u8,
+   number_of_books: u8,
+   book_list: [u8; 16], // varies
+}
+
+#[repr(C)]
+struct Floor1
+{
+   partitions: u8,
+   partition_class_list: [u8; 32], // varies
+   class_dimensions: [u8; 16], // varies
+   class_subclasses: [u8; 16], // varies
+   class_masterbooks: [u8; 16], // varies
+   subclass_books: [[i16; 8]; 16], // varies
+   Xlist: [u16; 31*8+2], // varies
+   sorted_order: [u8; 31*8+2],
+   neighbors: [[u8; 2]; 31*8+2],
+   floor1_multiplier: u8,
+   rangebits: u8,
+   values: c_int,
+}
+
+// union Floor
+struct Floor
+{
+   floor0: Floor0,
+   floor1: Floor1,
+}
+
+#[repr(C)] 
+struct Residue
+{
+   begin: u32, end: u32,
+   part_size: u32,
+   classifications: u8,
+   classbook: u8,
+   classdata: *mut *mut u8,
+   residue_books: *mut [i16; 8],
+} 
+
+#[repr(C)]
+struct MappingChannel
+{
+   magnitude: u8,
+   angle: u8,
+   mux: u8,
+}
+
+
+#[repr(C)]
+struct Mapping
+{
+   coupling_steps: u16,
+   chan: *mut MappingChannel,
+   submaps: u8,
+   submap_floor: [u8; 15], // varies
+   submap_residue: [u8; 15], // varies
+}
+
+
+#[repr(C)]
+struct Mode
+{
+   blockflag: u8,
+   mapping: u8,
+   windowtype: u16,
+   transformtype: u16,
+}
+
+
+
+#[repr(C)]
+struct CRCscan
+{
+   goal_crc: u32,    // expected crc if match
+   bytes_left: c_int,  // bytes left in packet
+   crc_so_far: u32,  // running crc
+   bytes_done: c_int,  // bytes processed in _current_ chunk
+   sample_loc: u32,  // granule pos encoded in page
+} 
+
+#[repr(C)]
+struct ProbedPage
+{
+   page_start: u32, page_end: u32,
+   last_decoded_sample: u32
+}
+ 
+
+
+#[repr(C)]
+struct stb_vorbis
+{
+  // user-accessible info
+   sample_rate: c_uint,
+   channels: c_int,
+
+   setup_memory_required: c_uint,
+   temp_memory_required: c_uint,
+   setup_temp_memory_required: c_uint,
+
+  // input config
+// #ifndef STB_VORBIS_NO_STDIO
+   f: *mut libc::FILE,
+   f_start: u32,
+   close_on_free: c_int,
+// #endif
+
+   stream: *mut u8,
+   stream_start: *mut u8,
+   stream_end: *mut u8,
+
+   stream_len: u32,
+
+   push_mode: u8,
+
+   first_audio_page_offset: u32,
+
+   p_first: ProbedPage, p_last: ProbedPage,
+
+  // memory management
+   alloc: stb_vorbis_alloc,
+   setup_offset: c_int,
+   temp_offset: c_int,
+
+  // run-time results
+   eof: c_int,
+   error: STBVorbisError,
+
+  // user-useful data
+
+  // header info
+   blocksize: [c_int; 2],
+   blocksize_0: c_int, blocksize_1: c_int,
+   codebook_count: c_int,
+   codebooks: *mut Codebook,
+   floor_count: c_int,
+   floor_types: [u16; 64], // varies
+   floor_config: *mut Floor,
+   residue_count: c_int,
+   residue_types: [u16; 64], // varies
+   residue_config: *mut Residue,
+   mapping_count: c_int,
+   mapping: *const Mapping,
+   mode_count: c_int,
+   mode_config: [Mode; 64],  // varies
+
+   total_samples: u32,
+
+  // decode buffer
+   channel_buffers: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize],
+   outputs        : [*mut f32; STB_VORBIS_MAX_CHANNELS as usize],
+
+   previous_window: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize],
+   previous_length: c_int,
+
+//    #ifndef STB_VORBIS_NO_DEFER_FLOOR
+   finalY: [*mut i16; STB_VORBIS_MAX_CHANNELS as usize],
+//    #else
+//    float *floor_buffers[STB_VORBIS_MAX_CHANNELS],
+//    #endif
+
+   current_loc: u32, // sample location of next frame to decode
+   current_loc_valid: c_int,
+
+  // per-blocksize precomputed data
+   
+   // twiddle factors
+   A: [*mut f32; 2], B: [*mut f32; 2], C: [*mut f32; 2],
+   window: [*mut f32; 2],
+   bit_reverse: [*mut u16; 2],
+
+  // current page/packet/segment streaming info
+   serial: u32, // stream serial number for verification
+   last_page: c_int,
+   segment_count: c_int,
+   segments: [u8; 255],
+   page_flag: u8,
+   bytes_in_seg: u8,
+   first_decode: u8,
+   next_seg: c_int,
+   last_seg: c_int,  // flag that we're on the last segment
+   last_seg_which: c_int, // what was the segment number of the last seg?
+   acc: u32,
+   valid_bits: c_int,
+   packet_bytes: c_int,
+   end_seg_with_known_loc: c_int,
+   known_loc_for_packet: u32,
+   discard_samples_deferred: c_int,
+   samples_output: u32,
+
+  // push mode scanning
+   page_crc_tests: c_int, // only in push_mode: number of tests active, -1 if not searching
+// #ifndef STB_VORBIS_NO_PUSHDATA_API
+   scan: [CRCscan; STB_VORBIS_PUSHDATA_CRC_COUNT as usize],
+// #endif
+
+  // sample-access
+   channel_buffer_start: c_int,
+   channel_buffer_end: c_int,
+}
+
 
 ////////   ERROR CODES
 
