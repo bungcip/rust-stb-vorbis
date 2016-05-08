@@ -407,6 +407,30 @@ pub unsafe extern fn setup_free(f: &mut vorb, p: *mut c_void)
    libc::free(p);
 }
 
+#[no_mangle]
+pub unsafe extern fn setup_temp_malloc(f: &mut vorb, sz: c_int) -> *mut c_void
+{
+   let sz = (sz+3) & !3;
+   f.setup_memory_required += sz as u32;
+   if f.alloc.alloc_buffer.is_null() == false {
+      if f.temp_offset - sz < f.setup_offset {
+          return std::ptr::null_mut();
+      }
+      f.temp_offset -= sz;
+      return f.alloc.alloc_buffer.offset(f.temp_offset as isize) as *mut c_void;
+   }
+   return libc::malloc(sz as usize);
+}
+
+#[no_mangle]
+pub unsafe extern fn setup_temp_free(f: &mut vorb, p: *mut c_void, sz: c_int)
+{
+   if f.alloc.alloc_buffer.is_null() == false {
+      f.temp_offset += (sz+3)&!3;
+      return;
+   }
+   libc::free(p);
+}
 
 
 // used in setup, and for huffman that doesn't go fast path

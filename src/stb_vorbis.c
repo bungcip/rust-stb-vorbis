@@ -906,26 +906,8 @@ static void *make_block_array(void *mem, int count, int size)
 /// NOTE: moved to rust
 void *setup_malloc(vorb *f, int sz);
 void setup_free(vorb *f, void *p);
-
-static void *setup_temp_malloc(vorb *f, int sz)
-{
-   sz = (sz+3) & ~3;
-   if (f->alloc.alloc_buffer) {
-      if (f->temp_offset - sz < f->setup_offset) return NULL;
-      f->temp_offset -= sz;
-      return (char *) f->alloc.alloc_buffer + f->temp_offset;
-   }
-   return malloc(sz);
-}
-
-static void setup_temp_free(vorb *f, void *p, int sz)
-{
-   if (f->alloc.alloc_buffer) {
-      f->temp_offset += (sz+3)&~3;
-      return;
-   }
-   free(p);
-}
+void *setup_temp_malloc(vorb *f, int sz);
+void setup_temp_free(vorb *f, void *p, int sz);
 
 #define CRC32_POLY    0x04c11db7   // from spec
 
