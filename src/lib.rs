@@ -56,7 +56,7 @@ pub struct stb_vorbis_alloc
    alloc_buffer_length_in_bytes: i32,
 }
 
-type codetype = f32;
+pub type codetype = f32;
 
 // @NOTE
 //
@@ -74,8 +74,8 @@ type codetype = f32;
 const FAST_HUFFMAN_TABLE_SIZE : i32 =   (1 << STB_VORBIS_FAST_HUFFMAN_LENGTH);
 const FAST_HUFFMAN_TABLE_MASK : i32 =   (FAST_HUFFMAN_TABLE_SIZE - 1);
 
-#[repr(C)] 
-struct Codebook
+#[repr(C)]
+pub struct Codebook
 {
    dimensions: c_int, entries: c_int,
    codeword_lengths: *mut u8,
@@ -99,7 +99,7 @@ struct Codebook
 } 
 
 #[repr(C)]
-struct  Floor0
+pub struct  Floor0
 {
    order: u8,
    rate: u16,
@@ -111,7 +111,7 @@ struct  Floor0
 }
 
 #[repr(C)]
-struct Floor1
+pub struct Floor1
 {
    partitions: u8,
    partition_class_list: [u8; 32], // varies
@@ -128,14 +128,15 @@ struct Floor1
 }
 
 // union Floor
-struct Floor
+#[repr(C)]
+pub struct Floor
 {
    floor0: Floor0,
    floor1: Floor1,
 }
 
 #[repr(C)] 
-struct Residue
+pub struct Residue
 {
    begin: u32, end: u32,
    part_size: u32,
@@ -146,7 +147,7 @@ struct Residue
 } 
 
 #[repr(C)]
-struct MappingChannel
+pub struct MappingChannel
 {
    magnitude: u8,
    angle: u8,
@@ -155,7 +156,7 @@ struct MappingChannel
 
 
 #[repr(C)]
-struct Mapping
+pub struct Mapping
 {
    coupling_steps: u16,
    chan: *mut MappingChannel,
@@ -166,7 +167,7 @@ struct Mapping
 
 
 #[repr(C)]
-struct Mode
+pub struct Mode
 {
    blockflag: u8,
    mapping: u8,
@@ -177,7 +178,7 @@ struct Mode
 
 
 #[repr(C)]
-struct CRCscan
+pub struct CRCscan
 {
    goal_crc: u32,    // expected crc if match
    bytes_left: c_int,  // bytes left in packet
@@ -187,7 +188,7 @@ struct CRCscan
 } 
 
 #[repr(C)]
-struct ProbedPage
+pub struct ProbedPage
 {
    page_start: u32, page_end: u32,
    last_decoded_sample: u32
@@ -196,7 +197,7 @@ struct ProbedPage
 
 
 #[repr(C)]
-struct stb_vorbis
+pub struct stb_vorbis
 {
   // user-accessible info
    sample_rate: c_uint,
@@ -232,7 +233,7 @@ struct stb_vorbis
 
   // run-time results
    eof: c_int,
-   error: STBVorbisError,
+   error: c_int, //STBVorbisError,
 
   // user-useful data
 
@@ -306,6 +307,9 @@ struct stb_vorbis
    channel_buffer_start: c_int,
    channel_buffer_end: c_int,
 }
+
+pub type vorb = stb_vorbis;
+
 
 
 ////////   ERROR CODES
@@ -536,9 +540,22 @@ pub unsafe extern fn point_compare(p: *const c_void, q: *const c_void) -> c_int
    }
 }
 
+#[no_mangle]
+pub unsafe extern fn get32(f: *mut vorb) -> u32
+{
+   let mut x : u32 = get8(f) as u32;
+   x += (get8(f) as u32) << 8;
+   x += (get8(f) as u32) << 16;
+   x += (get8(f) as u32) << 24;
+   return x;
+}
+
+
 
 // Below is function that still live in C code
 extern {
+    pub fn get8(z: *mut vorb) -> u8;
+    
     pub fn stb_vorbis_decode_filename(
         filename: *const i8, 
         channels: *mut c_int, 

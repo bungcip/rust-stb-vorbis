@@ -1224,7 +1224,7 @@ extern int STBV_CDECL point_compare(const void *p, const void *q);
    #define USE_MEMORY(z)    ((z)->stream)
 #endif
 
-static uint8 get8(vorb *z)
+uint8 get8(vorb *z)
 {
    if (USE_MEMORY(z)) {
       if (z->stream >= z->stream_end) { z->eof = TRUE; return 0; }
@@ -1240,15 +1240,16 @@ static uint8 get8(vorb *z)
    #endif
 }
 
-static uint32 get32(vorb *f)
-{
-   uint32 x;
-   x = get8(f);
-   x += get8(f) << 8;
-   x += get8(f) << 16;
-   x += (uint32) get8(f) << 24;
-   return x;
-}
+// NOTE: moved to Rust
+extern uint32 get32(vorb *f);
+// {
+//    uint32 x;
+//    x = get8(f);
+//    x += get8(f) << 8;
+//    x += get8(f) << 16;
+//    x += (uint32) get8(f) << 24;
+//    return x;
+// }
 
 static int getn(vorb *z, uint8 *data, int n)
 {
