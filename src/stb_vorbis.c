@@ -1191,23 +1191,9 @@ extern int STBV_CDECL point_compare(const void *p, const void *q);
    #define USE_MEMORY(z)    ((z)->stream)
 #endif
 
-uint8 get8(vorb *z)
-{
-   if (USE_MEMORY(z)) {
-      if (z->stream >= z->stream_end) { z->eof = TRUE; return 0; }
-      return *z->stream++;
-   }
-
-   #ifndef STB_VORBIS_NO_STDIO
-   {
-   int c = fgetc(z->f);
-   if (c == EOF) { z->eof = TRUE; return 0; }
-   return c;
-   }
-   #endif
-}
 
 // NOTE: moved to Rust
+extern uint8 get8(vorb *z);
 extern uint32 get32(vorb *f);
 
 static int getn(vorb *z, uint8 *data, int n)

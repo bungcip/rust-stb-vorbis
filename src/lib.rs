@@ -596,8 +596,34 @@ pub unsafe extern fn point_compare(p: *const c_void, q: *const c_void) -> c_int
    }
 }
 
+macro_rules! USE_MEMORY {
+    ($z: expr) => {
+        $z.stream.is_null() == false
+    }
+}
+
 #[no_mangle]
-pub unsafe extern fn get32(f: *mut vorb) -> u32
+pub unsafe extern fn get8(z: &mut vorb) -> u8
+{
+   if USE_MEMORY!(z) {
+      if z.stream >= z.stream_end { 
+          z.eof = 1;
+          return 0;
+      }
+      z.stream = z.stream.offset(1);
+      return *z.stream;
+   }
+
+   let c = libc::fgetc(z.f);
+   if c == libc::EOF { 
+       z.eof = 1; return 0; 
+    }
+   return c as u8;
+}
+
+
+#[no_mangle]
+pub unsafe extern fn get32(f: &mut vorb) -> u32
 {
    let mut x : u32 = get8(f) as u32;
    x += (get8(f) as u32) << 8;
@@ -607,7 +633,7 @@ pub unsafe extern fn get32(f: *mut vorb) -> u32
 }
 
 #[no_mangle]
-pub unsafe extern fn capture_pattern(f: *mut vorb) -> c_int
+pub unsafe extern fn capture_pattern(f: &mut vorb) -> c_int
 {
    if 0x4f != get8(f) {return 0;}
    if 0x67 != get8(f) {return 0;}
@@ -691,7 +717,7 @@ pub unsafe extern fn vorbis_pump_first_frame(f: *mut stb_vorbis)
 
 // Below is function that still live in C code
 extern {
-    pub fn get8(z: *mut vorb) -> u8;
+    // pub fn get8(z: *mut vorb) -> u8;
     pub fn next_segment(f: *mut vorb) -> c_int;
     
     // pub fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int;
