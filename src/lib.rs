@@ -602,6 +602,25 @@ pub unsafe extern fn flush_packet(f: *mut vorb)
 }
 
 #[no_mangle]
+pub unsafe extern fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int
+{
+    let mut mode : c_int = 0;
+    let mut left_end: c_int = 0;
+    let mut right_end: c_int = 0;
+    
+    if vorbis_decode_initial(f, p_left, &mut left_end, p_right, &mut right_end, &mut mode) == 0{
+        return 0;
+    }
+    
+    let f : &mut vorb = std::mem::transmute(f);
+    return vorbis_decode_packet_rest(
+        f, len, &mut f.mode_config[mode as usize], 
+        *p_left, left_end, *p_right, right_end, p_left
+    );
+}
+
+
+#[no_mangle]
 pub unsafe extern fn vorbis_pump_first_frame(f: *mut stb_vorbis)
 {
     let mut len: c_int = 0;
@@ -619,8 +638,11 @@ extern {
     pub fn get8(z: *mut vorb) -> u8;
     pub fn next_segment(f: *mut vorb) -> c_int;
     
-    pub fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int;
+    // pub fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int;
     pub fn vorbis_finish_frame(f: *mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int;
+    
+    pub fn vorbis_decode_initial(f: *mut vorb, p_left_start: *mut c_int, p_left_end: *mut c_int, p_right_start: *mut c_int, p_right_end: *mut c_int, mode: *mut c_int) -> c_int;
+    pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
     
     pub fn stb_vorbis_decode_filename(
         filename: *const i8, 

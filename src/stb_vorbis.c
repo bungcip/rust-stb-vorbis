@@ -3004,7 +3004,7 @@ static int do_floor(vorb *f, Mapping *map, int i, int n, float *target, YTYPE *f
 //        has to be the same as frame N+1's left_end-left_start (which they are by
 //        construction)
 
-static int vorbis_decode_initial(vorb *f, int *p_left_start, int *p_left_end, int *p_right_start, int *p_right_end, int *mode)
+int vorbis_decode_initial(vorb *f, int *p_left_start, int *p_left_end, int *p_right_start, int *p_right_end, int *mode)
 {
    Mode *m;
    int i, n, prev, next, window_center;
@@ -3060,7 +3060,7 @@ static int vorbis_decode_initial(vorb *f, int *p_left_start, int *p_left_end, in
    return TRUE;
 }
 
-static int vorbis_decode_packet_rest(vorb *f, int *len, Mode *m, int left_start, int left_end, int right_start, int right_end, int *p_left)
+int vorbis_decode_packet_rest(vorb *f, int *len, Mode *m, int left_start, int left_end, int right_start, int right_end, int *p_left)
 {
    Mapping *map;
    int i,j,k,n,n2;
@@ -3328,12 +3328,8 @@ static int vorbis_decode_packet_rest(vorb *f, int *len, Mode *m, int left_start,
    return TRUE;
 }
 
-int vorbis_decode_packet(vorb *f, int *len, int *p_left, int *p_right)
-{
-   int mode, left_end, right_end;
-   if (!vorbis_decode_initial(f, p_left, &left_end, p_right, &right_end, &mode)) return 0;
-   return vorbis_decode_packet_rest(f, len, f->mode_config + mode, *p_left, left_end, *p_right, right_end, p_left);
-}
+/// NOTE: moved to rust
+int vorbis_decode_packet(vorb *f, int *len, int *p_left, int *p_right);
 
 int vorbis_finish_frame(stb_vorbis *f, int len, int left, int right)
 {
