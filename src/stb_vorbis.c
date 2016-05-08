@@ -3328,14 +3328,14 @@ static int vorbis_decode_packet_rest(vorb *f, int *len, Mode *m, int left_start,
    return TRUE;
 }
 
-static int vorbis_decode_packet(vorb *f, int *len, int *p_left, int *p_right)
+int vorbis_decode_packet(vorb *f, int *len, int *p_left, int *p_right)
 {
    int mode, left_end, right_end;
    if (!vorbis_decode_initial(f, p_left, &left_end, p_right, &right_end, &mode)) return 0;
    return vorbis_decode_packet_rest(f, len, f->mode_config + mode, *p_left, left_end, *p_right, right_end, p_left);
 }
 
-static int vorbis_finish_frame(stb_vorbis *f, int len, int left, int right)
+int vorbis_finish_frame(stb_vorbis *f, int len, int left, int right)
 {
    int prev,i,j;
    // we use right&left (the start of the right- and left-window sin()-regions)
@@ -3387,12 +3387,8 @@ static int vorbis_finish_frame(stb_vorbis *f, int len, int left, int right)
    return right - left;
 }
 
-static void vorbis_pump_first_frame(stb_vorbis *f)
-{
-   int len, right, left;
-   if (vorbis_decode_packet(f, &len, &left, &right))
-      vorbis_finish_frame(f, len, left, right);
-}
+/// NOTE: moved to rust
+extern void vorbis_pump_first_frame(stb_vorbis *f);
 
 #ifndef STB_VORBIS_NO_PUSHDATA_API
 static int is_whole_packet_present(stb_vorbis *f, int end_page)

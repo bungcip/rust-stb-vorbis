@@ -601,10 +601,26 @@ pub unsafe extern fn flush_packet(f: *mut vorb)
     while get8_packet_raw(f) != EOP {}
 }
 
+#[no_mangle]
+pub unsafe extern fn vorbis_pump_first_frame(f: *mut stb_vorbis)
+{
+    let mut len: c_int = 0;
+    let mut right: c_int = 0;
+    let mut left: c_int = 0;
+    
+    if vorbis_decode_packet(f, &mut len, &mut left, &mut right) != 0 {
+        vorbis_finish_frame(f, len, left, right);
+    }
+}
+
+
 // Below is function that still live in C code
 extern {
     pub fn get8(z: *mut vorb) -> u8;
     pub fn next_segment(f: *mut vorb) -> c_int;
+    
+    pub fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int;
+    pub fn vorbis_finish_frame(f: *mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int;
     
     pub fn stb_vorbis_decode_filename(
         filename: *const i8, 
