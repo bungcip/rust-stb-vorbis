@@ -62,6 +62,30 @@ pub enum STBVorbisError
 }
 
 
+// this has been repurposed so y is now the original index instead of y
+#[repr(C)]
+#[derive(Copy, Clone, Eq, Ord)]
+struct Point
+{
+   x : u16,
+   y : u16
+}
+
+impl PartialEq for Point {
+    fn eq(&self, other: &Self) -> bool{
+        return self.x.eq(&other.x);
+    }
+}
+
+use std::cmp::Ordering;
+impl PartialOrd for Point {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering>{
+        return self.x.partial_cmp(&other.x);
+    }
+}
+
+
+
 // Converted function is here
 
 // used in setup, and for huffman that doesn't go fast path
@@ -211,6 +235,22 @@ pub extern fn neighbors(x: *mut u16, n: c_int, plow: *mut c_int, phigh: *mut c_i
         }
     }
 }
+
+#[no_mangle]
+pub unsafe extern fn point_compare(p: *const c_void, q: *const c_void) -> c_int
+{
+   let a : &Point = std::mem::transmute(p as *const Point);
+   let b : &Point = std::mem::transmute(q as *const Point);
+   
+   if a.x < b.x {
+       return -1;
+   }else if a.x > b.x {
+       return 1;
+   }else {
+       return 0;
+   }
+}
+
 
 // Below is function that still live in C code
 extern {

@@ -1211,12 +1211,8 @@ typedef struct
    uint16 x,y;
 } Point;
 
-static int STBV_CDECL point_compare(const void *p, const void *q)
-{
-   Point *a = (Point *) p;
-   Point *b = (Point *) q;
-   return a->x < b->x ? -1 : a->x > b->x;
-}
+/// NOTE: moved to rust
+extern int STBV_CDECL point_compare(const void *p, const void *q);
 
 //
 /////////////////////// END LEAF SETUP FUNCTIONS //////////////////////////
