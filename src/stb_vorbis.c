@@ -1413,7 +1413,7 @@ static int maybe_start_packet(vorb *f)
    return start_packet(f);
 }
 
-static int next_segment(vorb *f)
+int next_segment(vorb *f)
 {
    int len;
    if (f->last_seg) return 0;
@@ -1437,29 +1437,10 @@ static int next_segment(vorb *f)
 #define EOP    (-1)
 #define INVALID_BITS  (-1)
 
-static int get8_packet_raw(vorb *f)
-{
-   if (!f->bytes_in_seg) {  // CLANG!
-      if (f->last_seg) return EOP;
-      else if (!next_segment(f)) return EOP;
-   }
-   assert(f->bytes_in_seg > 0);
-   --f->bytes_in_seg;
-   ++f->packet_bytes;
-   return get8(f);
-}
-
-static int get8_packet(vorb *f)
-{
-   int x = get8_packet_raw(f);
-   f->valid_bits = 0;
-   return x;
-}
-
-static void flush_packet(vorb *f)
-{
-   while (get8_packet_raw(f) != EOP);
-}
+/// NOTE: moved to rust
+extern int get8_packet_raw(vorb *f);
+extern int get8_packet(vorb *f);
+extern void flush_packet(vorb *f);
 
 // @OPTIMIZE: this is the secondary bit decoder, so it's probably not as important
 // as the huffman decoder?

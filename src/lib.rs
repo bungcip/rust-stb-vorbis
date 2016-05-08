@@ -560,9 +560,51 @@ pub unsafe extern fn capture_pattern(f: *mut vorb) -> c_int
    return 1;
 }
 
+
+const EOP : i32 = -1;
+const INVALID_BITS : i32 = -1;
+
+#[no_mangle]
+pub unsafe extern fn get8_packet_raw(f: *mut vorb) -> c_int
+{
+    let f : &mut vorb = std::mem::transmute(f as *mut vorb); 
+    if f.bytes_in_seg == 0 {
+        if f.last_seg != 0 {
+            return EOP;
+        }else if next_segment(f) == 0 {
+            return EOP;
+        }
+    }
+    
+    assert!(f.bytes_in_seg > 0);
+    
+    f.bytes_in_seg -= 1;
+    f.packet_bytes += 1;
+    
+    return get8(f) as c_int;
+}
+
+#[no_mangle]
+pub unsafe extern fn get8_packet(f: *mut vorb) -> c_int
+{
+    let x = get8_packet_raw(f);
+    
+    let f : &mut vorb = std::mem::transmute(f as *mut vorb); 
+    f.valid_bits = 0;
+    
+    return x;
+}
+
+#[no_mangle]
+pub unsafe extern fn flush_packet(f: *mut vorb)
+{
+    while get8_packet_raw(f) != EOP {}
+}
+
 // Below is function that still live in C code
 extern {
     pub fn get8(z: *mut vorb) -> u8;
+    pub fn next_segment(f: *mut vorb) -> c_int;
     
     pub fn stb_vorbis_decode_filename(
         filename: *const i8, 
