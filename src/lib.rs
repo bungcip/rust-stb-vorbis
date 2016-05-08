@@ -550,7 +550,15 @@ pub unsafe extern fn get32(f: *mut vorb) -> u32
    return x;
 }
 
-
+#[no_mangle]
+pub unsafe extern fn capture_pattern(f: *mut vorb) -> c_int
+{
+   if 0x4f != get8(f) {return 0;}
+   if 0x67 != get8(f) {return 0;}
+   if 0x67 != get8(f) {return 0;}
+   if 0x53 != get8(f) {return 0;}
+   return 1;
+}
 
 // Below is function that still live in C code
 extern {

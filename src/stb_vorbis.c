@@ -1242,14 +1242,6 @@ uint8 get8(vorb *z)
 
 // NOTE: moved to Rust
 extern uint32 get32(vorb *f);
-// {
-//    uint32 x;
-//    x = get8(f);
-//    x += get8(f) << 8;
-//    x += get8(f) << 16;
-//    x += (uint32) get8(f) << 24;
-//    return x;
-// }
 
 static int getn(vorb *z, uint8 *data, int n)
 {
@@ -1319,14 +1311,8 @@ static int set_file_offset(stb_vorbis *f, unsigned int loc)
 
 static uint8 ogg_page_header[4] = { 0x4f, 0x67, 0x67, 0x53 };
 
-static int capture_pattern(vorb *f)
-{
-   if (0x4f != get8(f)) return FALSE;
-   if (0x67 != get8(f)) return FALSE;
-   if (0x67 != get8(f)) return FALSE;
-   if (0x53 != get8(f)) return FALSE;
-   return TRUE;
-}
+/// NOTE: moved to rust
+extern int capture_pattern(vorb *f);
 
 #define PAGEFLAG_continued_packet   1
 #define PAGEFLAG_first_page         2
