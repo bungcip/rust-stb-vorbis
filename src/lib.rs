@@ -513,6 +513,18 @@ pub extern fn ilog(n: i32) -> i32
 }
 
 #[no_mangle]
+pub extern fn get_window(f: &vorb, len: c_int) -> *mut f32
+{
+   let len = len << 1;
+   if len == f.blocksize_0 { return f.window[0]; }
+   if len == f.blocksize_1 { return f.window[1]; }
+
+   unreachable!();
+}
+
+
+
+#[no_mangle]
 pub extern fn uint32_compare(p: *const c_void, q: *const c_void) -> c_int
 {
     unsafe {

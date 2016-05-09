@@ -2892,14 +2892,8 @@ void inverse_mdct_naive(float *buffer, int n)
 }
 #endif
 
-static float *get_window(vorb *f, int len)
-{
-   len <<= 1;
-   if (len == f->blocksize_0) return f->window[0];
-   if (len == f->blocksize_1) return f->window[1];
-   assert(0);
-   return NULL;
-}
+/// NOTE: moved to rust
+extern float *get_window(vorb *f, int len);
 
 #ifndef STB_VORBIS_NO_DEFER_FLOOR
 typedef int16 YTYPE;
