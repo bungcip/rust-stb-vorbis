@@ -466,6 +466,22 @@ pub unsafe extern fn setup_temp_free(f: &mut vorb, p: *mut c_void, sz: c_int)
    libc::free(p);
 }
 
+const  CRC32_POLY  : u32 =  0x04c11db7;   // from spec
+
+#[no_mangle]
+pub unsafe extern fn crc32_init()
+{
+   for i in 0 .. 256 {
+       let mut s : u32 = i << 24;
+       for _ in 0 .. 8 {
+           s = (s << 1) ^ (if s >= (1u32<<31) {CRC32_POLY} else {0});
+       }
+       crc_table[i as usize] = s;
+   }
+   
+}
+
+
 
 // used in setup, and for huffman that doesn't go fast path
 #[no_mangle]
@@ -1015,7 +1031,9 @@ pub unsafe extern fn stb_vorbis_open_filename(filename: *const i8, error: *mut c
 
 
 // Below is function that still live in C code
-extern {    
+extern {
+    static mut crc_table: [u32; 256];
+        
     // pub fn next_segment(f: *mut vorb) -> c_int;
     
     pub fn vorbis_finish_frame(f: *mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int;

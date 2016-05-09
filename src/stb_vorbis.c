@@ -904,19 +904,10 @@ void setup_free(vorb *f, void *p);
 void *setup_temp_malloc(vorb *f, int sz);
 void setup_temp_free(vorb *f, void *p, int sz);
 
-#define CRC32_POLY    0x04c11db7   // from spec
+// #define CRC32_POLY    0x04c11db7   // from spec
 
-static uint32 crc_table[256];
-static void crc32_init(void)
-{
-   int i,j;
-   uint32 s;
-   for(i=0; i < 256; i++) {
-      for (s=(uint32) i << 24, j=0; j < 8; ++j)
-         s = (s << 1) ^ (s >= (1U<<31) ? CRC32_POLY : 0);
-      crc_table[i] = s;
-   }
-}
+uint32 crc_table[256];
+extern void crc32_init(void);
 
 static __forceinline uint32 crc32_update(uint32 crc, uint8 byte)
 {
