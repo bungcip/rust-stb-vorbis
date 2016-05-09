@@ -1045,14 +1045,7 @@ static void compute_accelerated_huffman(Codebook *c)
 
 /// NOTE: moved to rust
 extern STBV_CDECL uint32_compare(const void *p, const void *q);
-
-static int include_in_sort(Codebook *c, uint8 len)
-{
-   if (c->sparse) { assert(len != NO_CODE); return TRUE; }
-   if (len == NO_CODE) return FALSE;
-   if (len > STB_VORBIS_FAST_HUFFMAN_LENGTH) return TRUE;
-   return FALSE;
-}
+extern int include_in_sort(Codebook *c, uint8 len);
 
 // if the fast table above doesn't work, we want to binary
 // search them... need to reverse the bits

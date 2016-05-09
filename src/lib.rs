@@ -74,6 +74,10 @@ pub type codetype = f32;
 const FAST_HUFFMAN_TABLE_SIZE : i32 =   (1 << STB_VORBIS_FAST_HUFFMAN_LENGTH);
 const FAST_HUFFMAN_TABLE_MASK : i32 =   (FAST_HUFFMAN_TABLE_SIZE - 1);
 
+// code length assigned to a value with no huffman encoding
+const NO_CODE : i32 =   255;
+
+
 #[repr(C)]
 pub struct Codebook
 {
@@ -388,6 +392,23 @@ pub fn error(f: &mut vorb, e: c_int) -> c_int
     
     return 0;
 }
+
+#[no_mangle]
+pub fn include_in_sort(c: &Codebook, len: u8) -> c_int
+{
+   if c.sparse != 0 { 
+       assert!(len as c_int != NO_CODE); 
+       return 1; // true
+    }
+   if len as c_int == NO_CODE {
+       return 0; // false
+   }
+   if len as c_int > STB_VORBIS_FAST_HUFFMAN_LENGTH {
+       return 1; // true
+   }
+   return 0;
+}
+
 
 
 #[no_mangle]
