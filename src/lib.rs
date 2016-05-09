@@ -378,6 +378,19 @@ impl PartialOrd for Point {
 // Converted function is here
 
 #[no_mangle]
+pub fn error(f: &mut vorb, e: c_int) -> c_int
+{
+    // NOTE: e is STBVorbisError
+    f.error = e;
+    if f.eof == 0 && e != STBVorbisError::VORBIS_need_more_data as c_int {
+        f.error = e; // breakpoint for debugging
+    }
+    
+    return 0;
+}
+
+
+#[no_mangle]
 pub unsafe extern fn setup_malloc(f: &mut vorb, sz: c_int) -> *mut c_void
 {
    let sz = (sz+3) & !3;
@@ -790,9 +803,7 @@ pub unsafe extern fn stb_vorbis_open_filename(filename: *const i8, error: *mut c
 
 
 // Below is function that still live in C code
-extern {
-    pub fn error(f: *mut vorb, e: c_int) -> c_int;
-    
+extern {    
     pub fn next_segment(f: *mut vorb) -> c_int;
     
     pub fn vorbis_finish_frame(f: *mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int;

@@ -863,14 +863,8 @@ struct stb_vorbis
 typedef struct stb_vorbis vorb;
 
 
-int error(vorb *f, enum STBVorbisError e)
-{
-   f->error = e;
-   if (!f->eof && e != VORBIS_need_more_data) {
-      f->error=e; // breakpoint for debugging
-   }
-   return 0;
-}
+/// NOTE: moved to rust
+extern int error(vorb *f, enum STBVorbisError e);
 
 
 // these functions are used for allocating temporary memory
