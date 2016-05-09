@@ -51,6 +51,7 @@ const STB_VORBIS_FAST_HUFFMAN_LENGTH : i32 = 10;
 
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct stb_vorbis_alloc
 {
    alloc_buffer: *const u8,
@@ -80,6 +81,7 @@ const NO_CODE : i32 =   255;
 
 
 #[repr(C)]
+#[derive(Copy)]
 pub struct Codebook
 {
    dimensions: c_int, entries: c_int,
@@ -102,6 +104,12 @@ pub struct Codebook
    sorted_values: *mut c_int,
    sorted_entries: c_int,
 } 
+
+impl Clone for Codebook {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
 
 #[repr(C)]
 pub struct  Floor0
@@ -194,6 +202,7 @@ pub struct CRCscan
 } 
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct ProbedPage
 {
    page_start: u32, page_end: u32,
@@ -1124,6 +1133,26 @@ pub unsafe extern fn vorbis_pump_first_frame(f: &mut stb_vorbis)
     if vorbis_decode_packet(f, &mut len, &mut left, &mut right) != 0 {
         vorbis_finish_frame(f, len, left, right);
     }
+}
+
+// NOTE(bungcip): p must be zeroed before using it
+#[no_mangle]
+pub unsafe extern fn vorbis_init(p: &mut stb_vorbis, z: *const stb_vorbis_alloc)
+{
+   
+   if z.is_null() == false {
+      p.alloc = *z;
+      p.alloc.alloc_buffer_length_in_bytes = (p.alloc.alloc_buffer_length_in_bytes+3) & !3;
+      p.temp_offset = p.alloc.alloc_buffer_length_in_bytes;
+   }
+   p.eof = 0;
+   p.error = STBVorbisError::VORBIS__no_error as c_int;
+   p.stream = std::ptr::null_mut();
+   p.codebooks = std::ptr::null_mut();
+   p.page_crc_tests = -1;
+
+   p.close_on_free = 0;
+   p.f = std::ptr::null_mut();
 }
 
 #[no_mangle]
@@ -2119,7 +2148,6 @@ extern {
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn vorbis_deinit(f: *mut stb_vorbis);
-    pub fn vorbis_init(f: *mut stb_vorbis, z: *const stb_vorbis_alloc);
     pub fn vorbis_alloc(f: *mut stb_vorbis) -> *mut stb_vorbis;
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
