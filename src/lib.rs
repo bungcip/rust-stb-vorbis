@@ -1513,6 +1513,25 @@ unsafe fn copy_samples(dest: *mut i16, src: *mut f32, len: c_int)
    }
 }
 
+#[no_mangle]
+pub unsafe extern fn stb_vorbis_seek(f: &mut stb_vorbis, sample_number: c_uint) -> c_int
+{
+   if stb_vorbis_seek_frame(f, sample_number) == 0 {
+      return 0;
+   }
+
+   if sample_number != f.current_loc {
+      let mut n = 0;
+      let frame_start = f.current_loc;
+      stb_vorbis_get_frame_float(f, &mut n, std::ptr::null_mut());
+      assert!(sample_number > frame_start);
+      assert!(f.channel_buffer_start + (sample_number-frame_start) as c_int <= f.channel_buffer_end);
+      f.channel_buffer_start += (sample_number - frame_start) as i32;
+   }
+
+   return 1;
+}
+
 
 #[no_mangle]
 pub unsafe extern fn init_blocksize(f: &mut vorb, b: c_int, n: c_int) -> c_int
@@ -2065,4 +2084,6 @@ extern {
     pub fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32);
 
     // Real API
+    pub fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: c_uint) -> c_int;
+
 }
