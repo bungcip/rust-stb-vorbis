@@ -504,6 +504,30 @@ pub extern fn float32_unpack(x: u32) -> f32
    return f64::ldexp(res, (exp as i32 - 788 ) as isize) as f32;
 }
 
+// zlib & jpeg huffman tables assume that the output symbols
+// can either be arbitrarily arranged, or have monotonically
+// increasing frequencies--they rely on the lengths being sorted;
+// this makes for a very simple generation algorithm.
+// vorbis allows a huffman table with non-sorted lengths. This
+// requires a more sophisticated construction, since symbols in
+// order do not map to huffman codes "in order".
+#[no_mangle]
+pub unsafe extern fn add_entry(c: &Codebook, huff_code: u32, symbol: c_int, count: c_int, len: c_int, values: *mut u32)
+{
+    // TODO(bungcip): maybe change len as u8?
+    // TODO(bungcip): maybe symbol len as u32?
+    
+   if c.sparse == 0 {
+      *c.codewords.offset(symbol as isize) = huff_code;
+   } else {
+      let count = count as isize;
+      *c.codewords.offset(count) = huff_code;
+      *c.codeword_lengths.offset(count) = len as u8;
+      *values.offset(count) = symbol as u32;
+   }
+}
+
+
 // this is a weird definition of log2() for which log2(1) = 1, log2(2) = 2, log2(4) = 3
 // as required by the specification. fast(?) implementation from stb.h
 // @OPTIMIZE: called multiple times per-packet with "constants"; move to setup

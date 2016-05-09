@@ -947,25 +947,7 @@ extern int ilog(int32 n);
 
 /// NOTE: moved to Rust
 extern float float32_unpack(uint32 x);
-
-
-// zlib & jpeg huffman tables assume that the output symbols
-// can either be arbitrarily arranged, or have monotonically
-// increasing frequencies--they rely on the lengths being sorted;
-// this makes for a very simple generation algorithm.
-// vorbis allows a huffman table with non-sorted lengths. This
-// requires a more sophisticated construction, since symbols in
-// order do not map to huffman codes "in order".
-static void add_entry(Codebook *c, uint32 huff_code, int symbol, int count, int len, uint32 *values)
-{
-   if (!c->sparse) {
-      c->codewords      [symbol] = huff_code;
-   } else {
-      c->codewords       [count] = huff_code;
-      c->codeword_lengths[count] = len;
-      values             [count] = symbol;
-   }
-}
+extern void add_entry(Codebook *c, uint32 huff_code, int symbol, int count, int len, uint32 *values);
 
 static int compute_codewords(Codebook *c, uint8 *len, int n, uint32 *values)
 {
