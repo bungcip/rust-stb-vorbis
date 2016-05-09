@@ -795,6 +795,40 @@ pub unsafe extern fn flush_packet(f: *mut vorb)
 }
 
 
+// @OPTIMIZE: this is the secondary bit decoder, so it's probably not as important
+// as the huffman decoder?
+#[no_mangle]
+pub unsafe extern fn get_bits(f: &mut vorb, n: c_int) -> u32
+{
+   let mut z : u32;
+
+   if f.valid_bits < 0 {return 0;}
+   if f.valid_bits < n {
+      if n > 24 {
+         // the accumulator technique below would not work correctly in this case
+         z = get_bits(f, 24);
+         z += get_bits(f, n-24) << 24;
+         return z;
+      }
+      if f.valid_bits == 0 {f.acc = 0;}
+      while f.valid_bits < n {
+         let z = get8_packet_raw(f);
+         if z == EOP {
+            f.valid_bits = INVALID_BITS;
+            return 0;
+         }
+         f.acc += (z as u32) << f.valid_bits;
+         f.valid_bits += 8;
+      }
+   }
+   if f.valid_bits < 0 {return 0;}
+   z = f.acc & ((1 << n)-1);
+   f.acc >>= n;
+   f.valid_bits -= n;
+   return z;
+}
+
+
 #[no_mangle]
 pub unsafe extern fn start_page(f: &mut vorb) -> c_int
 {

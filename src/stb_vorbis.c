@@ -1288,38 +1288,7 @@ int next_segment(vorb *f)
 extern int get8_packet_raw(vorb *f);
 extern int get8_packet(vorb *f);
 extern void flush_packet(vorb *f);
-
-// @OPTIMIZE: this is the secondary bit decoder, so it's probably not as important
-// as the huffman decoder?
-static uint32 get_bits(vorb *f, int n)
-{
-   uint32 z;
-
-   if (f->valid_bits < 0) return 0;
-   if (f->valid_bits < n) {
-      if (n > 24) {
-         // the accumulator technique below would not work correctly in this case
-         z = get_bits(f, 24);
-         z += get_bits(f, n-24) << 24;
-         return z;
-      }
-      if (f->valid_bits == 0) f->acc = 0;
-      while (f->valid_bits < n) {
-         int z = get8_packet_raw(f);
-         if (z == EOP) {
-            f->valid_bits = INVALID_BITS;
-            return 0;
-         }
-         f->acc += z << f->valid_bits;
-         f->valid_bits += 8;
-      }
-   }
-   if (f->valid_bits < 0) return 0;
-   z = f->acc & ((1 << n)-1);
-   f->acc >>= n;
-   f->valid_bits -= n;
-   return z;
-}
+extern uint32 get_bits(vorb *f, int n);
 
 // @OPTIMIZE: primary accumulator for huffman
 // expand the buffer to as many bits as possible without reading off end of packet
@@ -5039,57 +5008,5 @@ int stb_vorbis_get_samples_float(stb_vorbis *f, int channels, float **buffer, in
    return n;
 }
 #endif // STB_VORBIS_NO_PULLDATA_API
-
-/* Version history
-    1.09    - 2016/04/04 - back out 'avoid discarding last frame' fix from previous version
-    1.08    - 2016/04/02 - fixed multiple warnings; fix setup memory leaks;
-                           avoid discarding last frame of audio data
-    1.07    - 2015/01/16 - fixed some warnings, fix mingw, const-correct API
-                           some more crash fixes when out of memory or with corrupt files 
-    1.06    - 2015/08/31 - full, correct support for seeking API (Dougall Johnson)
-                           some crash fixes when out of memory or with corrupt files
-    1.05    - 2015/04/19 - don't define __forceinline if it's redundant
-    1.04    - 2014/08/27 - fix missing const-correct case in API
-    1.03    - 2014/08/07 - Warning fixes
-    1.02    - 2014/07/09 - Declare qsort compare function _cdecl on windows
-    1.01    - 2014/06/18 - fix stb_vorbis_get_samples_float
-    1.0     - 2014/05/26 - fix memory leaks; fix warnings; fix bugs in multichannel
-                           (API change) report sample rate for decode-full-file funcs
-    0.99996 - bracket #include <malloc.h> for macintosh compilation by Laurent Gomila
-    0.99995 - use union instead of pointer-cast for fast-float-to-int to avoid alias-optimization problem
-    0.99994 - change fast-float-to-int to work in single-precision FPU mode, remove endian-dependence
-    0.99993 - remove assert that fired on legal files with empty tables
-    0.99992 - rewind-to-start
-    0.99991 - bugfix to stb_vorbis_get_samples_short by Bernhard Wodo
-    0.9999 - (should have been 0.99990) fix no-CRT support, compiling as C++
-    0.9998 - add a full-decode function with a memory source
-    0.9997 - fix a bug in the read-from-FILE case in 0.9996 addition
-    0.9996 - query length of vorbis stream in samples/seconds
-    0.9995 - bugfix to another optimization that only happened in certain files
-    0.9994 - bugfix to one of the optimizations that caused significant (but inaudible?) errors
-    0.9993 - performance improvements; runs in 99% to 104% of time of reference implementation
-    0.9992 - performance improvement of IMDCT; now performs close to reference implementation
-    0.9991 - performance improvement of IMDCT
-    0.999 - (should have been 0.9990) performance improvement of IMDCT
-    0.998 - no-CRT support from Casey Muratori
-    0.997 - bugfixes for bugs found by Terje Mathisen
-    0.996 - bugfix: fast-huffman decode initialized incorrectly for sparse codebooks; fixing gives 10% speedup - found by Terje Mathisen
-    0.995 - bugfix: fix to 'effective' overrun detection - found by Terje Mathisen
-    0.994 - bugfix: garbage decode on final VQ symbol of a non-multiple - found by Terje Mathisen
-    0.993 - bugfix: pushdata API required 1 extra byte for empty page (failed to consume final page if empty) - found by Terje Mathisen
-    0.992 - fixes for MinGW warning
-    0.991 - turn fast-float-conversion on by default
-    0.990 - fix push-mode seek recovery if you seek into the headers
-    0.98b - fix to bad release of 0.98
-    0.98 - fix push-mode seek recovery; robustify float-to-int and support non-fast mode
-    0.97 - builds under c++ (typecasting, don't use 'class' keyword)
-    0.96 - somehow MY 0.95 was right, but the web one was wrong, so here's my 0.95 rereleased as 0.96, fixes a typo in the clamping code
-    0.95 - clamping code for 16-bit functions
-    0.94 - not publically released
-    0.93 - fixed all-zero-floor case (was decoding garbage)
-    0.92 - fixed a memory leak
-    0.91 - conditional compiles to omit parts of the API and the infrastructure to support them: STB_VORBIS_NO_PULLDATA_API, STB_VORBIS_NO_PUSHDATA_API, STB_VORBIS_NO_STDIO, STB_VORBIS_NO_INTEGER_CONVERSION
-    0.90 - first public release
-*/
 
 #endif // STB_VORBIS_HEADER_ONLY
