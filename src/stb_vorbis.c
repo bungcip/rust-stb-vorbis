@@ -1113,6 +1113,7 @@ static void compute_window(int n, float *window)
       window[i] = (float) sin(0.5 * M_PI * square((float) sin((i - 0 + 0.5) / n2 * 0.5 * M_PI)));
 }
 
+/// NOTE: moved to rust
 extern void compute_bitreverse(int n, uint16 *rev);
 
 static int init_blocksize(vorb *f, int b, int n)
@@ -1157,40 +1158,8 @@ extern int STBV_CDECL point_compare(const void *p, const void *q);
 // NOTE: moved to Rust
 extern uint8 get8(vorb *z);
 extern uint32 get32(vorb *f);
-
-static int getn(vorb *z, uint8 *data, int n)
-{
-   if (USE_MEMORY(z)) {
-      if (z->stream+n > z->stream_end) { z->eof = 1; return 0; }
-      memcpy(data, z->stream, n);
-      z->stream += n;
-      return 1;
-   }
-
-   #ifndef STB_VORBIS_NO_STDIO   
-   if (fread(data, n, 1, z->f) == 1)
-      return 1;
-   else {
-      z->eof = 1;
-      return 0;
-   }
-   #endif
-}
-
-static void skip(vorb *z, int n)
-{
-   if (USE_MEMORY(z)) {
-      z->stream += n;
-      if (z->stream >= z->stream_end) z->eof = 1;
-      return;
-   }
-   #ifndef STB_VORBIS_NO_STDIO
-   {
-      long x = ftell(z->f);
-      fseek(z->f, x+n, SEEK_SET);
-   }
-   #endif
-}
+extern int getn(vorb *z, uint8 *data, int n);
+extern void skip(vorb *z, int n);
 
 static int set_file_offset(stb_vorbis *f, unsigned int loc)
 {

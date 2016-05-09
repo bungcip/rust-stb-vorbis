@@ -712,6 +712,38 @@ pub unsafe extern fn get32(f: &mut vorb) -> u32
 }
 
 #[no_mangle]
+pub unsafe extern fn getn(z: &mut vorb, data: *mut u8, n: c_int) -> c_int
+{
+   if USE_MEMORY!(z) {
+      if z.stream.offset(n as isize) > z.stream_end { z.eof = 1; return 0; }
+      std::ptr::copy_nonoverlapping(z.stream, data, n as usize);
+    //   libc::memcpy(data, z.stream, n);
+      z.stream = z.stream.offset(n as isize);
+      return 1;
+   }
+
+   if libc::fread(data as *mut c_void, n as usize, 1, z.f) == 1 {
+      return 1;
+   } else {
+      z.eof = 1;
+      return 0;
+   }
+}
+
+#[no_mangle]
+pub unsafe extern fn skip(z: &mut vorb, n: c_int)
+{
+   if USE_MEMORY!(z) {
+      z.stream = z.stream.offset(n as isize);
+      if z.stream >= z.stream_end {z.eof = 1;}
+      return;
+   }
+
+   let x = libc::ftell(z.f);
+   libc::fseek(z.f, x+n, libc::SEEK_SET);
+}
+
+#[no_mangle]
 pub unsafe extern fn capture_pattern(f: &mut vorb) -> c_int
 {
    if 0x4f != get8(f) {return 0;}
