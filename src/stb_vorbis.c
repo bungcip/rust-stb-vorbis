@@ -1086,8 +1086,6 @@ static void compute_sorted_huffman(Codebook *c, uint8 *lengths, uint32 *values)
 
 /// NOTE: moved to rust
 extern int vorbis_validate(uint8 *data);
-
-/// NOTE: moved to rust
 extern int lookup1_values(int entries, int dim);
 
 // called twice per file
@@ -1115,13 +1113,7 @@ static void compute_window(int n, float *window)
       window[i] = (float) sin(0.5 * M_PI * square((float) sin((i - 0 + 0.5) / n2 * 0.5 * M_PI)));
 }
 
-static void compute_bitreverse(int n, uint16 *rev)
-{
-   int ld = ilog(n) - 1; // ilog is off-by-one from normal definitions
-   int i, n8 = n >> 3;
-   for (i=0; i < n8; ++i)
-      rev[i] = (bit_reverse(i) >> (32-ld+3)) << 2;
-}
+extern void compute_bitreverse(int n, uint16 *rev);
 
 static int init_blocksize(vorb *f, int b, int n)
 {

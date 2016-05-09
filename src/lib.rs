@@ -580,7 +580,16 @@ pub extern fn get_window(f: &vorb, len: c_int) -> *mut f32
    unreachable!();
 }
 
-
+#[no_mangle]
+pub unsafe extern fn compute_bitreverse(n: c_int, rev: *mut u16)
+{
+   let ld = ilog(n) - 1; // ilog is off-by-one from normal definitions
+   let n8 = n >> 3;
+   
+   for i in 0 .. n8 {
+       *rev.offset(i as isize) = ((bit_reverse(i as c_uint) >> (32-ld+3)) << 2) as u16;
+   }
+}
 
 #[no_mangle]
 pub extern fn uint32_compare(p: *const c_void, q: *const c_void) -> c_int
