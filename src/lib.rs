@@ -827,6 +827,31 @@ pub unsafe extern fn start_packet(f: &mut vorb) -> c_int
    return 1; // true
 }
 
+#[no_mangle]
+pub unsafe extern fn maybe_start_packet(f: &mut vorb) -> c_int
+{
+    use STBVorbisError::{VORBIS_missing_capture_pattern, VORBIS_continued_packet_flag_invalid};
+    
+   if f.next_seg == -1 {
+      let x = get8(f) as i32;
+      if f.eof != 0 { return 0; } // EOF at page boundary is not an error!
+      if 0x4f != x       { return error(f, VORBIS_missing_capture_pattern as c_int); }
+      if 0x67 != get8(f) { return error(f, VORBIS_missing_capture_pattern as c_int); }
+      if 0x67 != get8(f) { return error(f, VORBIS_missing_capture_pattern as c_int); }
+      if 0x53 != get8(f) { return error(f, VORBIS_missing_capture_pattern as c_int); }
+      if start_page_no_capturepattern(f) == 0 { return 0; }
+      if (f.page_flag & PAGEFLAG_continued_packet as u8) != 0 {
+         // set up enough state that we can read this packet if we want,
+         // e.g. during recovery
+         f.last_seg = 0;
+         f.bytes_in_seg = 0;
+         return error(f, VORBIS_continued_packet_flag_invalid as c_int);
+      }
+   }
+   return start_packet(f);
+}
+
+
 
 #[no_mangle]
 pub unsafe extern fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int

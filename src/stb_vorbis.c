@@ -1258,27 +1258,7 @@ int start_page_no_capturepattern(vorb *f)
 /// NOTE: moved to rust
 extern int start_page(vorb *f);
 extern int start_packet(vorb *f);
-
-static int maybe_start_packet(vorb *f)
-{
-   if (f->next_seg == -1) {
-      int x = get8(f);
-      if (f->eof) return FALSE; // EOF at page boundary is not an error!
-      if (0x4f != x      ) return error(f, VORBIS_missing_capture_pattern);
-      if (0x67 != get8(f)) return error(f, VORBIS_missing_capture_pattern);
-      if (0x67 != get8(f)) return error(f, VORBIS_missing_capture_pattern);
-      if (0x53 != get8(f)) return error(f, VORBIS_missing_capture_pattern);
-      if (!start_page_no_capturepattern(f)) return FALSE;
-      if (f->page_flag & PAGEFLAG_continued_packet) {
-         // set up enough state that we can read this packet if we want,
-         // e.g. during recovery
-         f->last_seg = FALSE;
-         f->bytes_in_seg = 0;
-         return error(f, VORBIS_continued_packet_flag_invalid);
-      }
-   }
-   return start_packet(f);
-}
+extern int maybe_start_packet(vorb *f);
 
 int next_segment(vorb *f)
 {
