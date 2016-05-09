@@ -695,6 +695,40 @@ pub unsafe extern fn flush_packet(f: *mut vorb)
     while get8_packet_raw(f) != EOP {}
 }
 
+
+#[no_mangle]
+pub unsafe extern fn start_page(f: &mut vorb) -> c_int
+{
+   if capture_pattern(f) == 0 {
+       return error(f, STBVorbisError::VORBIS_missing_capture_pattern as i32);
+   } 
+   return start_page_no_capturepattern(f);
+}
+
+
+const PAGEFLAG_continued_packet : c_int =   1;
+const PAGEFLAG_first_page       : c_int =   2;
+const PAGEFLAG_last_page        : c_int =   4;
+
+
+#[no_mangle]
+pub unsafe extern fn start_packet(f: &mut vorb) -> c_int
+{
+   while f.next_seg == -1 {
+      if start_page(f) == 0 { return 0; } // false
+      if (f.page_flag & PAGEFLAG_continued_packet as u8) != 0 {
+         return error(f, STBVorbisError::VORBIS_continued_packet_flag_invalid as i32);
+      }
+   }
+   f.last_seg = 0; // false
+   f.valid_bits = 0;
+   f.packet_bytes = 0;
+   f.bytes_in_seg = 0;
+   // f.next_seg is now valid
+   return 1; // true
+}
+
+
 #[no_mangle]
 pub unsafe extern fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int
 {
@@ -744,14 +778,16 @@ pub unsafe extern fn stb_vorbis_open_filename(filename: *const i8, error: *mut c
 
 // Below is function that still live in C code
 extern {
-    // pub fn get8(z: *mut vorb) -> u8;
+    pub fn error(f: *mut vorb, e: c_int) -> c_int;
+    
     pub fn next_segment(f: *mut vorb) -> c_int;
     
-    // pub fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int;
     pub fn vorbis_finish_frame(f: *mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int;
     
     pub fn vorbis_decode_initial(f: *mut vorb, p_left_start: *mut c_int, p_left_end: *mut c_int, p_right_start: *mut c_int, p_right_end: *mut c_int, mode: *mut c_int) -> c_int;
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
+
+    pub fn start_page_no_capturepattern(f: *mut vorb) -> c_int;
     
     pub fn stb_vorbis_open_file(
         file: *mut FILE, 

@@ -862,7 +862,8 @@ struct stb_vorbis
 
 typedef struct stb_vorbis vorb;
 
-static int error(vorb *f, enum STBVorbisError e)
+
+int error(vorb *f, enum STBVorbisError e)
 {
    f->error = e;
    if (!f->eof && e != VORBIS_need_more_data) {
@@ -1271,7 +1272,7 @@ extern int capture_pattern(vorb *f);
 #define PAGEFLAG_first_page         2
 #define PAGEFLAG_last_page          4
 
-static int start_page_no_capturepattern(vorb *f)
+int start_page_no_capturepattern(vorb *f)
 {
    uint32 loc0,loc1,n;
    // stream structure version
@@ -1324,26 +1325,27 @@ static int start_page_no_capturepattern(vorb *f)
    return TRUE;
 }
 
-static int start_page(vorb *f)
-{
-   if (!capture_pattern(f)) return error(f, VORBIS_missing_capture_pattern);
-   return start_page_no_capturepattern(f);
-}
+extern int start_page(vorb *f);
+// {
+//    if (!capture_pattern(f)) return error(f, VORBIS_missing_capture_pattern);
+//    return start_page_no_capturepattern(f);
+// }
 
-static int start_packet(vorb *f)
-{
-   while (f->next_seg == -1) {
-      if (!start_page(f)) return FALSE;
-      if (f->page_flag & PAGEFLAG_continued_packet)
-         return error(f, VORBIS_continued_packet_flag_invalid);
-   }
-   f->last_seg = FALSE;
-   f->valid_bits = 0;
-   f->packet_bytes = 0;
-   f->bytes_in_seg = 0;
-   // f->next_seg is now valid
-   return TRUE;
-}
+/// NOTE: moved to rust
+extern int start_packet(vorb *f);
+// {
+//    while (f->next_seg == -1) {
+//       if (!start_page(f)) return FALSE;
+//       if (f->page_flag & PAGEFLAG_continued_packet)
+//          return error(f, VORBIS_continued_packet_flag_invalid);
+//    }
+//    f->last_seg = FALSE;
+//    f->valid_bits = 0;
+//    f->packet_bytes = 0;
+//    f->bytes_in_seg = 0;
+//    // f->next_seg is now valid
+//    return TRUE;
+// }
 
 static int maybe_start_packet(vorb *f)
 {
