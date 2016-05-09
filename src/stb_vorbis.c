@@ -3293,7 +3293,7 @@ static int is_whole_packet_present(stb_vorbis *f, int end_page)
 }
 #endif // !STB_VORBIS_NO_PUSHDATA_API
 
-static int start_decoder(vorb *f)
+int start_decoder(vorb *f)
 {
    uint8 header[6], x,y;
    int len,i,j,k, max_submaps = 0;
@@ -3898,7 +3898,7 @@ void vorbis_deinit(stb_vorbis *p)
    #endif
 }
 
-static void vorbis_init(stb_vorbis *p, const stb_vorbis_alloc *z)
+void vorbis_init(stb_vorbis *p, const stb_vorbis_alloc *z)
 {
    memset(p, 0, sizeof(*p)); // NULL out all malloc'd pointers to start
    if (z) {
@@ -3944,7 +3944,7 @@ int stb_vorbis_get_error(stb_vorbis *f)
    return e;
 }
 
-static stb_vorbis * vorbis_alloc(stb_vorbis *f)
+stb_vorbis * vorbis_alloc(stb_vorbis *f)
 {
    stb_vorbis *p = (stb_vorbis *) setup_malloc(f, sizeof(*p));
    return p;
@@ -4653,28 +4653,9 @@ int stb_vorbis_get_frame_float(stb_vorbis *f, int *channels, float ***output)
 
 #ifndef STB_VORBIS_NO_STDIO
 
-stb_vorbis * stb_vorbis_open_file_section(FILE *file, int close_on_free, int *error, const stb_vorbis_alloc *alloc, unsigned int length)
-{
-   stb_vorbis *f, p;
-   vorbis_init(&p, alloc);
-   p.f = file;
-   p.f_start = (uint32) ftell(file);
-   p.stream_len   = length;
-   p.close_on_free = close_on_free;
-   if (start_decoder(&p)) {
-      f = vorbis_alloc(&p);
-      if (f) {
-         *f = p;
-         vorbis_pump_first_frame(f);
-         return f;
-      }
-   }
-   if (error) *error = p.error;
-   vorbis_deinit(&p);
-   return NULL;
-}
 
 /// NOTE: moved to rust
+extern stb_vorbis * stb_vorbis_open_file_section(FILE *file, int close_on_free, int *error, const stb_vorbis_alloc *alloc, unsigned int length);
 extern stb_vorbis * stb_vorbis_open_file(FILE *file, int close_on_free, int *error, const stb_vorbis_alloc *alloc);
 extern stb_vorbis * stb_vorbis_open_filename(const char *filename, int *error, const stb_vorbis_alloc *alloc);
 

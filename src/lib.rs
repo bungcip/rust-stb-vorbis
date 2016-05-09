@@ -896,6 +896,35 @@ pub unsafe extern fn stb_vorbis_close(p: *mut stb_vorbis)
 }
 
 #[no_mangle]
+pub unsafe extern fn stb_vorbis_open_file_section(file: *mut libc::FILE, close_on_free: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc, length: c_uint) -> *mut stb_vorbis
+{
+    let mut p : stb_vorbis = std::mem::zeroed();
+    
+    vorbis_init(&mut p, alloc);
+   p.f = file;
+   p.f_start = ftell(file) as u32;
+   p.stream_len   = length;
+   p.close_on_free = close_on_free;
+    
+   if start_decoder(&mut p) != 0 {
+      let mut f = vorbis_alloc(&mut p);
+      if f.is_null() == false {
+         *f = p;
+         vorbis_pump_first_frame(f);
+         return f;
+      }
+   }
+   
+   if error.is_null() == false {
+       *error = p.error;
+   } 
+   vorbis_deinit(&mut p);
+   
+   return std::ptr::null_mut();
+}
+
+
+#[no_mangle]
 pub unsafe extern fn stb_vorbis_open_file(file: *mut FILE,  close_on_free: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
 {
     let start = libc::ftell(file);
@@ -936,10 +965,13 @@ extern {
     pub fn start_page_no_capturepattern(f: *mut vorb) -> c_int;
 
     pub fn vorbis_deinit(f: *mut stb_vorbis);
+    pub fn vorbis_init(f: *mut stb_vorbis, z: *const stb_vorbis_alloc);
+    pub fn vorbis_alloc(f: *mut stb_vorbis) -> *mut stb_vorbis;
+
+    pub fn start_decoder(f: *mut vorb) -> c_int;
 
     /// Real API
 
-    pub fn stb_vorbis_open_file_section(file: *mut FILE, close_on_free: c_int, error: *const c_int, alloc: *const stb_vorbis_alloc, length: c_uint) -> *mut stb_vorbis;    
     pub fn stb_vorbis_decode_filename(
         filename: *const i8, 
         channels: *mut c_int, 
