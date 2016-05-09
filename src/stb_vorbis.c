@@ -1325,27 +1325,9 @@ int start_page_no_capturepattern(vorb *f)
    return TRUE;
 }
 
-extern int start_page(vorb *f);
-// {
-//    if (!capture_pattern(f)) return error(f, VORBIS_missing_capture_pattern);
-//    return start_page_no_capturepattern(f);
-// }
-
 /// NOTE: moved to rust
+extern int start_page(vorb *f);
 extern int start_packet(vorb *f);
-// {
-//    while (f->next_seg == -1) {
-//       if (!start_page(f)) return FALSE;
-//       if (f->page_flag & PAGEFLAG_continued_packet)
-//          return error(f, VORBIS_continued_packet_flag_invalid);
-//    }
-//    f->last_seg = FALSE;
-//    f->valid_bits = 0;
-//    f->packet_bytes = 0;
-//    f->bytes_in_seg = 0;
-//    // f->next_seg is now valid
-//    return TRUE;
-// }
 
 static int maybe_start_packet(vorb *f)
 {
@@ -4789,17 +4771,8 @@ stb_vorbis * stb_vorbis_open_file_section(FILE *file, int close_on_free, int *er
    return NULL;
 }
 
-stb_vorbis * stb_vorbis_open_file(FILE *file, int close_on_free, int *error, const stb_vorbis_alloc *alloc)
-{
-   unsigned int len, start;
-   start = (unsigned int) ftell(file);
-   fseek(file, 0, SEEK_END);
-   len = (unsigned int) (ftell(file) - start);
-   fseek(file, start, SEEK_SET);
-   return stb_vorbis_open_file_section(file, close_on_free, error, alloc, len);
-}
-
 /// NOTE: moved to rust
+extern stb_vorbis * stb_vorbis_open_file(FILE *file, int close_on_free, int *error, const stb_vorbis_alloc *alloc);
 extern stb_vorbis * stb_vorbis_open_filename(const char *filename, int *error, const stb_vorbis_alloc *alloc);
 
 #endif // STB_VORBIS_NO_STDIO

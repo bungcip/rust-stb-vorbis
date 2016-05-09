@@ -761,6 +761,19 @@ pub unsafe extern fn vorbis_pump_first_frame(f: *mut stb_vorbis)
 }
 
 #[no_mangle]
+pub unsafe extern fn stb_vorbis_open_file(file: *mut FILE,  close_on_free: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
+{
+    let start = libc::ftell(file);
+    libc::fseek(file, 0, libc::SEEK_END);
+    
+    let len = libc::ftell(file) - start;
+    libc::fseek(file, start, libc::SEEK_SET);
+    
+    return stb_vorbis_open_file_section(file, close_on_free, error, alloc, len as c_uint);
+}
+
+
+#[no_mangle]
 pub unsafe extern fn stb_vorbis_open_filename(filename: *const i8, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
 {
    let  mode: &'static [u8; 3] = b"rb\0";
@@ -788,13 +801,8 @@ extern {
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn start_page_no_capturepattern(f: *mut vorb) -> c_int;
-    
-    pub fn stb_vorbis_open_file(
-        file: *mut FILE, 
-        close_on_free: c_int, 
-        error: *mut c_int, 
-        alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis;
-    
+
+    pub fn stb_vorbis_open_file_section(file: *mut FILE, close_on_free: c_int, error: *const c_int, alloc: *const stb_vorbis_alloc, length: c_uint) -> *mut stb_vorbis;    
     pub fn stb_vorbis_decode_filename(
         filename: *const i8, 
         channels: *mut c_int, 
