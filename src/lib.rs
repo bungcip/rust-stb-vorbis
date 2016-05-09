@@ -885,6 +885,33 @@ pub unsafe extern fn maybe_start_packet(f: &mut vorb) -> c_int
    return start_packet(f);
 }
 
+#[no_mangle]
+pub unsafe extern fn next_segment(f: &mut vorb) -> c_int
+{
+    use STBVorbisError::VORBIS_continued_packet_flag_invalid;
+//    int len;
+   if f.last_seg != 0 {return 0;}
+   if f.next_seg == -1 {
+      f.last_seg_which = f.segment_count-1; // in case start_page fails
+      if start_page(f) == 0 { f.last_seg = 1; return 0; }
+      if (f.page_flag & PAGEFLAG_continued_packet as u8) == 0 {return error(f, VORBIS_continued_packet_flag_invalid as c_int); }
+   }
+   
+   let len = f.segments[f.next_seg as usize];
+   f.next_seg += 1;
+   
+   if len < 255 {
+      f.last_seg = 1; // true
+      f.last_seg_which = f.next_seg-1;
+   }
+   if f.next_seg >= f.segment_count{
+      f.next_seg = -1;
+   }
+   assert!(f.bytes_in_seg == 0);
+   f.bytes_in_seg = len;
+   return len as i32;
+}
+
 
 
 #[no_mangle]
@@ -989,7 +1016,7 @@ pub unsafe extern fn stb_vorbis_open_filename(filename: *const i8, error: *mut c
 
 // Below is function that still live in C code
 extern {    
-    pub fn next_segment(f: *mut vorb) -> c_int;
+    // pub fn next_segment(f: *mut vorb) -> c_int;
     
     pub fn vorbis_finish_frame(f: *mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int;
     
