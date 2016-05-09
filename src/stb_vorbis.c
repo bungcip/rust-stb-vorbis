@@ -3842,7 +3842,7 @@ static int start_decoder(vorb *f)
    return TRUE;
 }
 
-static void vorbis_deinit(stb_vorbis *p)
+void vorbis_deinit(stb_vorbis *p)
 {
    int i,j;
    if (p->residue_config) {
@@ -3896,13 +3896,6 @@ static void vorbis_deinit(stb_vorbis *p)
    #ifndef STB_VORBIS_NO_STDIO
    if (p->close_on_free) fclose(p->f);
    #endif
-}
-
-void stb_vorbis_close(stb_vorbis *p)
-{
-   if (p == NULL) return;
-   vorbis_deinit(p);
-   setup_free(p,p);
 }
 
 static void vorbis_init(stb_vorbis *p, const stb_vorbis_alloc *z)

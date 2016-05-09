@@ -885,6 +885,17 @@ pub unsafe extern fn vorbis_pump_first_frame(f: *mut stb_vorbis)
 }
 
 #[no_mangle]
+pub unsafe extern fn stb_vorbis_close(p: *mut stb_vorbis)
+{
+   if p.is_null(){
+       return;
+   }
+   
+   vorbis_deinit(p);
+   setup_free(std::mem::transmute(p),p as *mut c_void);
+}
+
+#[no_mangle]
 pub unsafe extern fn stb_vorbis_open_file(file: *mut FILE,  close_on_free: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
 {
     let start = libc::ftell(file);
@@ -923,6 +934,10 @@ extern {
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn start_page_no_capturepattern(f: *mut vorb) -> c_int;
+
+    pub fn vorbis_deinit(f: *mut stb_vorbis);
+
+    /// Real API
 
     pub fn stb_vorbis_open_file_section(file: *mut FILE, close_on_free: c_int, error: *const c_int, alloc: *const stb_vorbis_alloc, length: c_uint) -> *mut stb_vorbis;    
     pub fn stb_vorbis_decode_filename(
