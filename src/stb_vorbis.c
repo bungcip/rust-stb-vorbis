@@ -4803,14 +4803,9 @@ stb_vorbis * stb_vorbis_open_file(FILE *file, int close_on_free, int *error, con
    return stb_vorbis_open_file_section(file, close_on_free, error, alloc, len);
 }
 
-stb_vorbis * stb_vorbis_open_filename(const char *filename, int *error, const stb_vorbis_alloc *alloc)
-{
-   FILE *f = fopen(filename, "rb");
-   if (f) 
-      return stb_vorbis_open_file(f, TRUE, error, alloc);
-   if (error) *error = VORBIS_file_open_failure;
-   return NULL;
-}
+/// NOTE: moved to rust
+extern stb_vorbis * stb_vorbis_open_filename(const char *filename, int *error, const stb_vorbis_alloc *alloc);
+
 #endif // STB_VORBIS_NO_STDIO
 
 stb_vorbis * stb_vorbis_open_memory(const unsigned char *data, int len, int *error, const stb_vorbis_alloc *alloc)

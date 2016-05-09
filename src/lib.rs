@@ -714,6 +714,21 @@ pub unsafe extern fn vorbis_pump_first_frame(f: *mut stb_vorbis)
     }
 }
 
+#[no_mangle]
+pub unsafe extern fn stb_vorbis_open_filename(filename: *const i8, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
+{
+   let  mode: &'static [u8; 3] = b"rb\0";
+   let f = libc::fopen(filename, mode.as_ptr() as *const i8);
+   if f.is_null() == false {
+      return stb_vorbis_open_file(f, 1, error, alloc);
+   } 
+   
+   if error.is_null() == false {
+     *error = STBVorbisError::VORBIS_file_open_failure as i32;  
+   } 
+   return std::ptr::null_mut();
+}
+
 
 // Below is function that still live in C code
 extern {
@@ -725,6 +740,12 @@ extern {
     
     pub fn vorbis_decode_initial(f: *mut vorb, p_left_start: *mut c_int, p_left_end: *mut c_int, p_right_start: *mut c_int, p_right_end: *mut c_int, mode: *mut c_int) -> c_int;
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
+    
+    pub fn stb_vorbis_open_file(
+        file: *mut FILE, 
+        close_on_free: c_int, 
+        error: *mut c_int, 
+        alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis;
     
     pub fn stb_vorbis_decode_filename(
         filename: *const i8, 
