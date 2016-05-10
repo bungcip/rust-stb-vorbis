@@ -1263,6 +1263,26 @@ pub unsafe extern fn vorbis_finish_frame(f: &mut stb_vorbis, len: c_int, left: c
    return right - left;
 }
 
+#[no_mangle]
+pub unsafe extern fn stb_vorbis_get_frame_short_interleaved(f: &mut stb_vorbis, num_c: c_int, buffer: *mut i16, num_shorts: i32) -> c_int
+{
+   let mut output: *mut *mut f32 = std::ptr::null_mut();
+   let mut buffer = buffer;
+   
+   if num_c == 1 {
+       return stb_vorbis_get_frame_short(f, num_c, &mut buffer, num_shorts);
+   }
+   let mut len = stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut output);
+   if len != 0 {
+      if len*num_c > num_shorts {
+        len = num_shorts / num_c;  
+      } 
+      convert_channels_short_interleaved(num_c, buffer, f.channels, output, 0, len);
+   }
+   return len;
+}
+
+
 
 // Below is function that still live in C code
 extern {
@@ -1279,7 +1299,11 @@ extern {
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
 
+    pub fn convert_channels_short_interleaved(buf_c: c_int, buffer: *mut i16, data_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
+
     /// Real API
+    pub fn stb_vorbis_get_frame_short(f: *mut vorb, num_c: c_int, buffer: *mut *mut i16, num_samples: c_int) -> c_int;
+    pub fn stb_vorbis_get_frame_float(f: *mut vorb, channels: *mut c_int, output: *mut *mut *mut f32) -> c_int;
 
     pub fn stb_vorbis_decode_filename(
         filename: *const i8, 
