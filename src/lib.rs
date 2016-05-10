@@ -171,6 +171,7 @@ pub struct Mapping
 
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Mode
 {
    blockflag: u8,
@@ -697,6 +698,12 @@ macro_rules! USE_MEMORY {
     }
 }
 
+macro_rules! IS_PUSH_MODE {
+    ($f: expr) => {
+        $f.push_mode != 0
+    }
+}
+
 #[no_mangle]
 pub unsafe extern fn get8(z: &mut vorb) -> u8
 {
@@ -931,7 +938,7 @@ pub unsafe extern fn next_segment(f: &mut vorb) -> c_int
 
 
 #[no_mangle]
-pub unsafe extern fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int
+pub unsafe extern fn vorbis_decode_packet(f: &mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int
 {
     let mut mode : c_int = 0;
     let mut left_end: c_int = 0;
@@ -941,7 +948,6 @@ pub unsafe extern fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left:
         return 0;
     }
     
-    let f : &mut vorb = std::mem::transmute(f);
     return vorbis_decode_packet_rest(
         f, len, &mut f.mode_config[mode as usize], 
         *p_left, left_end, *p_right, right_end, p_left
@@ -950,7 +956,7 @@ pub unsafe extern fn vorbis_decode_packet(f: *mut vorb, len: &mut c_int, p_left:
 
 
 #[no_mangle]
-pub unsafe extern fn vorbis_pump_first_frame(f: *mut stb_vorbis)
+pub unsafe extern fn vorbis_pump_first_frame(f: &mut stb_vorbis)
 {
     let mut len: c_int = 0;
     let mut right: c_int = 0;
@@ -987,7 +993,7 @@ pub unsafe extern fn stb_vorbis_open_file_section(file: *mut libc::FILE, close_o
       let mut f = vorbis_alloc(&mut p);
       if f.is_null() == false {
          *f = p;
-         vorbis_pump_first_frame(f);
+         vorbis_pump_first_frame(std::mem::transmute(f));
          return f;
       }
    }
@@ -1030,15 +1036,104 @@ pub unsafe extern fn stb_vorbis_open_filename(filename: *const i8, error: *mut c
 }
 
 
+// The meaning of "left" and "right"
+//
+// For a given frame:
+//     we compute samples from 0..n
+//     window_center is n/2
+//     we'll window and mix the samples from left_start to left_end with data from the previous frame
+//     all of the samples from left_end to right_start can be output without mixing; however,
+//        this interval is 0-length except when transitioning between short and long frames
+//     all of the samples from right_start to right_end need to be mixed with the next frame,
+//        which we don't have, so those get saved in a buffer
+//     frame N's right_end-right_start, the number of samples to mix with the next frame,
+//        has to be the same as frame N+1's left_end-left_start (which they are by
+//        construction)
+
+#[no_mangle]
+pub unsafe extern fn vorbis_decode_initial(f: &mut vorb, p_left_start: *mut c_int, p_left_end: *mut c_int, p_right_start: *mut c_int, p_right_end: *mut c_int, mode: *mut c_int) -> c_int
+{
+   f.channel_buffer_start = 0;
+   f.channel_buffer_end = 0;
+
+   loop {
+        if f.eof != 0 {return 0;} // false
+        if maybe_start_packet(f) == 0 {
+            return 0; // false
+        }
+        // check packet type
+        if get_bits(f,1) != 0 {
+            if IS_PUSH_MODE!(f) {
+                return error(f, STBVorbisError::VORBIS_bad_packet_type as c_int);
+            }
+            while EOP != get8_packet(f){}
+            continue;
+        }
+        
+       break;
+   }
+
+   if f.alloc.alloc_buffer.is_null() == false {
+      assert!(f.alloc.alloc_buffer_length_in_bytes == f.temp_offset);
+   }
+
+   let x = ilog(f.mode_count-1);
+   let i : c_int = get_bits(f, x) as c_int;
+   if i == EOP {return 0;} // false
+   if i >= f.mode_count {return 0;} // false
+   
+   *mode = i;
+
+   // NOTE: hack to forget borrow
+   let &mut m = {
+       let _borrow = &mut f.mode_config[i as usize];
+       let _borrow = _borrow as *mut _;
+       let _borrow : &mut Mode = std::mem::transmute(_borrow);
+       _borrow
+   };
+   let n : c_int;
+   let prev: c_int;
+   let next: c_int;
+   
+   if m.blockflag != 0 {
+      n = f.blocksize_1;
+      prev = get_bits(f,1) as c_int;
+      next = get_bits(f,1) as c_int;
+   } else {
+      prev = 0;
+      next = 0;
+      n = f.blocksize_0;
+   }
+
+// WINDOWING
+
+   let window_center = n >> 1;
+   if m.blockflag != 0 && prev == 0 {
+      *p_left_start = (n - f.blocksize_0) >> 2;
+      *p_left_end   = (n + f.blocksize_0) >> 2;
+   } else {
+      *p_left_start = 0;
+      *p_left_end   = window_center;
+   }
+   if m.blockflag != 0 && next == 0 {
+      *p_right_start = (n*3 - f.blocksize_0) >> 2;
+      *p_right_end   = (n*3 + f.blocksize_0) >> 2;
+   } else {
+      *p_right_start = window_center;
+      *p_right_end   = n;
+   }
+
+   return 1; // true
+}
+
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
         
-    // pub fn next_segment(f: *mut vorb) -> c_int;
-    
     pub fn vorbis_finish_frame(f: *mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int;
     
-    pub fn vorbis_decode_initial(f: *mut vorb, p_left_start: *mut c_int, p_left_end: *mut c_int, p_right_start: *mut c_int, p_right_end: *mut c_int, mode: *mut c_int) -> c_int;
+    // pub fn vorbis_decode_initial(f: *mut vorb, p_left_start: *mut c_int, p_left_end: *mut c_int, p_right_start: *mut c_int, p_right_end: *mut c_int, mode: *mut c_int) -> c_int;
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn start_page_no_capturepattern(f: *mut vorb) -> c_int;
