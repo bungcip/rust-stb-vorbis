@@ -2771,20 +2771,6 @@ static int do_floor(vorb *f, Mapping *map, int i, int n, float *target, YTYPE *f
    return TRUE;
 }
 
-// The meaning of "left" and "right"
-//
-// For a given frame:
-//     we compute samples from 0..n
-//     window_center is n/2
-//     we'll window and mix the samples from left_start to left_end with data from the previous frame
-//     all of the samples from left_end to right_start can be output without mixing; however,
-//        this interval is 0-length except when transitioning between short and long frames
-//     all of the samples from right_start to right_end need to be mixed with the next frame,
-//        which we don't have, so those get saved in a buffer
-//     frame N's right_end-right_start, the number of samples to mix with the next frame,
-//        has to be the same as frame N+1's left_end-left_start (which they are by
-//        construction)
-
 extern int vorbis_decode_initial(vorb *f, int *p_left_start, int *p_left_end, int *p_right_start, int *p_right_end, int *mode);
 
 int vorbis_decode_packet_rest(vorb *f, int *len, Mode *m, int left_start, int left_end, int right_start, int right_end, int *p_left)
@@ -3056,61 +3042,8 @@ int vorbis_decode_packet_rest(vorb *f, int *len, Mode *m, int left_start, int le
 }
 
 /// NOTE: moved to rust
-int vorbis_decode_packet(vorb *f, int *len, int *p_left, int *p_right);
-
-int vorbis_finish_frame(stb_vorbis *f, int len, int left, int right)
-{
-   int prev,i,j;
-   // we use right&left (the start of the right- and left-window sin()-regions)
-   // to determine how much to return, rather than inferring from the rules
-   // (same result, clearer code); 'left' indicates where our sin() window
-   // starts, therefore where the previous window's right edge starts, and
-   // therefore where to start mixing from the previous buffer. 'right'
-   // indicates where our sin() ending-window starts, therefore that's where
-   // we start saving, and where our returned-data ends.
-
-   // mixin from previous window
-   if (f->previous_length) {
-      int i,j, n = f->previous_length;
-      float *w = get_window(f, n);
-      for (i=0; i < f->channels; ++i) {
-         for (j=0; j < n; ++j)
-            f->channel_buffers[i][left+j] =
-               f->channel_buffers[i][left+j]*w[    j] +
-               f->previous_window[i][     j]*w[n-1-j];
-      }
-   }
-
-   prev = f->previous_length;
-
-   // last half of this data becomes previous window
-   f->previous_length = len - right;
-
-   // @OPTIMIZE: could avoid this copy by double-buffering the
-   // output (flipping previous_window with channel_buffers), but
-   // then previous_window would have to be 2x as large, and
-   // channel_buffers couldn't be temp mem (although they're NOT
-   // currently temp mem, they could be (unless we want to level
-   // performance by spreading out the computation))
-   for (i=0; i < f->channels; ++i)
-      for (j=0; right+j < len; ++j)
-         f->previous_window[i][j] = f->channel_buffers[i][right+j];
-
-   if (!prev)
-      // there was no previous packet, so this data isn't valid...
-      // this isn't entirely true, only the would-have-overlapped data
-      // isn't valid, but this seems to be what the spec requires
-      return 0;
-
-   // truncate a short frame
-   if (len < right) right = len;
-
-   f->samples_output += right-left;
-
-   return right - left;
-}
-
-/// NOTE: moved to rust
+extern int vorbis_decode_packet(vorb *f, int *len, int *p_left, int *p_right);
+extern int vorbis_finish_frame(stb_vorbis *f, int len, int left, int right);
 extern void vorbis_pump_first_frame(stb_vorbis *f);
 
 #ifndef STB_VORBIS_NO_PUSHDATA_API

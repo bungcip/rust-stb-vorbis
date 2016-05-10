@@ -1126,14 +1126,74 @@ pub unsafe extern fn vorbis_decode_initial(f: &mut vorb, p_left_start: *mut c_in
    return 1; // true
 }
 
+#[no_mangle]
+pub unsafe extern fn vorbis_finish_frame(f: &mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int
+{
+//    int prev,i,j;
+   // we use right&left (the start of the right- and left-window sin()-regions)
+   // to determine how much to return, rather than inferring from the rules
+   // (same result, clearer code); 'left' indicates where our sin() window
+   // starts, therefore where the previous window's right edge starts, and
+   // therefore where to start mixing from the previous buffer. 'right'
+   // indicates where our sin() ending-window starts, therefore that's where
+   // we start saving, and where our returned-data ends.
+
+   // mixin from previous window
+   if f.previous_length != 0 {
+    //   int i,j, 
+      let n = f.previous_length;
+      let w = get_window(f, n);
+      for i in 0 .. f.channels {
+         let i = i as usize;
+         for j in 0 .. n {
+            *f.channel_buffers[i].offset( (left + j) as isize ) =
+               *f.channel_buffers[i].offset((left + j) as isize) * *w.offset(    j as isize) +
+               *f.previous_window[i].offset(        j  as isize) * *w.offset(n as isize - 1 - (j as isize));
+         }
+      }
+   }
+
+   let prev = f.previous_length;
+
+   // last half of this data becomes previous window
+   f.previous_length = len - right;
+
+   // @OPTIMIZE: could avoid this copy by double-buffering the
+   // output (flipping previous_window with channel_buffers), but
+   // then previous_window would have to be 2x as large, and
+   // channel_buffers couldn't be temp mem (although they're NOT
+   // currently temp mem, they could be (unless we want to level
+   // performance by spreading out the computation))
+   for i in 0 .. f.channels {
+       let i = i as usize;
+      let mut j = 0;
+      while right + j < len {
+         *f.previous_window[i].offset(j as isize) = *f.channel_buffers[i].offset( (right+j) as isize);
+          j += 1;
+      }           
+   }
+
+   if prev == 0 {
+      // there was no previous packet, so this data isn't valid...
+      // this isn't entirely true, only the would-have-overlapped data
+      // isn't valid, but this seems to be what the spec requires
+      return 0;
+   }
+
+   // truncate a short frame
+   let right = if len < right { len } else { right };
+
+   f.samples_output += (right-left) as u32;
+
+   return right - left;
+}
+
 
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
         
-    pub fn vorbis_finish_frame(f: *mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int;
     
-    // pub fn vorbis_decode_initial(f: *mut vorb, p_left_start: *mut c_int, p_left_end: *mut c_int, p_right_start: *mut c_int, p_right_end: *mut c_int, mode: *mut c_int) -> c_int;
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn start_page_no_capturepattern(f: *mut vorb) -> c_int;
