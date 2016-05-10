@@ -545,6 +545,81 @@ pub unsafe extern fn add_entry(c: &Codebook, huff_code: u32, symbol: c_int, coun
 }
 
 
+#[no_mangle]
+pub unsafe extern fn compute_codewords(c: &mut Codebook, len: *mut u8, n: c_int, values: *mut u32) -> c_int
+{
+   let mut m=0;
+   let mut available: [u32; 32] = std::mem::zeroed();
+
+//    memset(available, 0, sizeof(available));
+   // find the first entry
+   let mut k = 0;
+   while k < n {
+       if (*len.offset(k as isize) as c_int) < NO_CODE {
+           break;
+       }
+       k += 1;
+   }
+   
+   if k == n { assert!(c.sorted_entries == 0); return 1; } // true
+   
+   // add to the list
+   add_entry(c, 0, k, m, *len.offset(k as isize) as i32, values);
+   m += 1;
+   
+   // add all available leaves
+   let mut i = 1;
+   while i <= *len.offset(k as isize) {
+      available[i as usize] = 1u32 << (32-i);
+      i += 1;
+   }
+   
+   // note that the above code treats the first case specially,
+   // but it's really the same as the following code, so they
+   // could probably be combined (except the initial code is 0,
+   // and I use 0 in available[] to mean 'empty')
+   for i in k+1 .. n {
+      let res : u32;
+      let mut z = *len.offset(i as isize);
+      if z as c_int == NO_CODE {
+          continue;
+      }
+      // find lowest available leaf (should always be earliest,
+      // which is what the specification calls for)
+      // note that this property, and the fact we can never have
+      // more than one free leaf at a given level, isn't totally
+      // trivial to prove, but it seems true and the assert never
+      // fires, so!
+      while z > 0 && available[z as usize]  == 0{
+          z -= 1;
+      }
+      if z == 0 { return 0; } // false
+      res = available[z as usize];
+    //   assert!(z >= 0 && z < 32);
+      assert!(z < 32); // NOTE(z is u8 so negative is impossible)
+      available[z as usize] = 0;
+      add_entry(c, bit_reverse(res), i, m, *len.offset(i as isize) as i32, values);
+      m += 1;
+      
+      // propogate availability up the tree
+      if z != *len.offset(i as isize) {
+        //  assert!(*len.offset(i as isize) >= 0 && *len.offset(i as isize) < 32);
+         assert!(*len.offset(i as isize) < 32); // NOTE (len[x] is already unsigned)
+         
+         let mut y = *len.offset(i as isize);
+         while y > z {
+            assert!(available[y as usize] == 0);
+            available[y as usize] = res + (1 << (32-y));
+             
+             y -= 1;
+         }         
+      }
+   }
+   
+   return 1; // true
+}
+
+
 // this is a weird definition of log2() for which log2(1) = 1, log2(2) = 2, log2(4) = 3
 // as required by the specification. fast(?) implementation from stb.h
 // @OPTIMIZE: called multiple times per-packet with "constants"; move to setup

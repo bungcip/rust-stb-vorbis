@@ -939,52 +939,51 @@ extern int ilog(int32 n);
 /// NOTE: moved to Rust
 extern float float32_unpack(uint32 x);
 extern void add_entry(Codebook *c, uint32 huff_code, int symbol, int count, int len, uint32 *values);
+extern int compute_codewords(Codebook *c, uint8 *len, int n, uint32 *values);
+// {
+//    int i,k,m=0;
+//    uint32 available[32];
 
-static int compute_codewords(Codebook *c, uint8 *len, int n, uint32 *values)
-{
-   int i,k,m=0;
-   uint32 available[32];
-
-   memset(available, 0, sizeof(available));
-   // find the first entry
-   for (k=0; k < n; ++k) if (len[k] < NO_CODE) break;
-   if (k == n) { assert(c->sorted_entries == 0); return TRUE; }
-   // add to the list
-   add_entry(c, 0, k, m++, len[k], values);
-   // add all available leaves
-   for (i=1; i <= len[k]; ++i)
-      available[i] = 1U << (32-i);
-   // note that the above code treats the first case specially,
-   // but it's really the same as the following code, so they
-   // could probably be combined (except the initial code is 0,
-   // and I use 0 in available[] to mean 'empty')
-   for (i=k+1; i < n; ++i) {
-      uint32 res;
-      int z = len[i], y;
-      if (z == NO_CODE) continue;
-      // find lowest available leaf (should always be earliest,
-      // which is what the specification calls for)
-      // note that this property, and the fact we can never have
-      // more than one free leaf at a given level, isn't totally
-      // trivial to prove, but it seems true and the assert never
-      // fires, so!
-      while (z > 0 && !available[z]) --z;
-      if (z == 0) { return FALSE; }
-      res = available[z];
-      assert(z >= 0 && z < 32);
-      available[z] = 0;
-      add_entry(c, bit_reverse(res), i, m++, len[i], values);
-      // propogate availability up the tree
-      if (z != len[i]) {
-         assert(len[i] >= 0 && len[i] < 32);
-         for (y=len[i]; y > z; --y) {
-            assert(available[y] == 0);
-            available[y] = res + (1 << (32-y));
-         }
-      }
-   }
-   return TRUE;
-}
+//    memset(available, 0, sizeof(available));
+//    // find the first entry
+//    for (k=0; k < n; ++k) if (len[k] < NO_CODE) break;
+//    if (k == n) { assert(c->sorted_entries == 0); return TRUE; }
+//    // add to the list
+//    add_entry(c, 0, k, m++, len[k], values);
+//    // add all available leaves
+//    for (i=1; i <= len[k]; ++i)
+//       available[i] = 1U << (32-i);
+//    // note that the above code treats the first case specially,
+//    // but it's really the same as the following code, so they
+//    // could probably be combined (except the initial code is 0,
+//    // and I use 0 in available[] to mean 'empty')
+//    for (i=k+1; i < n; ++i) {
+//       uint32 res;
+//       int z = len[i], y;
+//       if (z == NO_CODE) continue;
+//       // find lowest available leaf (should always be earliest,
+//       // which is what the specification calls for)
+//       // note that this property, and the fact we can never have
+//       // more than one free leaf at a given level, isn't totally
+//       // trivial to prove, but it seems true and the assert never
+//       // fires, so!
+//       while (z > 0 && !available[z]) --z;
+//       if (z == 0) { return FALSE; }
+//       res = available[z];
+//       assert(z >= 0 && z < 32);
+//       available[z] = 0;
+//       add_entry(c, bit_reverse(res), i, m++, len[i], values);
+//       // propogate availability up the tree
+//       if (z != len[i]) {
+//          assert(len[i] >= 0 && len[i] < 32);
+//          for (y=len[i]; y > z; --y) {
+//             assert(available[y] == 0);
+//             available[y] = res + (1 << (32-y));
+//          }
+//       }
+//    }
+//    return TRUE;
+// }
 
 // accelerated huffman table allows fast O(1) match of all symbols
 // of length <= STB_VORBIS_FAST_HUFFMAN_LENGTH
