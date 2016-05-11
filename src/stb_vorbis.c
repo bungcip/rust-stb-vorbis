@@ -4233,7 +4233,7 @@ static int8 channel_position[7][6] =
    #define FASTDEF(x)
 #endif
 
-static void copy_samples(short *dest, float *src, int len)
+void copy_samples(short *dest, float *src, int len)
 {
    int i;
    check_endianness();
@@ -4246,7 +4246,7 @@ static void copy_samples(short *dest, float *src, int len)
    }
 }
 
-static void compute_samples(int mask, short *output, int num_c, float **data, int d_offset, int len)
+void compute_samples(int mask, short *output, int num_c, float **data, int d_offset, int len)
 {
    #define BUFFER_SIZE  32
    float buffer[BUFFER_SIZE];
@@ -4310,31 +4310,9 @@ static void compute_stereo_samples(short *output, int num_c, float **data, int d
    }
 }
 
-static void convert_samples_short(int buf_c, short **buffer, int b_offset, int data_c, float **data, int d_offset, int samples)
-{
-   int i;
-   if (buf_c != data_c && buf_c <= 2 && data_c <= 6) {
-      static int channel_selector[3][2] = { {0}, {PLAYBACK_MONO}, {PLAYBACK_LEFT, PLAYBACK_RIGHT} };
-      for (i=0; i < buf_c; ++i)
-         compute_samples(channel_selector[buf_c][i], buffer[i]+b_offset, data_c, data, d_offset, samples);
-   } else {
-      int limit = buf_c < data_c ? buf_c : data_c;
-      for (i=0; i < limit; ++i)
-         copy_samples(buffer[i]+b_offset, data[i]+d_offset, samples);
-      for (   ; i < buf_c; ++i)
-         memset(buffer[i]+b_offset, 0, sizeof(short) * samples);
-   }
-}
-
-int stb_vorbis_get_frame_short(stb_vorbis *f, int num_c, short **buffer, int num_samples)
-{
-   float **output;
-   int len = stb_vorbis_get_frame_float(f, NULL, &output);
-   if (len > num_samples) len = num_samples;
-   if (len)
-      convert_samples_short(num_c, buffer, 0, f->channels, output, 0, len);
-   return len;
-}
+/// Note: moved to rust
+extern void convert_samples_short(int buf_c, short **buffer, int b_offset, int data_c, float **data, int d_offset, int samples);
+extern int stb_vorbis_get_frame_short(stb_vorbis *f, int num_c, short **buffer, int num_samples);
 
 void convert_channels_short_interleaved(int buf_c, short *buffer, int data_c, float **data, int d_offset, int len)
 {

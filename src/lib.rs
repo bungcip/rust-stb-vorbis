@@ -1370,11 +1370,67 @@ pub unsafe extern fn stb_vorbis_get_frame_float(f: &mut stb_vorbis, channels: *m
    return len;
 }
 
+#[no_mangle]
+pub unsafe extern fn stb_vorbis_get_frame_short(f: &mut vorb, num_c: c_int, buffer: *mut *mut i16, num_samples: c_int) -> c_int
+{
+    let mut output: *mut *mut f32 = std::ptr::null_mut();
+   let mut len = stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut output);
+   if len > num_samples{
+     len = num_samples;
+   }
+   
+    if len != 0 {
+      convert_samples_short(num_c, buffer, 0, f.channels, output, 0, len);
+    }
+   return len;
+}
+
+
+const PLAYBACK_MONO  : c_int =   1;
+const PLAYBACK_LEFT  : c_int =   2;
+const PLAYBACK_RIGHT : c_int =   4;
+
+
+#[no_mangle]
+pub unsafe extern fn convert_samples_short(buf_c: c_int, buffer: *mut *mut i16, b_offset: c_int, data_c: c_int, data: *mut *mut f32, d_offset: c_int, samples: c_int)
+{
+//    int i;
+   if buf_c != data_c && buf_c <= 2 && data_c <= 6 {
+    //   static int channel_selector[3][2] = { {0}, {PLAYBACK_MONO}, {PLAYBACK_LEFT, PLAYBACK_RIGHT} };
+      
+      static channel_selector: [[c_int; 2]; 3] = [
+          [0, 0],
+          [PLAYBACK_MONO, PLAYBACK_MONO],
+          [PLAYBACK_LEFT, PLAYBACK_RIGHT]
+      ];
+      
+      for i in 0 .. buf_c {
+         compute_samples(channel_selector[buf_c as usize][i as usize], 
+            (*buffer.offset(i as isize)).offset(b_offset as isize), data_c, data, d_offset, samples as i32);
+      }
+   } else {
+      let limit = if buf_c < data_c { buf_c } else { data_c };
+      
+      let mut i = 0;
+      while i < limit {
+         copy_samples((*buffer.offset(i as isize)).offset(b_offset as isize),
+             (*data.offset(i as isize)).offset(d_offset as isize), samples);
+          i += 1;
+      }
+      
+      while i < buf_c {
+          std::ptr::write_bytes(
+              (*buffer.offset(i as isize)).offset(b_offset as isize), 0, samples as usize);
+          i += 1;
+      }
+   }
+}
+
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
-        
-    
+ 
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn start_page_no_capturepattern(f: *mut vorb) -> c_int;
@@ -1385,8 +1441,11 @@ extern {
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
 
-    pub fn convert_channels_short_interleaved(buf_c: c_int, buffer: *mut i16, data_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
+    pub fn copy_samples(dest: *mut i16, src: *mut f32, len: c_int);
+    pub fn compute_samples(mask: c_int, output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
 
-    /// Real API
-    pub fn stb_vorbis_get_frame_short(f: *mut vorb, num_c: c_int, buffer: *mut *mut i16, num_samples: c_int) -> c_int;
+    pub fn convert_channels_short_interleaved(buf_c: c_int, buffer: *mut i16, data_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
+    // pub fn convert_samples_short(uf_c: c_int, buffer: *mut *mut i16, b_offset: c_int, data_c: c_int, data: *mut *mut f32, d_offset: c_int, samples: c_int);
+
+    // Real API
 }
