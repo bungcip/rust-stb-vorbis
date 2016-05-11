@@ -1336,6 +1336,39 @@ pub unsafe extern fn stb_vorbis_decode_filename(filename: *const i8, channels: *
 }
 
 
+#[no_mangle]
+pub unsafe extern fn stb_vorbis_get_frame_float(f: &mut stb_vorbis, channels: *mut c_int, output: *mut *mut *mut f32) -> c_int
+{
+//    int len, right,left,i;
+   if IS_PUSH_MODE!(f){
+       return error(f, STBVorbisError::VORBIS_invalid_api_mixing as c_int);
+   } 
+
+    let mut len = 0;
+    let mut left = 0;
+    let mut right = 0;
+   if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == 0 {
+      f.channel_buffer_start = 0;
+      f.channel_buffer_end = 0;
+      return 0;
+   }
+
+   let len = vorbis_finish_frame(f, len, left, right);
+   for i in 0 .. f.channels {
+      f.outputs[i as usize] = f.channel_buffers[i as usize].offset(left as isize);
+   }
+
+   f.channel_buffer_start = left;
+   f.channel_buffer_end   = left+len;
+
+   if channels.is_null() == false {*channels = f.channels;}
+   if output.is_null() == false   {
+       let o = f.outputs.as_ptr();
+       let o = o as *mut *mut f32;
+       *output = o;
+    }
+   return len;
+}
 
 // Below is function that still live in C code
 extern {
@@ -1356,6 +1389,4 @@ extern {
 
     /// Real API
     pub fn stb_vorbis_get_frame_short(f: *mut vorb, num_c: c_int, buffer: *mut *mut i16, num_samples: c_int) -> c_int;
-    pub fn stb_vorbis_get_frame_float(f: *mut vorb, channels: *mut c_int, output: *mut *mut *mut f32) -> c_int;
-
 }
