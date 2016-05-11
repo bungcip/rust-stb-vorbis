@@ -1283,6 +1283,59 @@ pub unsafe extern fn stb_vorbis_get_frame_short_interleaved(f: &mut stb_vorbis, 
 }
 
 
+#[no_mangle]
+pub unsafe extern fn stb_vorbis_decode_filename(filename: *const i8, channels: *mut c_int, sample_rate: *mut c_int, output: *mut *mut i16) -> c_int
+{
+//    int data_len, offset, total, limit, error;
+//    short *data;
+   let mut error : c_int = 0;
+   let v: *mut stb_vorbis = stb_vorbis_open_filename(filename, &mut error, std::ptr::null_mut());
+   if v == std::ptr::null_mut(){
+       return -1;
+   }
+   
+   let v: &mut stb_vorbis = std::mem::transmute(v);
+    
+   let limit = v.channels * 4096;
+   *channels = v.channels;
+   if sample_rate.is_null() == false {
+      *sample_rate = v.sample_rate as i32;
+   }
+   
+   let mut offset = 0;
+   let mut data_len = 0;
+   let mut total = limit;
+   let mut data : *mut i16 = libc::malloc(total as usize * std::mem::size_of::<i16>()) as *mut i16;
+   if data == std::ptr::null_mut() {
+      stb_vorbis_close(v);
+      return -2;
+   }
+   
+   loop {
+       let ch = v.channels;
+      let  n = stb_vorbis_get_frame_short_interleaved(v, ch, data.offset(offset as isize), total-offset);
+      if n == 0{
+        break;  
+      } 
+      data_len += n;
+      offset += n * v.channels;
+      if offset + limit > total {
+         total *= 2;
+         let data2 = libc::realloc(data as *mut c_void, total as usize * std::mem::size_of::<i16>()) as *mut i16;
+         if data2 == std::ptr::null_mut() {
+            libc::free(data as *mut c_void);
+            stb_vorbis_close(v);
+            return -2;
+         }
+         data = data2;
+      }
+   }
+   *output = data;
+   stb_vorbis_close(v);
+   return data_len;
+}
+
+
 
 // Below is function that still live in C code
 extern {
@@ -1305,9 +1358,4 @@ extern {
     pub fn stb_vorbis_get_frame_short(f: *mut vorb, num_c: c_int, buffer: *mut *mut i16, num_samples: c_int) -> c_int;
     pub fn stb_vorbis_get_frame_float(f: *mut vorb, channels: *mut c_int, output: *mut *mut *mut f32) -> c_int;
 
-    pub fn stb_vorbis_decode_filename(
-        filename: *const i8, 
-        channels: *mut c_int, 
-        sample_rate: *mut c_int, 
-        output: *mut *mut i16) -> c_int;
 }
