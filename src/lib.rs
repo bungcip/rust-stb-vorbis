@@ -779,6 +779,22 @@ macro_rules! IS_PUSH_MODE {
     }
 }
 
+macro_rules! MAGIC {
+    ($SHIFT: expr) => { (1.5f32 * (1 << (23-$SHIFT)) as f32 + 0.5f32/(1 << $SHIFT) as f32) }
+}
+
+macro_rules! ADDEND {
+    ($SHIFT: expr) => { (((150-$SHIFT) << 23) + (1 << 22) ) }
+}
+
+macro_rules! FAST_SCALED_FLOAT_TO_INT {
+    ($x: expr, $s: expr) => {{
+        let temp : i32 = $crate::std::mem::transmute($x + MAGIC!($s));
+        temp - ADDEND!($s)        
+    }}
+}
+
+
 #[no_mangle]
 pub unsafe extern fn get8(z: &mut vorb) -> u8
 {
@@ -1427,24 +1443,6 @@ pub unsafe extern fn convert_samples_short(buf_c: c_int, buffer: *mut *mut i16, 
 }
 
 
-//    #define MAGIC(SHIFT) (1.5f * (1 << (23-SHIFT)) + 0.5f/(1 << SHIFT))
-//    #define ADDEND(SHIFT) (((150-SHIFT) << 23) + (1 << 22))
-//    #define FAST_SCALED_FLOAT_TO_INT(temp,x,s) (temp.f = (x) + MAGIC(s), temp.i - ADDEND(s))
-
-macro_rules! MAGIC {
-    ($SHIFT: expr) => { (1.5f32 * (1 << (23-$SHIFT)) as f32 + 0.5f32/(1 << $SHIFT) as f32) }
-}
-
-macro_rules! ADDEND {
-    ($SHIFT: expr) => { (((150-$SHIFT) << 23) + (1 << 22) ) }
-}
-
-macro_rules! FAST_SCALED_FLOAT_TO_INT {
-    ($x: expr, $s: expr) => {{
-        let temp : i32 = $crate::std::mem::transmute($x + MAGIC!($s));
-        temp - ADDEND!($s)        
-    }}
-}
 
 #[no_mangle]
 pub unsafe extern fn convert_channels_short_interleaved(buf_c: c_int, buffer: *mut i16, data_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int)
@@ -1483,6 +1481,18 @@ pub unsafe extern fn convert_channels_short_interleaved(buf_c: c_int, buffer: *m
    }
 }
 
+unsafe fn copy_samples(dest: *mut i16, src: *mut f32, len: c_int)
+{
+   for i in 0 .. len  {
+      let mut v : i32 = FAST_SCALED_FLOAT_TO_INT!(*src.offset(i as isize), 15);
+      if ((v + 32768) as c_uint) > 65535 {
+         v = if v < 0 { -32768 } else { 32767 };
+      }
+      *dest.offset(i as isize) = v as i16;
+   }
+}
+
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
@@ -1497,7 +1507,6 @@ extern {
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
 
-    pub fn copy_samples(dest: *mut i16, src: *mut f32, len: c_int);
     pub fn compute_samples(mask: c_int, output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
     pub fn compute_stereo_samples(output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
 
