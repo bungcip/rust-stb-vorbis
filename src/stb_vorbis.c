@@ -4271,7 +4271,7 @@ void compute_samples(int mask, short *output, int num_c, float **data, int d_off
    }
 }
 
-static void compute_stereo_samples(short *output, int num_c, float **data, int d_offset, int len)
+void compute_stereo_samples(short *output, int num_c, float **data, int d_offset, int len)
 {
    #define BUFFER_SIZE  32
    float buffer[BUFFER_SIZE];
@@ -4310,37 +4310,10 @@ static void compute_stereo_samples(short *output, int num_c, float **data, int d
    }
 }
 
-/// Note: moved to rust
+/// NOTE: moved to rust
 extern void convert_samples_short(int buf_c, short **buffer, int b_offset, int data_c, float **data, int d_offset, int samples);
 extern int stb_vorbis_get_frame_short(stb_vorbis *f, int num_c, short **buffer, int num_samples);
-
-void convert_channels_short_interleaved(int buf_c, short *buffer, int data_c, float **data, int d_offset, int len)
-{
-   int i;
-   check_endianness();
-   if (buf_c != data_c && buf_c <= 2 && data_c <= 6) {
-      assert(buf_c == 2);
-      for (i=0; i < buf_c; ++i)
-         compute_stereo_samples(buffer, data_c, data, d_offset, len);
-   } else {
-      int limit = buf_c < data_c ? buf_c : data_c;
-      int j;
-      for (j=0; j < len; ++j) {
-         for (i=0; i < limit; ++i) {
-            FASTDEF(temp);
-            float f = data[i][d_offset+j];
-            int v = FAST_SCALED_FLOAT_TO_INT(temp, f,15);//data[i][d_offset+j],15);
-            if ((unsigned int) (v + 32768) > 65535)
-               v = v < 0 ? -32768 : 32767;
-            *buffer++ = v;
-         }
-         for (   ; i < buf_c; ++i)
-            *buffer++ = 0;
-      }
-   }
-}
-
-/// NOTE: moved to rust
+extern void convert_channels_short_interleaved(int buf_c, short *buffer, int data_c, float **data, int d_offset, int len);
 extern int stb_vorbis_get_frame_short_interleaved(stb_vorbis *f, int num_c, short *buffer, int num_shorts);
 
 int stb_vorbis_get_samples_short_interleaved(stb_vorbis *f, int channels, short *buffer, int num_shorts)

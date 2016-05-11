@@ -19,11 +19,12 @@ def md5(fname):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
 
+oggs = ['stereo_short', 'mono', '048']
+
 # run stb_vorbis
 #print("run stb_vorbic C...")
-#subprocess.call(["vorvis-sample.exe", "1", "ogg/018.ogg", "c_output/[decode_filename]_018.out"])
-#subprocess.call(["vorvis-sample.exe", "1", "ogg/044.ogg", "c_output/[decode_filename]_044.out"])
-#subprocess.call(["vorvis-sample.exe", "1", "ogg/048.ogg", "c_output/[decode_filename]_048.out"])
+#for o in oggs:
+#    subprocess.call(["vorvis-sample.exe", "1", "ogg/{}.ogg".format(o), "c_output/[decode_filename]_{}.out".format(o)])
 
 # compile rust port
 print("compile stb_vorbis rust example...")
@@ -32,23 +33,8 @@ result = subprocess.call(["cargo", "build", "--example", "decode_filename"])
 if result != 0:
     sys.exit()
 
-# run binary
 
 executable = "../target/debug/examples/decode_filename.exe"
-oggs = ['018', '044', '048']
-
-try:
-    for o in oggs:
-        input = "ogg/{}.ogg".format(o)
-        output = "rust_output/[decode_filename]_{}.out".format(o)
-        return_value = subprocess.call([executable, input, output])
-        if return_value != 0:
-            print("stoped due to error...")
-            sys.exit()
-except:
-    print("error happened")
-    sys.exit()
-
 
 # test output file size
 # test output file hash
@@ -58,6 +44,17 @@ for i in oggs:
     filename = "[decode_filename]_{}.out".format(i)
     c_name = os.path.join('c_output', filename)
     rust_name = os.path.join('rust_output', filename)
+
+    try:
+        input = "ogg/{}.ogg".format(i)
+        return_value = subprocess.call([executable, input, rust_name])
+        if return_value != 0:
+            print("stoped due to error...")
+            sys.exit()
+    except:
+        print("error happened")
+        sys.exit()
+
 
     c_size = os.path.getsize(c_name)
     rust_size = os.path.getsize(rust_name)

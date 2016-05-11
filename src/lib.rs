@@ -1427,6 +1427,62 @@ pub unsafe extern fn convert_samples_short(buf_c: c_int, buffer: *mut *mut i16, 
 }
 
 
+//    #define MAGIC(SHIFT) (1.5f * (1 << (23-SHIFT)) + 0.5f/(1 << SHIFT))
+//    #define ADDEND(SHIFT) (((150-SHIFT) << 23) + (1 << 22))
+//    #define FAST_SCALED_FLOAT_TO_INT(temp,x,s) (temp.f = (x) + MAGIC(s), temp.i - ADDEND(s))
+
+macro_rules! MAGIC {
+    ($SHIFT: expr) => { (1.5f32 * (1 << (23-$SHIFT)) as f32 + 0.5f32/(1 << $SHIFT) as f32) }
+}
+
+macro_rules! ADDEND {
+    ($SHIFT: expr) => { (((150-$SHIFT) << 23) + (1 << 22) ) }
+}
+
+macro_rules! FAST_SCALED_FLOAT_TO_INT {
+    ($x: expr, $s: expr) => {{
+        let temp : i32 = $crate::std::mem::transmute($x + MAGIC!($s));
+        temp - ADDEND!($s)        
+    }}
+}
+
+#[no_mangle]
+pub unsafe extern fn convert_channels_short_interleaved(buf_c: c_int, buffer: *mut i16, data_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int)
+{
+   if buf_c != data_c && buf_c <= 2 && data_c <= 6 {
+       assert!(buf_c == 2);
+       for _ in 0 .. buf_c {
+         compute_stereo_samples(buffer, data_c, data, d_offset, len);     
+       }
+   } else {
+       let limit = if buf_c < data_c { buf_c } else { data_c };
+       let mut buffer = buffer;
+       for j in 0 .. len {
+           let mut i = 0;
+           while i < limit {
+               let f : f32 = *(*data.offset(i as isize)).offset( (d_offset+j) as isize );
+               let mut v : i32 = FAST_SCALED_FLOAT_TO_INT!(f, 15);
+               if ( (v + 32768) as c_uint) > 65535 {
+                   v = if v < 0 {  -32768 } else { 32767 };
+               }
+               
+               *buffer = v as i16;
+               buffer = buffer.offset(1);
+               
+               i += 1;
+           }
+           
+           while i < buf_c {
+               *buffer = 0;
+               buffer = buffer.offset(1);
+
+               i += 1;
+           }
+       }
+       
+   }
+}
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
@@ -1443,9 +1499,8 @@ extern {
 
     pub fn copy_samples(dest: *mut i16, src: *mut f32, len: c_int);
     pub fn compute_samples(mask: c_int, output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
+    pub fn compute_stereo_samples(output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
 
-    pub fn convert_channels_short_interleaved(buf_c: c_int, buffer: *mut i16, data_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
-    // pub fn convert_samples_short(uf_c: c_int, buffer: *mut *mut i16, b_offset: c_int, data_c: c_int, data: *mut *mut f32, d_offset: c_int, samples: c_int);
 
     // Real API
 }
