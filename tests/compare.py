@@ -19,7 +19,8 @@ def md5(fname):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
 
-oggs = ['stereo_short', 'mono', '048']
+# oggs = ['stereo_short', 'mono', '048']
+oggs = ['stereo_short', 'mono']
 
 # run stb_vorbis
 #print("run stb_vorbic C...")

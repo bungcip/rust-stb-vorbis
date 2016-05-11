@@ -1493,6 +1493,38 @@ unsafe fn copy_samples(dest: *mut i16, src: *mut f32, len: c_int)
 }
 
 
+#[no_mangle]
+pub unsafe extern fn init_blocksize(f: &mut vorb, b: c_int, n: c_int) -> c_int
+{
+    use STBVorbisError::*;
+    
+   let n2 = n >> 1;
+   let n4 = n >> 2;
+   let n8 = n >> 3;
+   
+   let b = b as usize;
+   f.A[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n2) as *mut f32;
+   f.B[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n2) as *mut f32;
+   f.C[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n4) as *mut f32;
+   
+   if f.A[b].is_null() || f.B[b].is_null() || f.C[b].is_null() {
+     return error(f, VORBIS_outofmem as c_int);  
+   } 
+   
+   compute_twiddle_factors(n, f.A[b], f.B[b], f.C[b]);
+   f.window[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n2) as *mut f32;
+   
+   if f.window[b].is_null() {return error(f, VORBIS_outofmem as c_int);}
+   compute_window(n, f.window[b]);
+
+   f.bit_reverse[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n8) as *mut u16;
+   if f.bit_reverse[b].is_null() { return error(f, VORBIS_outofmem as c_int); }
+   
+   compute_bitreverse(n, f.bit_reverse[b]);
+   return 1; // true
+}
+
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
@@ -1510,6 +1542,8 @@ extern {
     pub fn compute_samples(mask: c_int, output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
     pub fn compute_stereo_samples(output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
 
+    pub fn compute_window(n: c_int, window: *mut f32);
+    pub fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32);
 
     // Real API
 }

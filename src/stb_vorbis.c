@@ -1035,7 +1035,7 @@ extern int vorbis_validate(uint8 *data);
 extern int lookup1_values(int entries, int dim);
 
 // called twice per file
-static void compute_twiddle_factors(int n, float *A, float *B, float *C)
+void compute_twiddle_factors(int n, float *A, float *B, float *C)
 {
    int n4 = n >> 2, n8 = n >> 3;
    int k,k2;
@@ -1052,7 +1052,7 @@ static void compute_twiddle_factors(int n, float *A, float *B, float *C)
    }
 }
 
-static void compute_window(int n, float *window)
+void compute_window(int n, float *window)
 {
    int n2 = n >> 1, i;
    for (i=0; i < n2; ++i)
@@ -1062,22 +1062,22 @@ static void compute_window(int n, float *window)
 /// NOTE: moved to rust
 extern void compute_bitreverse(int n, uint16 *rev);
 
-static int init_blocksize(vorb *f, int b, int n)
-{
-   int n2 = n >> 1, n4 = n >> 2, n8 = n >> 3;
-   f->A[b] = (float *) setup_malloc(f, sizeof(float) * n2);
-   f->B[b] = (float *) setup_malloc(f, sizeof(float) * n2);
-   f->C[b] = (float *) setup_malloc(f, sizeof(float) * n4);
-   if (!f->A[b] || !f->B[b] || !f->C[b]) return error(f, VORBIS_outofmem);
-   compute_twiddle_factors(n, f->A[b], f->B[b], f->C[b]);
-   f->window[b] = (float *) setup_malloc(f, sizeof(float) * n2);
-   if (!f->window[b]) return error(f, VORBIS_outofmem);
-   compute_window(n, f->window[b]);
-   f->bit_reverse[b] = (uint16 *) setup_malloc(f, sizeof(uint16) * n8);
-   if (!f->bit_reverse[b]) return error(f, VORBIS_outofmem);
-   compute_bitreverse(n, f->bit_reverse[b]);
-   return TRUE;
-}
+extern int init_blocksize(vorb *f, int b, int n);
+// {
+//    int n2 = n >> 1, n4 = n >> 2, n8 = n >> 3;
+//    f->A[b] = (float *) setup_malloc(f, sizeof(float) * n2);
+//    f->B[b] = (float *) setup_malloc(f, sizeof(float) * n2);
+//    f->C[b] = (float *) setup_malloc(f, sizeof(float) * n4);
+//    if (!f->A[b] || !f->B[b] || !f->C[b]) return error(f, VORBIS_outofmem);
+//    compute_twiddle_factors(n, f->A[b], f->B[b], f->C[b]);
+//    f->window[b] = (float *) setup_malloc(f, sizeof(float) * n2);
+//    if (!f->window[b]) return error(f, VORBIS_outofmem);
+//    compute_window(n, f->window[b]);
+//    f->bit_reverse[b] = (uint16 *) setup_malloc(f, sizeof(uint16) * n8);
+//    if (!f->bit_reverse[b]) return error(f, VORBIS_outofmem);
+//    compute_bitreverse(n, f->bit_reverse[b]);
+//    return TRUE;
+// }
 
 extern void neighbors(uint16 *x, int n, int *plow, int *phigh);
 
