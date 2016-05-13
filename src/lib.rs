@@ -1787,7 +1787,7 @@ macro_rules! CODEBOOK_ELEMENT_BASE {
 }
 
 
-unsafe fn codebook_decode(f: &mut vorb, c: &mut Codebook, output: *mut f32, mut len: c_int ) -> c_int
+unsafe fn codebook_decode(f: &mut vorb, c: &Codebook, output: *mut f32, mut len: c_int ) -> c_int
 {
    let mut z = codebook_decode_start(f,c);
    if z < 0 {return 0;} // false
@@ -1812,6 +1812,87 @@ unsafe fn codebook_decode(f: &mut vorb, c: &mut Codebook, output: *mut f32, mut 
 }
 
 
+macro_rules! DECODE_RAW {
+    ($var: expr, $f: expr, $c: expr) => {
+        $var = codebook_decode_scalar($f, $c);
+    }
+}
+
+macro_rules! DECODE_VQ {
+    ($var: expr, $f: expr, $c: expr) => {
+        DECODE_RAW!($var, $f, $c)
+    }
+}
+
+
+#[no_mangle]
+pub unsafe extern fn codebook_decode_start(f: &mut vorb, c: &Codebook) -> c_int
+{
+    // NOTE(bungcip) : change c to &Codebook
+    
+   let mut z = -1;
+
+   // type 0 is only legal in a scalar context
+   if c.lookup_type == 0 {
+      error(f, STBVorbisError::VORBIS_invalid_stream as c_int);
+   } else {
+      DECODE_VQ!(z,f,c);
+      if c.sparse != 0 {assert!(z < c.sorted_entries);}
+      if z < 0 {  // check for EOP
+         if f.bytes_in_seg == 0 {
+            if f.last_seg != 0 {
+               return z;
+            }
+         }
+         error(f,  STBVorbisError::VORBIS_invalid_stream as c_int);
+      }
+   }
+   return z;
+}
+
+#[inline(always)]
+unsafe fn codebook_decode_scalar(f: &mut vorb, c: &Codebook) -> c_int
+{
+   let mut i : i32;
+   if f.valid_bits < STB_VORBIS_FAST_HUFFMAN_LENGTH {
+      prep_huffman(f);
+   }
+   // fast huffman table lookup
+   i = (f.acc & FAST_HUFFMAN_TABLE_MASK as u32) as i32;
+   i = c.fast_huffman[i as usize] as i32;
+   if i >= 0 {
+      f.acc >>= *c.codeword_lengths.offset(i as isize);
+      f.valid_bits -= *c.codeword_lengths.offset(i as isize) as i32;
+      if f.valid_bits < 0 { f.valid_bits = 0; return -1; }
+      return i;
+   }
+   return codebook_decode_scalar_raw(f,c);
+}
+
+// @OPTIMIZE: primary accumulator for huffman
+// expand the buffer to as many bits as possible without reading off end of packet
+// it might be nice to allow f->valid_bits and f->acc to be stored in registers,
+// e.g. cache them locally and decode locally
+#[inline(always)]
+unsafe fn prep_huffman(f: &mut vorb)
+{
+   if f.valid_bits <= 24 {
+      if f.valid_bits == 0 {f.acc = 0;}
+      
+      while {
+         if f.last_seg != 0 && f.bytes_in_seg == 0 {return;}
+         let z : i32 = get8_packet_raw(f);
+         if z == EOP {return;}
+         f.acc += (z as u32) << f.valid_bits;
+         f.valid_bits += 8;
+          
+         // condition
+         f.valid_bits <= 24
+      }{/* do nothing */}
+   }
+}
+
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
@@ -1832,7 +1913,7 @@ extern {
     pub fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32);
 
     pub fn codebook_decode_step(f: *mut vorb, c: *mut Codebook, output: *mut f32, len: c_int , step: c_int ) -> c_int;
-    pub fn codebook_decode_start(f: *mut vorb, c: *mut Codebook) -> c_int;
+    pub fn codebook_decode_scalar_raw(f: *mut vorb, c: *const Codebook) -> c_int;
 
     // Real API
 }

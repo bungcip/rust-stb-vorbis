@@ -1151,7 +1151,7 @@ enum
    VORBIS_packet_setup = 5
 };
 
-static int codebook_decode_scalar_raw(vorb *f, Codebook *c)
+extern int codebook_decode_scalar_raw(vorb *f, Codebook *c)
 {
    int i;
    prep_huffman(f);
@@ -1228,22 +1228,6 @@ static int codebook_decode_scalar_raw(vorb *f, Codebook *c)
 
 #else
 
-static int codebook_decode_scalar(vorb *f, Codebook *c)
-{
-   int i;
-   if (f->valid_bits < STB_VORBIS_FAST_HUFFMAN_LENGTH)
-      prep_huffman(f);
-   // fast huffman table lookup
-   i = f->acc & FAST_HUFFMAN_TABLE_MASK;
-   i = c->fast_huffman[i];
-   if (i >= 0) {
-      f->acc >>= c->codeword_lengths[i];
-      f->valid_bits -= c->codeword_lengths[i];
-      if (f->valid_bits < 0) { f->valid_bits = 0; return -1; }
-      return i;
-   }
-   return codebook_decode_scalar_raw(f,c);
-}
 
 #define DECODE_RAW(var,f,c)    var = codebook_decode_scalar(f,c);
 
@@ -1270,25 +1254,25 @@ static int codebook_decode_scalar(vorb *f, Codebook *c)
 #define CODEBOOK_ELEMENT_FAST(c,off)     (c->multiplicands[off])
 #define CODEBOOK_ELEMENT_BASE(c)         (0)
 
-int codebook_decode_start(vorb *f, Codebook *c)
-{
-   int z = -1;
+int codebook_decode_start(vorb *f, Codebook *c);
+// {
+//    int z = -1;
 
-   // type 0 is only legal in a scalar context
-   if (c->lookup_type == 0)
-      error(f, VORBIS_invalid_stream);
-   else {
-      DECODE_VQ(z,f,c);
-      if (c->sparse) assert(z < c->sorted_entries);
-      if (z < 0) {  // check for EOP
-         if (!f->bytes_in_seg)
-            if (f->last_seg)
-               return z;
-         error(f, VORBIS_invalid_stream);
-      }
-   }
-   return z;
-}
+//    // type 0 is only legal in a scalar context
+//    if (c->lookup_type == 0)
+//       error(f, VORBIS_invalid_stream);
+//    else {
+//       DECODE_VQ(z,f,c);
+//       if (c->sparse) assert(z < c->sorted_entries);
+//       if (z < 0) {  // check for EOP
+//          if (!f->bytes_in_seg)
+//             if (f->last_seg)
+//                return z;
+//          error(f, VORBIS_invalid_stream);
+//       }
+//    }
+//    return z;
+// }
 
 int codebook_decode_step(vorb *f, Codebook *c, float *output, int len, int step)
 {
