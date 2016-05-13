@@ -1624,6 +1624,17 @@ pub unsafe extern fn start_page_no_capturepattern(f: &mut vorb) -> c_int
    return 1; // true
 }
 
+#[no_mangle]
+pub unsafe extern fn predict_point(x: c_int, x0: c_int , x1: c_int , y0: c_int , y1: c_int ) -> c_int
+{
+   let dy = y1 - y0;
+   let adx = x1 - x0;
+   // @OPTIMIZE: force int division to round in the right direction... is this necessary on x86?
+   let err = libc::abs(dy) * (x - x0);
+   let off = err / adx;
+   return if dy < 0  {y0 - off} else {y0 + off};
+}
+
 
 
 // Below is function that still live in C code
