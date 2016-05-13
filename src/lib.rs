@@ -1766,6 +1766,51 @@ pub unsafe extern fn residue_decode(f: &mut vorb, book: &mut Codebook, target: *
    return 1; // true
 }
 
+// CODEBOOK_ELEMENT_FAST is an optimization for the CODEBOOK_FLOATS case
+// where we avoid one addition
+macro_rules! CODEBOOK_ELEMENT {
+    ($c: expr, $off: expr) => {
+        *$c.multiplicands.offset($off as isize)
+    }
+}
+
+macro_rules! CODEBOOK_ELEMENT_FAST {
+    ($c: expr, $off: expr) => {
+        *$c.multiplicands.offset($off as isize)
+    }
+}
+
+macro_rules! CODEBOOK_ELEMENT_BASE {
+    ($c: expr) => {
+        0.0
+    }
+}
+
+
+unsafe fn codebook_decode(f: &mut vorb, c: &mut Codebook, output: *mut f32, mut len: c_int ) -> c_int
+{
+   let mut z = codebook_decode_start(f,c);
+   if z < 0 {return 0;} // false
+   if len > c.dimensions {len = c.dimensions;}
+
+   z *= c.dimensions;
+   if c.sequence_p != 0 {
+      let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
+      for i in 0 .. len  {
+         let val : f32 = CODEBOOK_ELEMENT_FAST!(c, z+i) + last;
+         *output.offset(i as isize) += val;
+         last = val + c.minimum_value;
+      }
+   } else {
+      let last : f32 = CODEBOOK_ELEMENT_BASE!(c);
+      for i in 0 .. len  {
+         *output.offset(i as isize) += CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
+      }
+   }
+
+   return 1; // true
+}
+
 
 // Below is function that still live in C code
 extern {
@@ -1787,7 +1832,7 @@ extern {
     pub fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32);
 
     pub fn codebook_decode_step(f: *mut vorb, c: *mut Codebook, output: *mut f32, len: c_int , step: c_int ) -> c_int;
-    pub fn codebook_decode(f: *mut vorb, c: *mut Codebook, output: *mut f32, len: c_int ) -> c_int;
-    
+    pub fn codebook_decode_start(f: *mut vorb, c: *mut Codebook) -> c_int;
+
     // Real API
 }
