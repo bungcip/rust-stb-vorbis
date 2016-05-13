@@ -1742,6 +1742,29 @@ unsafe fn draw_line(output: *mut f32, x0: c_int, y0: c_int, mut x1: c_int, y1: c
 }
 
 
+#[no_mangle]
+pub unsafe extern fn residue_decode(f: &mut vorb, book: &mut Codebook, target: *mut f32, mut offset: c_int, n: c_int, rtype: c_int) -> c_int
+{
+   if rtype == 0 {
+      let step = n / book.dimensions;
+      for k in 0 .. step {
+         if codebook_decode_step(f, book, target.offset((offset+k) as isize), n-offset-k, step) == 0{
+            return 0; // false
+         }
+      }
+   } else {
+       let mut k = 0;
+       while k < n {
+         if codebook_decode(f, book, target.offset(offset as isize), n-k) == 0{
+            return 0; // FALSE
+         }
+         k += book.dimensions;
+         offset += book.dimensions;
+       }
+       
+   }
+   return 1; // true
+}
 
 
 // Below is function that still live in C code
@@ -1763,5 +1786,8 @@ extern {
     pub fn compute_window(n: c_int, window: *mut f32);
     pub fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32);
 
+    pub fn codebook_decode_step(f: *mut vorb, c: *mut Codebook, output: *mut f32, len: c_int , step: c_int ) -> c_int;
+    pub fn codebook_decode(f: *mut vorb, c: *mut Codebook, output: *mut f32, len: c_int ) -> c_int;
+    
     // Real API
 }

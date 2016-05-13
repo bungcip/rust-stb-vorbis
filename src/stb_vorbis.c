@@ -1290,7 +1290,7 @@ static int codebook_decode_start(vorb *f, Codebook *c)
    return z;
 }
 
-static int codebook_decode(vorb *f, Codebook *c, float *output, int len)
+int codebook_decode(vorb *f, Codebook *c, float *output, int len)
 {
    int i,z = codebook_decode_start(f,c);
    if (z < 0) return FALSE;
@@ -1329,7 +1329,7 @@ static int codebook_decode(vorb *f, Codebook *c, float *output, int len)
    return TRUE;
 }
 
-static int codebook_decode_step(vorb *f, Codebook *c, float *output, int len, int step)
+int codebook_decode_step(vorb *f, Codebook *c, float *output, int len, int step)
 {
    int i,z = codebook_decode_start(f,c);
    float last = CODEBOOK_ELEMENT_BASE(c);
@@ -1523,24 +1523,8 @@ int8 integer_divide_table[DIVTAB_NUMER][DIVTAB_DENOM]; // 2KB
 #endif
 
 
-static int residue_decode(vorb *f, Codebook *book, float *target, int offset, int n, int rtype)
-{
-   int k;
-   if (rtype == 0) {
-      int step = n / book->dimensions;
-      for (k=0; k < step; ++k)
-         if (!codebook_decode_step(f, book, target+offset+k, n-offset-k, step))
-            return FALSE;
-   } else {
-      for (k=0; k < n; ) {
-         if (!codebook_decode(f, book, target+offset, n-k))
-            return FALSE;
-         k += book->dimensions;
-         offset += book->dimensions;
-      }
-   }
-   return TRUE;
-}
+/// NOTE: moved to rust
+int residue_decode(vorb *f, Codebook *book, float *target, int offset, int n, int rtype);
 
 static void decode_residue(vorb *f, float *residue_buffers[], int ch, int n, int rn, uint8 *do_not_decode)
 {
