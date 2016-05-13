@@ -1434,7 +1434,7 @@ static int codebook_decode_deinterleave_repeat(vorb *f, Codebook *c, float **out
 int predict_point(int x, int x0, int x1, int y0, int y1);
 
 // the following table is block-copied from the specification
-static float inverse_db_table[256] =
+float inverse_db_table[256] =
 {
   1.0649863e-07f, 1.1341951e-07f, 1.2079015e-07f, 1.2863978e-07f, 
   1.3699951e-07f, 1.4590251e-07f, 1.5538408e-07f, 1.6548181e-07f, 
@@ -1522,54 +1522,6 @@ static float inverse_db_table[256] =
 int8 integer_divide_table[DIVTAB_NUMER][DIVTAB_DENOM]; // 2KB
 #endif
 
-static __forceinline void draw_line(float *output, int x0, int y0, int x1, int y1, int n)
-{
-   int dy = y1 - y0;
-   int adx = x1 - x0;
-   int ady = abs(dy);
-   int base;
-   int x=x0,y=y0;
-   int err = 0;
-   int sy;
-
-#ifdef STB_VORBIS_DIVIDE_TABLE
-   if (adx < DIVTAB_DENOM && ady < DIVTAB_NUMER) {
-      if (dy < 0) {
-         base = -integer_divide_table[ady][adx];
-         sy = base-1;
-      } else {
-         base =  integer_divide_table[ady][adx];
-         sy = base+1;
-      }
-   } else {
-      base = dy / adx;
-      if (dy < 0)
-         sy = base - 1;
-      else
-         sy = base+1;
-   }
-#else
-   base = dy / adx;
-   if (dy < 0)
-      sy = base - 1;
-   else
-      sy = base+1;
-#endif
-   ady -= abs(base) * adx;
-   if (x1 > n) x1 = n;
-   if (x < x1) {
-      LINE_OP(output[x], inverse_db_table[y]);
-      for (++x; x < x1; ++x) {
-         err += ady;
-         if (err >= adx) {
-            err -= adx;
-            y += sy;
-         } else
-            y += base;
-         LINE_OP(output[x], inverse_db_table[y]);
-      }
-   }
-}
 
 static int residue_decode(vorb *f, Codebook *book, float *target, int offset, int n, int rtype)
 {
@@ -2347,43 +2299,9 @@ typedef int16 YTYPE;
 #else
 typedef int YTYPE;
 #endif
-static int do_floor(vorb *f, Mapping *map, int i, int n, float *target, YTYPE *finalY, uint8 *step2_flag)
-{
-   int n2 = n >> 1;
-   int s = map->chan[i].mux, floor;
-   floor = map->submap_floor[s];
-   if (f->floor_types[floor] == 0) {
-      return error(f, VORBIS_invalid_stream);
-   } else {
-      Floor1 *g = &f->floor_config[floor].floor1;
-      int j,q;
-      int lx = 0, ly = finalY[0] * g->floor1_multiplier;
-      for (q=1; q < g->values; ++q) {
-         j = g->sorted_order[q];
-         #ifndef STB_VORBIS_NO_DEFER_FLOOR
-         if (finalY[j] >= 0)
-         #else
-         if (step2_flag[j])
-         #endif
-         {
-            int hy = finalY[j] * g->floor1_multiplier;
-            int hx = g->Xlist[j];
-            if (lx != hx)
-               draw_line(target, lx,ly, hx,hy, n2);
-            CHECK(f);
-            lx = hx, ly = hy;
-         }
-      }
-      if (lx < n2) {
-         // optimization of: draw_line(target, lx,ly, n,ly, n2);
-         for (j=lx; j < n2; ++j)
-            LINE_OP(target[j], inverse_db_table[ly]);
-         CHECK(f);
-      }
-   }
-   return TRUE;
-}
 
+/// NOTE: moved to rust
+int do_floor(vorb *f, Mapping *map, int i, int n, float *target, YTYPE *finalY, uint8 *step2_flag);
 extern int vorbis_decode_initial(vorb *f, int *p_left_start, int *p_left_end, int *p_right_start, int *p_right_end, int *mode);
 
 int vorbis_decode_packet_rest(vorb *f, int *len, Mode *m, int left_start, int left_end, int right_start, int right_end, int *p_left)

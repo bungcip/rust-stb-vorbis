@@ -135,7 +135,7 @@ pub struct Floor1
 #[repr(C)]
 pub struct Floor
 {
-   floor0: Floor0,
+//    floor0: Floor0,
    floor1: Floor1,
 }
 
@@ -793,6 +793,26 @@ macro_rules! FAST_SCALED_FLOAT_TO_INT {
         temp - ADDEND!($s)        
     }}
 }
+
+macro_rules! CHECK {
+    ($f: expr) => {
+        // assert!( $f.channel_buffers[1].is_null() == false );
+    }
+}
+
+// @OPTIMIZE: if you want to replace this bresenham line-drawing routine,
+// note that you must produce bit-identical output to decode correctly;
+// this specific sequence of operations is specified in the spec (it's
+// drawing integer-quantized frequency-space lines that the encoder
+// expects to be exactly the same)
+//     ... also, isn't the whole point of Bresenham's algorithm to NOT
+// have to divide in the setup? sigh
+macro_rules! LINE_OP {
+    ($a: expr, $b: expr) => {
+        $a *= $b
+    }
+}
+
 
 
 #[no_mangle]
@@ -1635,11 +1655,99 @@ pub unsafe extern fn predict_point(x: c_int, x0: c_int , x1: c_int , y0: c_int ,
    return if dy < 0  {y0 - off} else {y0 + off};
 }
 
+pub type YTYPE = i16;
+
+#[no_mangle]
+pub unsafe extern fn do_floor(f: &mut vorb, map: &mut Mapping, i: c_int, n: c_int , target: *mut f32, finalY: *mut YTYPE, _: *mut u8) -> c_int
+{
+   let n2 = n >> 1;
+
+   let s : &MappingChannel = std::mem::transmute(map.chan.offset(i as isize));
+   let s : i32 = s.mux as i32;
+   let floor = map.submap_floor[s as usize];
+   
+   if f.floor_types[floor as usize] == 0 {
+      return error(f, STBVorbisError::VORBIS_invalid_stream as c_int);
+   } else {
+      let g : &Floor1 = &(*f.floor_config.offset(floor as isize)).floor1;
+      let mut j : i32;
+      let mut lx : i32 = 0;
+      let mut ly : i32 = *finalY.offset(0) as i32 * g.floor1_multiplier as i32;
+      for q in 1 .. g.values {
+         j = g.sorted_order[q as usize] as i32;
+         if *finalY.offset(j as isize) >= 0
+         {
+            let hy : i32 = *finalY.offset(j as isize) as i32 * g.floor1_multiplier as i32;
+            let hx : i32 = g.Xlist[j as usize] as i32;
+            if lx != hx as i32{
+               draw_line(target, lx,ly, hx, hy, n2);
+            }
+            CHECK!(f);
+            lx = hx;
+            ly = hy;
+         }
+      }
+      if lx < n2 {
+         // optimization of: draw_line(target, lx,ly, n,ly, n2);
+         for j in lx .. n2{
+            LINE_OP!(*target.offset(j as isize), inverse_db_table[ly as usize]);
+         }
+         CHECK!(f);
+      }
+   }
+   return 1; // true
+}
+
+#[inline(always)]
+unsafe fn draw_line(output: *mut f32, x0: c_int, y0: c_int, mut x1: c_int, y1: c_int, n: c_int)
+{
+   let dy = y1 - y0;
+   let adx = x1 - x0;
+   let mut ady = libc::abs(dy);
+   let base : i32;
+   let mut x: i32 = x0;
+   let mut y: i32 = y0;
+   let mut err = 0;
+   let sy;
+
+   base = dy / adx;
+   if dy < 0 {
+      sy = base - 1;
+   }   else{
+      sy = base+1;
+   }
+
+
+   ady -= abs(base) * adx;
+   
+   if x1 > n {x1 = n;}
+   if x < x1 {
+      LINE_OP!(*output.offset(x as isize), inverse_db_table[y as usize]);
+      
+      x += 1;
+      while x < x1 {
+         err += ady;
+          
+         if err >= adx {
+            err -= adx;
+            y += sy;
+         } else{
+            y += base;
+         }
+         LINE_OP!(*output.offset(x as isize), inverse_db_table[y as usize]);
+         
+         x += 1;
+      }      
+   }
+}
+
+
 
 
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
+    static inverse_db_table: [f32; 256];
  
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
