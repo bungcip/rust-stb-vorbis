@@ -940,30 +940,7 @@ extern int ilog(int32 n);
 extern float float32_unpack(uint32 x);
 extern void add_entry(Codebook *c, uint32 huff_code, int symbol, int count, int len, uint32 *values);
 extern int compute_codewords(Codebook *c, uint8 *len, int n, uint32 *values);
-
-// accelerated huffman table allows fast O(1) match of all symbols
-// of length <= STB_VORBIS_FAST_HUFFMAN_LENGTH
-static void compute_accelerated_huffman(Codebook *c)
-{
-   int i, len;
-   for (i=0; i < FAST_HUFFMAN_TABLE_SIZE; ++i)
-      c->fast_huffman[i] = -1;
-
-   len = c->sparse ? c->sorted_entries : c->entries;
-   #ifdef STB_VORBIS_FAST_HUFFMAN_SHORT
-   if (len > 32767) len = 32767; // largest possible value we can encode!
-   #endif
-   for (i=0; i < len; ++i) {
-      if (c->codeword_lengths[i] <= STB_VORBIS_FAST_HUFFMAN_LENGTH) {
-         uint32 z = c->sparse ? bit_reverse(c->sorted_codewords[i]) : c->codewords[i];
-         // set table entries for all bit combinations in the higher bits
-         while (z < FAST_HUFFMAN_TABLE_SIZE) {
-             c->fast_huffman[z] = i;
-             z += 1 << c->codeword_lengths[i];
-         }
-      }
-   }
-}
+extern void compute_accelerated_huffman(Codebook *c);
 
 #ifdef _MSC_VER
 #define STBV_CDECL __cdecl

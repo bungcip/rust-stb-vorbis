@@ -1524,6 +1524,35 @@ pub unsafe extern fn init_blocksize(f: &mut vorb, b: c_int, n: c_int) -> c_int
    return 1; // true
 }
 
+// accelerated huffman table allows fast O(1) match of all symbols
+// of length <= STB_VORBIS_FAST_HUFFMAN_LENGTH
+#[no_mangle]
+pub unsafe extern fn compute_accelerated_huffman(c: &mut Codebook)
+{
+//    int i, len;
+   for i in 0 .. FAST_HUFFMAN_TABLE_SIZE {
+       c.fast_huffman[i as usize] = -1;
+   }
+
+   let mut len = if c.sparse != 0 { c.sorted_entries } else  {c.entries};
+   
+   if len > 32767 {len = 32767;} // largest possible value we can encode!
+   
+   for i in 0 .. len {
+      if *c.codeword_lengths.offset(i as isize) <= STB_VORBIS_FAST_HUFFMAN_LENGTH as u8 {
+         let mut z : u32 = if c.sparse != 0 { 
+             bit_reverse(*c.sorted_codewords.offset(i as isize)) 
+         } else { 
+             *c.codewords.offset(i as isize) 
+        };
+         // set table entries for all bit combinations in the higher bits
+         while z < FAST_HUFFMAN_TABLE_SIZE as u32 {
+             c.fast_huffman[z as usize] = i as i16;
+             z += 1 << *c.codeword_lengths.offset(i as isize);
+         }
+      }
+   }
+}
 
 // Below is function that still live in C code
 extern {
