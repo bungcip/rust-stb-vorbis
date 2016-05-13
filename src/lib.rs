@@ -1743,7 +1743,7 @@ unsafe fn draw_line(output: *mut f32, x0: c_int, y0: c_int, mut x1: c_int, y1: c
 
 
 #[no_mangle]
-pub unsafe extern fn residue_decode(f: &mut vorb, book: &mut Codebook, target: *mut f32, mut offset: c_int, n: c_int, rtype: c_int) -> c_int
+pub unsafe extern fn residue_decode(f: &mut vorb, book: &Codebook, target: *mut f32, mut offset: c_int, n: c_int, rtype: c_int) -> c_int
 {
    if rtype == 0 {
       let step = n / book.dimensions;
@@ -1912,7 +1912,7 @@ extern {
     pub fn compute_window(n: c_int, window: *mut f32);
     pub fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32);
 
-    pub fn codebook_decode_step(f: *mut vorb, c: *mut Codebook, output: *mut f32, len: c_int , step: c_int ) -> c_int;
+    pub fn codebook_decode_step(f: *mut vorb, c: *const Codebook, output: *mut f32, len: c_int , step: c_int ) -> c_int;
     pub fn codebook_decode_scalar_raw(f: *mut vorb, c: *const Codebook) -> c_int;
 
     // Real API
