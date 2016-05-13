@@ -1562,14 +1562,75 @@ pub unsafe extern fn stb_vorbis_get_file_offset(f: &stb_vorbis) -> c_uint
    return (libc::ftell(f.f) - f.f_start as i32) as c_uint;
 }
 
+#[no_mangle]
+pub unsafe extern fn start_page_no_capturepattern(f: &mut vorb) -> c_int
+{
+    use STBVorbisError::*;
+    
+   // stream structure version
+   if 0 != get8(f) {return error(f, VORBIS_invalid_stream_structure_version as c_int);}
+   // header flag
+   f.page_flag = get8(f);
+   // absolute granule position
+   let loc0 = get32(f); 
+   let loc1 = get32(f);
+   // @TODO: validate loc0,loc1 as valid positions?
+   // stream serial number -- vorbis doesn't interleave, so discard
+   get32(f);
+   // page sequence number
+   let n = get32(f);
+   f.last_page = n as i32;
+   // CRC32
+   get32(f);
+   // page_segments
+   f.segment_count = get8(f) as i32;
+   let sc = f.segment_count;
+   let segments_ptr = (&mut f.segments).as_mut_ptr();
+   if getn(f, segments_ptr, sc) == 0 {
+      return error(f, VORBIS_unexpected_eof as c_int);
+   }
+   // assume we _don't_ know any the sample position of any segments
+   f.end_seg_with_known_loc = -2;
+   if loc0 != !0 || loc1 != !0 {
+      let mut i;
+      // determine which packet is the last one that will complete
+      i = f.segment_count - 1;
+      while i >= 0 {
+         if f.segments[i as usize] < 255 {
+            break;
+         }
+          
+          i -= 1;
+      }
+      // 'i' is now the index of the _last_ segment of a packet that ends
+      if i >= 0 {
+         f.end_seg_with_known_loc = i;
+         f.known_loc_for_packet   = loc0;
+      }
+   }
+   if f.first_decode != 0{
+      let mut p : ProbedPage = std::mem::zeroed();
+      let mut len : i32 = 0;
+      for i in 0 .. f.segment_count {
+         len += f.segments[i as usize] as i32;
+      }
+      len += 27 + f.segment_count as i32;
+      p.page_start = f.first_audio_page_offset;
+      p.page_end = p.page_start + len as u32;
+      p.last_decoded_sample = loc0;
+      f.p_first = p;
+   }
+   f.next_seg = 0;
+   return 1; // true
+}
+
+
 
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
  
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
-
-    pub fn start_page_no_capturepattern(f: *mut vorb) -> c_int;
 
     pub fn vorbis_deinit(f: *mut stb_vorbis);
     pub fn vorbis_init(f: *mut stb_vorbis, z: *const stb_vorbis_alloc);

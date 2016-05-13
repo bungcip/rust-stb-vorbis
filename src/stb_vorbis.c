@@ -1038,24 +1038,7 @@ void compute_window(int n, float *window)
 
 /// NOTE: moved to rust
 extern void compute_bitreverse(int n, uint16 *rev);
-
 extern int init_blocksize(vorb *f, int b, int n);
-// {
-//    int n2 = n >> 1, n4 = n >> 2, n8 = n >> 3;
-//    f->A[b] = (float *) setup_malloc(f, sizeof(float) * n2);
-//    f->B[b] = (float *) setup_malloc(f, sizeof(float) * n2);
-//    f->C[b] = (float *) setup_malloc(f, sizeof(float) * n4);
-//    if (!f->A[b] || !f->B[b] || !f->C[b]) return error(f, VORBIS_outofmem);
-//    compute_twiddle_factors(n, f->A[b], f->B[b], f->C[b]);
-//    f->window[b] = (float *) setup_malloc(f, sizeof(float) * n2);
-//    if (!f->window[b]) return error(f, VORBIS_outofmem);
-//    compute_window(n, f->window[b]);
-//    f->bit_reverse[b] = (uint16 *) setup_malloc(f, sizeof(uint16) * n8);
-//    if (!f->bit_reverse[b]) return error(f, VORBIS_outofmem);
-//    compute_bitreverse(n, f->bit_reverse[b]);
-//    return TRUE;
-// }
-
 extern void neighbors(uint16 *x, int n, int *plow, int *phigh);
 
 // this has been repurposed so y is now the original index instead of y
@@ -1125,58 +1108,7 @@ extern int capture_pattern(vorb *f);
 #define PAGEFLAG_first_page         2
 #define PAGEFLAG_last_page          4
 
-int start_page_no_capturepattern(vorb *f)
-{
-   uint32 loc0,loc1,n;
-   // stream structure version
-   if (0 != get8(f)) return error(f, VORBIS_invalid_stream_structure_version);
-   // header flag
-   f->page_flag = get8(f);
-   // absolute granule position
-   loc0 = get32(f); 
-   loc1 = get32(f);
-   // @TODO: validate loc0,loc1 as valid positions?
-   // stream serial number -- vorbis doesn't interleave, so discard
-   get32(f);
-   //if (f->serial != get32(f)) return error(f, VORBIS_incorrect_stream_serial_number);
-   // page sequence number
-   n = get32(f);
-   f->last_page = n;
-   // CRC32
-   get32(f);
-   // page_segments
-   f->segment_count = get8(f);
-   if (!getn(f, f->segments, f->segment_count))
-      return error(f, VORBIS_unexpected_eof);
-   // assume we _don't_ know any the sample position of any segments
-   f->end_seg_with_known_loc = -2;
-   if (loc0 != ~0U || loc1 != ~0U) {
-      int i;
-      // determine which packet is the last one that will complete
-      for (i=f->segment_count-1; i >= 0; --i)
-         if (f->segments[i] < 255)
-            break;
-      // 'i' is now the index of the _last_ segment of a packet that ends
-      if (i >= 0) {
-         f->end_seg_with_known_loc = i;
-         f->known_loc_for_packet   = loc0;
-      }
-   }
-   if (f->first_decode) {
-      int i,len;
-      ProbedPage p;
-      len = 0;
-      for (i=0; i < f->segment_count; ++i)
-         len += f->segments[i];
-      len += 27 + f->segment_count;
-      p.page_start = f->first_audio_page_offset;
-      p.page_end = p.page_start + len;
-      p.last_decoded_sample = loc0;
-      f->p_first = p;
-   }
-   f->next_seg = 0;
-   return TRUE;
-}
+extern int start_page_no_capturepattern(vorb *f);
 
 /// NOTE: moved to rust
 extern int start_page(vorb *f);
