@@ -1554,6 +1554,15 @@ pub unsafe extern fn compute_accelerated_huffman(c: &mut Codebook)
    }
 }
 
+#[no_mangle]
+pub unsafe extern fn stb_vorbis_get_file_offset(f: &stb_vorbis) -> c_uint
+{
+   if f.push_mode != 0 {return 0;}
+   if USE_MEMORY!(f) {return (f.stream as usize - f.stream_start as usize) as c_uint;}
+   return (libc::ftell(f.f) - f.f_start as i32) as c_uint;
+}
+
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
