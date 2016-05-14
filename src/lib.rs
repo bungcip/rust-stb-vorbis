@@ -1825,11 +1825,8 @@ macro_rules! DECODE_VQ {
 }
 
 
-#[no_mangle]
-pub unsafe extern fn codebook_decode_start(f: &mut vorb, c: &Codebook) -> c_int
+unsafe fn codebook_decode_start(f: &mut vorb, c: &Codebook) -> c_int
 {
-    // NOTE(bungcip) : change c to &Codebook
-    
    let mut z = -1;
 
    // type 0 is only legal in a scalar context
@@ -1962,6 +1959,25 @@ pub unsafe extern fn codebook_decode_scalar_raw(f: &mut vorb, c: &Codebook) -> c
    return -1;
 }
 
+unsafe fn codebook_decode_step(f: &mut vorb, c: &Codebook, output: *mut f32, mut len: c_int , step: c_int ) -> c_int
+{
+    // NOTE(bungcip): convert return type to bool?
+    
+   let mut z = codebook_decode_start(f,c);
+   let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
+   if z < 0 {return 0;} // false
+   if len > c.dimensions { len = c.dimensions; }
+
+   z *= c.dimensions;
+   for i in 0 .. len  {
+      let val : f32 = CODEBOOK_ELEMENT_FAST!(c, z+i) + last;
+      *output.offset( (i*step) as isize) += val;
+      if c.sequence_p != 0 {last = val;}
+   }
+
+   return 1; // true
+}
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
@@ -1981,7 +1997,7 @@ extern {
     pub fn compute_window(n: c_int, window: *mut f32);
     pub fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32);
 
-    pub fn codebook_decode_step(f: *mut vorb, c: *const Codebook, output: *mut f32, len: c_int , step: c_int ) -> c_int;
+    // pub fn codebook_decode_step(f: *mut vorb, c: *const Codebook, output: *mut f32, len: c_int , step: c_int ) -> c_int;
 
     // Real API
 }
