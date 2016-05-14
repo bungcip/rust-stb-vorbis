@@ -2,6 +2,7 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
+// #![allow(unreachable_code)]
 // #![allow(unused_variables)]
 // #![allow(unused_imports)]
 // #![allow(unused_parens)]
@@ -1978,6 +1979,72 @@ unsafe fn codebook_decode_step(f: &mut vorb, c: &Codebook, output: *mut f32, mut
    return 1; // true
 }
 
+#[no_mangle]
+pub unsafe extern fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, outputs: *mut *mut f32, ch: c_int, c_inter_p: *mut c_int, p_inter_p: *mut c_int, len: c_int, mut total_decode: c_int) -> c_int
+{
+   let mut c_inter = *c_inter_p;
+   let mut p_inter = *p_inter_p;
+   let mut effective = c.dimensions;
+   let mut z : i32;
+
+   // type 0 is only legal in a scalar context
+   if c.lookup_type == 0 {
+     return error(f, STBVorbisError::VORBIS_invalid_stream as c_int);
+   } 
+   while total_decode > 0 {
+      let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
+      DECODE_VQ!(z,f,c);
+      assert!(c.sparse == 0 || z < c.sorted_entries);
+      if z < 0 {
+         if f.bytes_in_seg == 0{
+            if f.last_seg != 0{
+              return 0; // false
+            } 
+         }
+         return error(f, STBVorbisError::VORBIS_invalid_stream as c_int);
+      }
+
+      // if this will take us off the end of the buffers, stop short!
+      // we check by computing the length of the virtual interleaved
+      // buffer (len*ch), our current offset within it (p_inter*ch)+(c_inter),
+      // and the length we'll be using (effective)
+      if c_inter + p_inter*ch + effective > len * ch {
+         effective = len*ch - (p_inter*ch - c_inter);
+      }
+
+      {
+         z *= c.dimensions;
+         if c.sequence_p != 0 {
+            for i in 0 .. effective {
+               let val : f32 = CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
+               if (*outputs.offset(c_inter as isize)).is_null() == false {
+                  *(*outputs.offset(c_inter as isize)).offset(p_inter as isize) += val;
+               }
+               c_inter += 1;
+               if c_inter == ch { c_inter = 0; p_inter += 1; }
+               last = val;
+            }
+         } else {
+            for i in 0 .. effective {
+               let val : f32 = CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
+               if (*outputs.offset(c_inter as isize)).is_null() == false {
+                  *(*outputs.offset(c_inter as isize)).offset(p_inter as isize) += val;
+               }
+               c_inter += 1;
+               if c_inter == ch { c_inter = 0; p_inter += 1; }
+            }
+         }
+      }
+
+      total_decode -= effective;
+   }
+   *c_inter_p = c_inter;
+   *p_inter_p = p_inter;
+
+   return 1; // true
+}
+
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
@@ -1996,8 +2063,6 @@ extern {
 
     pub fn compute_window(n: c_int, window: *mut f32);
     pub fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32);
-
-    // pub fn codebook_decode_step(f: *mut vorb, c: *const Codebook, output: *mut f32, len: c_int , step: c_int ) -> c_int;
 
     // Real API
 }
