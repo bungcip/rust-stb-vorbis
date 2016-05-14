@@ -1506,7 +1506,6 @@ const PLAYBACK_RIGHT : c_int =   4;
 #[no_mangle]
 pub unsafe extern fn convert_samples_short(buf_c: c_int, buffer: *mut *mut i16, b_offset: c_int, data_c: c_int, data: *mut *mut f32, d_offset: c_int, samples: c_int)
 {
-//    int i;
    if buf_c != data_c && buf_c <= 2 && data_c <= 6 {
     //   static int channel_selector[3][2] = { {0}, {PLAYBACK_MONO}, {PLAYBACK_LEFT, PLAYBACK_RIGHT} };
       
@@ -2153,6 +2152,14 @@ unsafe fn compute_window(n: c_int, window: *mut f32)
    }
 }
 
+#[no_mangle]
+pub unsafe extern fn vorbis_alloc(f: &mut stb_vorbis) -> *mut stb_vorbis
+{
+   let p : *mut stb_vorbis = setup_malloc(f, std::mem::size_of::<stb_vorbis>() as i32)  as *mut stb_vorbis;
+   return p;
+}
+
+
 
 // Below is function that still live in C code
 extern {
@@ -2162,7 +2169,6 @@ extern {
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn vorbis_deinit(f: *mut stb_vorbis);
-    pub fn vorbis_alloc(f: *mut stb_vorbis) -> *mut stb_vorbis;
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
 
