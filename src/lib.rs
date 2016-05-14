@@ -745,8 +745,7 @@ pub extern fn lookup1_values(entries: c_int, dim: c_int) -> c_int
 const M_PI : f32 = 3.14159265358979323846264;
 
 // called twice per file
-#[no_mangle]
-pub extern fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32)
+fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32)
 {
     use std::f32;
     
@@ -2139,6 +2138,21 @@ pub unsafe extern fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codeb
    return 1; // true
 }
 
+unsafe fn compute_window(n: c_int, window: *mut f32)
+{
+   let n2 : i32 = n >> 1;
+   for i in 0 .. n2 {
+      *window.offset(i as isize) = 
+            f64::sin(
+                0.5 as f64 * 
+                M_PI as f64 * 
+                square(
+                    f64::sin((i as f64 - 0 as f64 + 0.5) / n2 as f64 * 0.5 * M_PI as f64) as f32
+                ) as f64
+            ) as f32;
+   }
+}
+
 
 // Below is function that still live in C code
 extern {
@@ -2154,8 +2168,6 @@ extern {
 
     pub fn compute_samples(mask: c_int, output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
     pub fn compute_stereo_samples(output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
-
-    pub fn compute_window(n: c_int, window: *mut f32);
 
     // Real API
     pub fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: c_uint) -> c_int;

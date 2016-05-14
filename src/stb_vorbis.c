@@ -1010,15 +1010,6 @@ static void compute_sorted_huffman(Codebook *c, uint8 *lengths, uint32 *values)
 /// NOTE: moved to rust
 extern int vorbis_validate(uint8 *data);
 extern int lookup1_values(int entries, int dim);
-
-void compute_window(int n, float *window)
-{
-   int n2 = n >> 1, i;
-   for (i=0; i < n2; ++i)
-      window[i] = (float) sin(0.5 * M_PI * square((float) sin((i - 0 + 0.5) / n2 * 0.5 * M_PI)));
-}
-
-/// NOTE: moved to rust
 extern void compute_bitreverse(int n, uint16 *rev);
 extern int init_blocksize(vorb *f, int b, int n);
 extern void neighbors(uint16 *x, int n, int *plow, int *phigh);
