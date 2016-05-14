@@ -1892,6 +1892,75 @@ unsafe fn prep_huffman(f: &mut vorb)
    }
 }
 
+#[no_mangle]
+pub unsafe extern fn codebook_decode_scalar_raw(f: &mut vorb, c: &Codebook) -> c_int
+{
+//    int i;
+   prep_huffman(f);
+
+   if c.codewords.is_null()  && c.sorted_codewords.is_null() {
+      return -1;
+   }
+
+   // cases to use binary search: sorted_codewords && !c.codewords
+   //                             sorted_codewords && c.entries > 8
+   let case = if c.entries > 8 {
+       c.sorted_codewords.is_null() == false
+   }else{
+       c.codewords.is_null()
+   };
+   if case {
+      // binary search
+      let code : u32 = bit_reverse(f.acc) as u32;
+      let mut x : i32 = 0;
+      let mut n : i32 = c.sorted_entries;
+      let len : i32;
+
+      while n > 1 {
+         // invariant: sc[x] <= code < sc[x+n]
+         let m = x + (n >> 1);
+         if *c.sorted_codewords.offset(m as isize) <= code {
+            x = m;
+            n -= n>>1;
+         } else {
+            n >>= 1;
+         }
+      }
+      // x is now the sorted index
+      if c.sparse == 0 {
+          x = *c.sorted_values.offset(x as isize);
+      }
+      // x is now sorted index if sparse, or symbol otherwise
+      len = *c.codeword_lengths.offset(x as isize) as i32;
+      if f.valid_bits >= len {
+         f.acc >>= len;
+         f.valid_bits -= len;
+         return x;
+      }
+
+      f.valid_bits = 0;
+      return -1;
+   }
+
+   // if small, linear search
+   assert!(c.sparse == 0);
+   for i in 0 .. c.entries  {
+      if *c.codeword_lengths.offset(i as isize) as i32 == NO_CODE {continue;}
+      if *c.codewords.offset(i as isize) == (f.acc & ((1 << *c.codeword_lengths.offset(i as isize))-1)) {
+         if f.valid_bits >= *c.codeword_lengths.offset(i as isize) as i32 {
+            f.acc >>= *c.codeword_lengths.offset(i as isize);
+            f.valid_bits -= *c.codeword_lengths.offset(i as isize) as i32;
+            return i;
+         }
+         f.valid_bits = 0;
+         return -1;
+      }
+   }
+
+   error(f, STBVorbisError::VORBIS_invalid_stream as c_int);
+   f.valid_bits = 0;
+   return -1;
+}
 
 // Below is function that still live in C code
 extern {
@@ -1913,7 +1982,6 @@ extern {
     pub fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32);
 
     pub fn codebook_decode_step(f: *mut vorb, c: *const Codebook, output: *mut f32, len: c_int , step: c_int ) -> c_int;
-    pub fn codebook_decode_scalar_raw(f: *mut vorb, c: *const Codebook) -> c_int;
 
     // Real API
 }
