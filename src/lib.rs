@@ -1161,7 +1161,7 @@ pub unsafe extern fn stb_vorbis_close(p: *mut stb_vorbis)
        return;
    }
    
-   vorbis_deinit(p);
+   vorbis_deinit(std::mem::transmute(p));
    setup_free(std::mem::transmute(p),p as *mut c_void);
 }
 
@@ -2159,6 +2159,72 @@ pub unsafe extern fn vorbis_alloc(f: &mut stb_vorbis) -> *mut stb_vorbis
    return p;
 }
 
+#[no_mangle]
+pub unsafe fn vorbis_deinit(p: &mut stb_vorbis)
+{
+   if p.residue_config.is_null() == false {
+      for i in 0 .. p.residue_count {
+         let r: &mut Residue = std::mem::transmute(p.residue_config.offset(i as isize));
+         if r.classdata.is_null() == false {
+            for j in 0 .. (*p.codebooks.offset(r.classbook as isize)).entries {
+               setup_free(p, (*r.classdata.offset(j as isize)) as *mut c_void);
+            }
+            setup_free(p, r.classdata as *mut c_void);
+         }
+         setup_free(p, r.residue_books as *mut c_void);
+      }
+   }
+
+   if p.codebooks.is_null() == false {
+      CHECK!(p);
+      for i in 0 .. p.codebook_count {
+         let c: &mut Codebook = std::mem::transmute(p.codebooks.offset(i as isize));
+         setup_free(p, c.codeword_lengths as *mut c_void);
+         setup_free(p, c.multiplicands as *mut c_void);
+         setup_free(p, c.codewords as *mut c_void);
+         setup_free(p, c.sorted_codewords as *mut c_void);
+         // c.sorted_values[-1] is the first entry in the array
+         setup_free(p, if c.sorted_values.is_null() == false {
+                c.sorted_values.offset(-1)
+             }else {
+                std::ptr::null_mut()
+             } as *mut c_void
+          );
+      }
+      
+      { let x1 = p.codebooks as *mut c_void; setup_free(p, x1); }
+   }
+   
+   { let x2 = p.floor_config as *mut c_void; setup_free(p, x2); }
+   { let x3 = p.residue_config as *mut c_void; setup_free(p, x3); }
+   if p.mapping.is_null() == false {
+      for i in 0 .. p.mapping_count {
+        { let x4 = (*p.mapping.offset(i as isize)).chan as *mut c_void; setup_free(p, x4); }
+      }
+      { let x5 = p.mapping as *mut c_void; setup_free(p, x5); }
+   }
+   CHECK!(p);
+    let mut i = 0;
+    while i < p.channels && i < STB_VORBIS_MAX_CHANNELS {
+      { let x6 = p.channel_buffers[i as usize] as *mut c_void; setup_free(p, x6); }
+      { let x7 = p.previous_window[i as usize] as *mut c_void; setup_free(p, x7); }
+      { let x8 = p.finalY[i as usize] as *mut c_void; setup_free(p, x8); }
+      
+      i += 1;
+   }
+   
+   for i in 0 .. 2 {
+      { let x9 = p.A[i as usize] as *mut c_void; setup_free(p, x9); }
+      { let x10 = p.B[i as usize] as *mut c_void; setup_free(p, x10); }
+      { let x11 = p.C[i as usize] as *mut c_void; setup_free(p, x11); }
+      { let x12 = p.window[i as usize] as *mut c_void; setup_free(p, x12); }
+      { let x13 = p.bit_reverse[i as usize] as *mut c_void; setup_free(p, x13); }
+   }
+   
+   if p.close_on_free != 0 {
+       libc::fclose(p.f);
+   }
+}
 
 
 // Below is function that still live in C code
@@ -2167,8 +2233,6 @@ extern {
     static inverse_db_table: [f32; 256];
  
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
-
-    pub fn vorbis_deinit(f: *mut stb_vorbis);
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
 
