@@ -2469,6 +2469,13 @@ pub unsafe extern fn stb_vorbis_seek_start(f: &mut stb_vorbis)
    vorbis_pump_first_frame(f);
 }
 
+// these functions return the total length of the vorbis stream
+pub unsafe fn stb_vorbis_stream_length_in_seconds(f: &mut stb_vorbis) -> f32
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+   return stb_vorbis_stream_length_in_samples(f) as f32 / f.sample_rate as f32;
+}
+
 
 // Below is function that still live in C code
 extern {
@@ -2482,5 +2489,6 @@ extern {
     pub fn set_file_offset(f: &mut stb_vorbis, loc: c_uint) -> c_int;
     
     // Real API
+    pub fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> c_uint;
 
 }

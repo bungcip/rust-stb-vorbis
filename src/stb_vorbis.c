@@ -3474,10 +3474,10 @@ unsigned int stb_vorbis_stream_length_in_samples(stb_vorbis *f)
    return f->total_samples == SAMPLE_unknown ? 0 : f->total_samples;
 }
 
-float stb_vorbis_stream_length_in_seconds(stb_vorbis *f)
-{
-   return stb_vorbis_stream_length_in_samples(f) / (float) f->sample_rate;
-}
+// float stb_vorbis_stream_length_in_seconds(stb_vorbis *f)
+// {
+//    return stb_vorbis_stream_length_in_samples(f) / (float) f->sample_rate;
+// }
 
 
 
