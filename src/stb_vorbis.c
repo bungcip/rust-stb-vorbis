@@ -3226,7 +3226,7 @@ static int go_to_page_before(stb_vorbis *f, unsigned int limit_offset)
 // the function succeeds, current_loc_valid will be true and current_loc will
 // be less than or equal to the provided sample number (the closer the
 // better).
-static int seek_to_sample_coarse(stb_vorbis *f, uint32 sample_number)
+int seek_to_sample_coarse(stb_vorbis *f, uint32 sample_number)
 {
    ProbedPage left, right, mid;
    int i, start_seg_with_known_loc, end_pos, page_start;
@@ -3372,7 +3372,7 @@ error:
 }
 
 // the same as vorbis_decode_initial, but without advancing
-static int peek_decode_initial(vorb *f, int *p_left_start, int *p_left_end, int *p_right_start, int *p_right_end, int *mode)
+int peek_decode_initial(vorb *f, int *p_left_start, int *p_left_end, int *p_right_start, int *p_right_end, int *mode)
 {
    int bits_read, bytes_read;
 
@@ -3397,44 +3397,6 @@ static int peek_decode_initial(vorb *f, int *p_left_start, int *p_left_end, int 
    return 1;
 }
 
-int stb_vorbis_seek_frame(stb_vorbis *f, unsigned int sample_number)
-{
-   uint32 max_frame_samples;
-
-   if (IS_PUSH_MODE(f)) return error(f, VORBIS_invalid_api_mixing);
-
-   // fast page-level search
-   if (!seek_to_sample_coarse(f, sample_number))
-      return 0;
-
-   assert(f->current_loc_valid);
-   assert(f->current_loc <= sample_number);
-
-   // linear search for the relevant packet
-   max_frame_samples = (f->blocksize_1*3 - f->blocksize_0) >> 2;
-   while (f->current_loc < sample_number) {
-      int left_start, left_end, right_start, right_end, mode, frame_samples;
-      if (!peek_decode_initial(f, &left_start, &left_end, &right_start, &right_end, &mode))
-         return error(f, VORBIS_seek_failed);
-      // calculate the number of samples returned by the next frame
-      frame_samples = right_start - left_start;
-      if (f->current_loc + frame_samples > sample_number) {
-         return 1; // the next frame will contain the sample
-      } else if (f->current_loc + frame_samples + max_frame_samples > sample_number) {
-         // there's a chance the frame after this could contain the sample
-         vorbis_pump_first_frame(f);
-      } else {
-         // this frame is too early to be relevant
-         f->current_loc += frame_samples;
-         f->previous_length = 0;
-         maybe_start_packet(f);
-         flush_packet(f);
-      }
-   }
-   // the next frame will start with the sample
-   assert(f->current_loc == sample_number);
-   return 1;
-}
 
 void stb_vorbis_seek_start(stb_vorbis *f)
 {

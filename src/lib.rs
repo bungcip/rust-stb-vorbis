@@ -2395,6 +2395,54 @@ unsafe fn compute_stereo_samples(output: *mut i16, num_c: c_int, data: *mut *mut
 
 }
 
+pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: c_uint) -> c_int
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+   
+   let max_frame_samples: u32;
+
+   if IS_PUSH_MODE!(f) { return error(f, STBVorbisError::VORBIS_invalid_api_mixing as c_int);}
+
+   // fast page-level search
+   if seek_to_sample_coarse(f, sample_number) == 0{
+      return 0;
+   }
+
+   assert!(f.current_loc_valid != 0);
+   assert!(f.current_loc <= sample_number);
+
+   // linear search for the relevant packet
+   max_frame_samples = ((f.blocksize_1*3 - f.blocksize_0) >> 2) as u32;
+   while f.current_loc < sample_number {
+      let mut left_start: i32 = 0; 
+      let mut left_end: i32 = 0;
+      let mut right_start: i32 = 0;
+      let mut right_end: i32 = 0;
+      let mut mode: i32 = 0;
+      let frame_samples: i32;
+      if peek_decode_initial(f, &mut left_start, &mut left_end, &mut right_start, &mut right_end, &mut mode) == 0{
+         return error(f, STBVorbisError::VORBIS_seek_failed as c_int);
+      }
+      // calculate the number of samples returned by the next frame
+      frame_samples = right_start - left_start;
+      if f.current_loc as i32 + frame_samples > sample_number as i32 {
+         return 1; // the next frame will contain the sample
+      } else if f.current_loc as i32 + frame_samples + max_frame_samples as i32 > sample_number as i32 {
+         // there's a chance the frame after this could contain the sample
+         vorbis_pump_first_frame(f);
+      } else {
+         // this frame is too early to be relevant
+         f.current_loc += frame_samples as u32;
+         f.previous_length = 0;
+         maybe_start_packet(f);
+         flush_packet(f);
+      }
+   }
+   // the next frame will start with the sample
+   assert!(f.current_loc == sample_number);
+   return 1;
+}
+
 
 // Below is function that still live in C code
 extern {
@@ -2403,9 +2451,9 @@ extern {
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
-
+    pub fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> c_int;
+    pub fn peek_decode_initial(f: &mut vorb, p_left_start: &mut c_int, p_left_end: &mut c_int, p_right_start: &mut c_int, p_right_end: &mut c_int, mode: &mut c_int) -> c_int;
 
     // Real API
-    pub fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: c_uint) -> c_int;
 
 }
