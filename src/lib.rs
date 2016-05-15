@@ -407,7 +407,17 @@ pub struct stb_vorbis
 
 pub type vorb = stb_vorbis;
 
+pub struct stb_vorbis_info
+{
+   sample_rate: c_uint,
+   channels: c_int,
 
+   setup_memory_required: c_uint,
+   setup_temp_memory_required: c_uint,
+   temp_memory_required: c_uint,
+
+   max_frame_size: c_int,
+}
 
 ////////   ERROR CODES
 
@@ -2476,6 +2486,58 @@ pub unsafe fn stb_vorbis_stream_length_in_seconds(f: &mut stb_vorbis) -> f32
    return stb_vorbis_stream_length_in_samples(f) as f32 / f.sample_rate as f32;
 }
 
+// this function returns the offset (in samples) from the beginning of the
+// file that will be returned by the next decode, if it is known, or -1
+// otherwise. after a flush_pushdata() call, this may take a while before
+// it becomes valid again.
+// NOT WORKING YET after a seek with PULLDATA API
+pub fn stb_vorbis_get_sample_offset(f: &mut stb_vorbis) -> c_int
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+   if f.current_loc_valid != 0 {
+      return f.current_loc as c_int;
+   } else{
+      return -1;
+   }
+}
+
+// get general information about the file
+pub fn stb_vorbis_get_info(f: &mut stb_vorbis) -> stb_vorbis_info
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+   stb_vorbis_info {
+       channels: f.channels,
+       sample_rate: f.sample_rate,
+       setup_memory_required: f.setup_memory_required,
+       setup_temp_memory_required: f.setup_temp_memory_required,
+       temp_memory_required: f.temp_memory_required,
+       max_frame_size: f.blocksize_1 >> 1
+   }
+}
+
+// inform stb_vorbis that your next datablock will not be contiguous with
+// previous ones (e.g. you've seeked in the data); future attempts to decode
+// frames will cause stb_vorbis to resynchronize (as noted above), and
+// once it sees a valid Ogg page (typically 4-8KB, as large as 64KB), it
+// will begin decoding the _next_ frame.
+//
+// if you want to seek using pushdata, you need to seek in your file, then
+// call stb_vorbis_flush_pushdata(), then start calling decoding, then once
+// decoding is returning you data, call stb_vorbis_get_sample_offset, and
+// if you don't like the result, seek your file again and repeat.
+#[no_mangle]
+pub extern fn stb_vorbis_flush_pushdata(f: &mut stb_vorbis)
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+   f.previous_length = 0;
+   f.page_crc_tests  = 0;
+   f.discard_samples_deferred = 0;
+   f.current_loc_valid = 0; // false
+   f.first_decode = 0; // false
+   f.samples_output = 0;
+   f.channel_buffer_start = 0;
+   f.channel_buffer_end = 0;
+}
 
 // Below is function that still live in C code
 extern {

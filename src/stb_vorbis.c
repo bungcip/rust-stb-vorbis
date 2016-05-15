@@ -2846,40 +2846,10 @@ int start_decoder(vorb *f)
 extern void vorbis_deinit(stb_vorbis *p);
 extern void vorbis_init(stb_vorbis *p, const stb_vorbis_alloc *z);
 
-int stb_vorbis_get_sample_offset(stb_vorbis *f)
-{
-   if (f->current_loc_valid)
-      return f->current_loc;
-   else
-      return -1;
-}
-
-stb_vorbis_info stb_vorbis_get_info(stb_vorbis *f)
-{
-   stb_vorbis_info d;
-   d.channels = f->channels;
-   d.sample_rate = f->sample_rate;
-   d.setup_memory_required = f->setup_memory_required;
-   d.setup_temp_memory_required = f->setup_temp_memory_required;
-   d.temp_memory_required = f->temp_memory_required;
-   d.max_frame_size = f->blocksize_1 >> 1;
-   return d;
-}
 
 
 #ifndef STB_VORBIS_NO_PUSHDATA_API
 
-void stb_vorbis_flush_pushdata(stb_vorbis *f)
-{
-   f->previous_length = 0;
-   f->page_crc_tests  = 0;
-   f->discard_samples_deferred = 0;
-   f->current_loc_valid = FALSE;
-   f->first_decode = FALSE;
-   f->samples_output = 0;
-   f->channel_buffer_start = 0;
-   f->channel_buffer_end = 0;
-}
 
 static int vorbis_search_for_page_pushdata(vorb *f, uint8 *data, int data_len)
 {
