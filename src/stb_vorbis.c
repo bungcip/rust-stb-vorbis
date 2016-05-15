@@ -915,7 +915,6 @@ static __forceinline uint32 crc32_update(uint32 crc, uint8 byte)
 
 /// NOTE: moved to rust
 extern unsigned int bit_reverse(unsigned int n);
-extern float square(float x);
 extern int ilog(int32 n);
 
 #ifndef M_PI
@@ -1003,7 +1002,6 @@ static void compute_sorted_huffman(Codebook *c, uint8 *lengths, uint32 *values)
 /// NOTE: moved to rust
 extern int vorbis_validate(uint8 *data);
 extern int lookup1_values(int entries, int dim);
-extern void compute_bitreverse(int n, uint16 *rev);
 extern int init_blocksize(vorb *f, int b, int n);
 extern void neighbors(uint16 *x, int n, int *plow, int *phigh);
 
@@ -1067,8 +1065,6 @@ int set_file_offset(stb_vorbis *f, unsigned int loc)
 
 static uint8 ogg_page_header[4] = { 0x4f, 0x67, 0x67, 0x53 };
 
-/// NOTE: moved to rust
-extern int capture_pattern(vorb *f);
 
 #define PAGEFLAG_continued_packet   1
 #define PAGEFLAG_first_page         2
@@ -1079,7 +1075,6 @@ extern int start_page_no_capturepattern(vorb *f);
 /// NOTE: moved to rust
 extern int start_page(vorb *f);
 extern int start_packet(vorb *f);
-extern int maybe_start_packet(vorb *f);
 extern int next_segment(vorb *f);
 
 #define EOP    (-1)
@@ -1158,9 +1153,9 @@ enum
 
 // CODEBOOK_ELEMENT_FAST is an optimization for the CODEBOOK_FLOATS case
 // where we avoid one addition
-#define CODEBOOK_ELEMENT(c,off)          (c->multiplicands[off])
-#define CODEBOOK_ELEMENT_FAST(c,off)     (c->multiplicands[off])
-#define CODEBOOK_ELEMENT_BASE(c)         (0)
+// #define CODEBOOK_ELEMENT(c,off)          (c->multiplicands[off])
+// #define CODEBOOK_ELEMENT_FAST(c,off)     (c->multiplicands[off])
+// #define CODEBOOK_ELEMENT_BASE(c)         (0)
 
 
 extern int codebook_decode_deinterleave_repeat(vorb *f, Codebook *c, float **outputs, int ch, int *c_inter_p, int *p_inter_p, int len, int total_decode);

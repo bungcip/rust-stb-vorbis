@@ -598,8 +598,7 @@ pub extern fn bit_reverse(n: c_uint) -> c_uint
 }
 
 
-#[no_mangle]
-pub extern fn square(x: f32) -> f32{
+fn square(x: f32) -> f32{
     x * x
 }
 
@@ -772,8 +771,7 @@ fn get_window(f: &vorb, len: c_int) -> *mut f32
    unreachable!();
 }
 
-#[no_mangle]
-pub unsafe extern fn compute_bitreverse(n: c_int, rev: *mut u16)
+unsafe fn compute_bitreverse(n: c_int, rev: *mut u16)
 {
    let ld = ilog(n) - 1; // ilog is off-by-one from normal definitions
    let n8 = n >> 3;
@@ -1023,8 +1021,7 @@ pub unsafe extern fn skip(z: &mut vorb, n: c_int)
    libc::fseek(z.f, x+n, libc::SEEK_SET);
 }
 
-#[no_mangle]
-pub unsafe extern fn capture_pattern(f: &mut vorb) -> c_int
+unsafe fn capture_pattern(f: &mut vorb) -> c_int
 {
    if 0x4f != get8(f) {return 0;}
    if 0x67 != get8(f) {return 0;}
@@ -1141,8 +1138,7 @@ pub unsafe extern fn start_packet(f: &mut vorb) -> c_int
    return 1; // true
 }
 
-#[no_mangle]
-pub unsafe extern fn maybe_start_packet(f: &mut vorb) -> c_int
+unsafe fn maybe_start_packet(f: &mut vorb) -> c_int
 {
     use STBVorbisError::{VORBIS_missing_capture_pattern, VORBIS_continued_packet_flag_invalid};
     
