@@ -3564,83 +3564,8 @@ stb_vorbis * stb_vorbis_open_memory(const unsigned char *data, int len, int *err
 }
 
 #ifndef STB_VORBIS_NO_INTEGER_CONVERSION
-#define PLAYBACK_MONO     1
-#define PLAYBACK_LEFT     2
-#define PLAYBACK_RIGHT    4
-
-#define L  (PLAYBACK_LEFT  | PLAYBACK_MONO)
-#define C  (PLAYBACK_LEFT  | PLAYBACK_RIGHT | PLAYBACK_MONO)
-#define R  (PLAYBACK_RIGHT | PLAYBACK_MONO)
-
-int8 channel_position[7][6] =
-{
-   { 0 },
-   { C },
-   { L, R },
-   { L, C, R },
-   { L, R, L, R },
-   { L, C, R, L, R },
-   { L, C, R, L, R, C },
-};
 
 
-#ifndef STB_VORBIS_NO_FAST_SCALED_FLOAT
-   typedef union {
-      float f;
-      int i;
-   } float_conv;
-   typedef char stb_vorbis_float_size_test[sizeof(float)==4 && sizeof(int) == 4];
-   #define FASTDEF(x) float_conv x
-   // add (1<<23) to convert to int, then divide by 2^SHIFT, then add 0.5/2^SHIFT to round
-   #define MAGIC(SHIFT) (1.5f * (1 << (23-SHIFT)) + 0.5f/(1 << SHIFT))
-   #define ADDEND(SHIFT) (((150-SHIFT) << 23) + (1 << 22))
-   #define FAST_SCALED_FLOAT_TO_INT(temp,x,s) (temp.f = (x) + MAGIC(s), temp.i - ADDEND(s))
-   #define check_endianness()  
-#else
-   #define FAST_SCALED_FLOAT_TO_INT(temp,x,s) ((int) ((x) * (1 << (s))))
-   #define check_endianness()
-   #define FASTDEF(x)
-#endif
-
-
-void compute_stereo_samples(short *output, int num_c, float **data, int d_offset, int len)
-{
-   #define BUFFER_SIZE  32
-   float buffer[BUFFER_SIZE];
-   int i,j,o,n = BUFFER_SIZE >> 1;
-   // o is the offset in the source data
-   check_endianness();
-   for (o = 0; o < len; o += BUFFER_SIZE >> 1) {
-      // o2 is the offset in the output data
-      int o2 = o << 1;
-      memset(buffer, 0, sizeof(buffer));
-      if (o + n > len) n = len - o;
-      for (j=0; j < num_c; ++j) {
-         int m = channel_position[num_c][j] & (PLAYBACK_LEFT | PLAYBACK_RIGHT);
-         if (m == (PLAYBACK_LEFT | PLAYBACK_RIGHT)) {
-            for (i=0; i < n; ++i) {
-               buffer[i*2+0] += data[j][d_offset+o+i];
-               buffer[i*2+1] += data[j][d_offset+o+i];
-            }
-         } else if (m == PLAYBACK_LEFT) {
-            for (i=0; i < n; ++i) {
-               buffer[i*2+0] += data[j][d_offset+o+i];
-            }
-         } else if (m == PLAYBACK_RIGHT) {
-            for (i=0; i < n; ++i) {
-               buffer[i*2+1] += data[j][d_offset+o+i];
-            }
-         }
-      }
-      for (i=0; i < (n<<1); ++i) {
-         FASTDEF(temp);
-         int v = FAST_SCALED_FLOAT_TO_INT(temp,buffer[i],15);
-         if ((unsigned int) (v + 32768) > 65535)
-            v = v < 0 ? -32768 : 32767;
-         output[o2+i] = v;
-      }
-   }
-}
 
 /// NOTE: moved to rust
 extern void convert_samples_short(int buf_c, short **buffer, int b_offset, int data_c, float **data, int d_offset, int samples);
