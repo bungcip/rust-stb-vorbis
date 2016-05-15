@@ -129,8 +129,6 @@ typedef struct
 // get general information about the file
 extern stb_vorbis_info stb_vorbis_get_info(stb_vorbis *f);
 
-// get the last error detected (clears it, too)
-extern int stb_vorbis_get_error(stb_vorbis *f);
 
 // close an ogg vorbis file and free all memory in use
 extern void stb_vorbis_close(stb_vorbis *f);
@@ -2866,13 +2864,6 @@ stb_vorbis_info stb_vorbis_get_info(stb_vorbis *f)
    d.temp_memory_required = f->temp_memory_required;
    d.max_frame_size = f->blocksize_1 >> 1;
    return d;
-}
-
-int stb_vorbis_get_error(stb_vorbis *f)
-{
-   int e = f->error;
-   f->error = VORBIS__no_error;
-   return e;
 }
 
 

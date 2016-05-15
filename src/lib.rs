@@ -2443,6 +2443,16 @@ pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: c_uint) -
    return 1;
 }
 
+// get the last error detected (clears it, too)
+pub fn stb_vorbis_get_error(f: &mut stb_vorbis) -> c_int
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   let e = f.error;
+   f.error = STBVorbisError::VORBIS__no_error as c_int;
+   return e;
+}
+
 
 // Below is function that still live in C code
 extern {
