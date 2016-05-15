@@ -2453,6 +2453,22 @@ pub fn stb_vorbis_get_error(f: &mut stb_vorbis) -> c_int
    return e;
 }
 
+// this function is equivalent to stb_vorbis_seek(f,0)
+#[no_mangle]
+pub unsafe extern fn stb_vorbis_seek_start(f: &mut stb_vorbis)
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   if IS_PUSH_MODE!(f) { error(f, STBVorbisError::VORBIS_invalid_api_mixing as c_int); return; }
+   
+   let offset = f.first_audio_page_offset;
+   set_file_offset(f, offset);
+   f.previous_length = 0;
+   f.first_decode = 1; // true
+   f.next_seg = -1;
+   vorbis_pump_first_frame(f);
+}
+
 
 // Below is function that still live in C code
 extern {
@@ -2463,7 +2479,8 @@ extern {
     pub fn start_decoder(f: *mut vorb) -> c_int;
     pub fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> c_int;
     pub fn peek_decode_initial(f: &mut vorb, p_left_start: &mut c_int, p_left_end: &mut c_int, p_right_start: &mut c_int, p_right_end: &mut c_int, mode: &mut c_int) -> c_int;
-
+    pub fn set_file_offset(f: &mut stb_vorbis, loc: c_uint) -> c_int;
+    
     // Real API
 
 }

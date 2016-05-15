@@ -1033,7 +1033,7 @@ extern uint32 get32(vorb *f);
 extern int getn(vorb *z, uint8 *data, int n);
 extern void skip(vorb *z, int n);
 
-static int set_file_offset(stb_vorbis *f, unsigned int loc)
+int set_file_offset(stb_vorbis *f, unsigned int loc)
 {
    #ifndef STB_VORBIS_NO_PUSHDATA_API
    if (f->push_mode) return 0;
@@ -3389,15 +3389,15 @@ int peek_decode_initial(vorb *f, int *p_left_start, int *p_left_end, int *p_righ
 }
 
 
-void stb_vorbis_seek_start(stb_vorbis *f)
-{
-   if (IS_PUSH_MODE(f)) { error(f, VORBIS_invalid_api_mixing); return; }
-   set_file_offset(f, f->first_audio_page_offset);
-   f->previous_length = 0;
-   f->first_decode = TRUE;
-   f->next_seg = -1;
-   vorbis_pump_first_frame(f);
-}
+// void stb_vorbis_seek_start(stb_vorbis *f)
+// {
+//    if (IS_PUSH_MODE(f)) { error(f, VORBIS_invalid_api_mixing); return; }
+//    set_file_offset(f, f->first_audio_page_offset);
+//    f->previous_length = 0;
+//    f->first_decode = TRUE;
+//    f->next_seg = -1;
+//    vorbis_pump_first_frame(f);
+// }
 
 unsigned int stb_vorbis_stream_length_in_samples(stb_vorbis *f)
 {
