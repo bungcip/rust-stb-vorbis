@@ -2,8 +2,8 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
-// #![allow(unreachable_code)]
-// #![allow(unused_variables)]
+#![allow(unreachable_code)]
+#![allow(unused_variables)]
 // #![allow(unused_imports)]
 // #![allow(unused_parens)]
 #![allow(non_upper_case_globals)]
@@ -2224,8 +2224,45 @@ pub unsafe fn vorbis_deinit(p: &mut stb_vorbis)
    }
 }
 
+unsafe fn compute_samples(mask: c_int, output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int)
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+   
+   const BUFFER_SIZE : usize = 32;
+   let mut buffer: [f32; BUFFER_SIZE];
+//    int i,j,o,
+   let mut n = BUFFER_SIZE as i32;
+//    check_endianness();
+
+   let mut o : i32 = 0;
+   while o < len {
+    //   memset(buffer, 0, sizeof(buffer));
+      buffer = std::mem::zeroed();
+      
+      if o + n > len {
+          n = len - o;
+      }
+      for j in 0 .. num_c {
+         if (channel_position[num_c as usize][j as usize] as i32 & mask) != 0 {
+            for i in 0 .. n {
+               buffer[i as usize] += *(*data.offset(j as isize)).offset( (d_offset+o+i) as isize);
+            }
+         }
+      }
+      for i in 0 .. n  {
+         let mut v : i32 = FAST_SCALED_FLOAT_TO_INT!(buffer[i as usize], 15);
+         if (v + 32768) as c_uint > 65535{
+            v = if v < 0 { -32768 } else { 32767 };
+         }
+         *output.offset( (o+i as i32) as isize) = v as i16;
+      }
+       
+       o += BUFFER_SIZE as i32;
+   }
+}
+
 // the following table is block-copied from the specification
-pub static inverse_db_table: [f32; 256] =
+static inverse_db_table: [f32; 256] =
 [
   1.0649863e-07, 1.1341951e-07, 1.2079015e-07, 1.2863978e-07, 
   1.3699951e-07, 1.4590251e-07, 1.5538408e-07, 1.6548181e-07, 
@@ -2297,13 +2334,13 @@ pub static inverse_db_table: [f32; 256] =
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
-    // static inverse_db_table: [f32; 256];
+    static channel_position: [[i8; 6]; 7];
  
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
 
-    pub fn compute_samples(mask: c_int, output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
+    // pub fn compute_samples(mask: c_int, output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
     pub fn compute_stereo_samples(output: *mut i16, num_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int);
 
     // Real API

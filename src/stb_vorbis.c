@@ -917,11 +917,7 @@ static __forceinline uint32 crc32_update(uint32 crc, uint8 byte)
 
 /// NOTE: moved to rust
 extern unsigned int bit_reverse(unsigned int n);
-
-/// NOTE: moved to rust
 extern float square(float x);
-
-/// NOTE: moved to rust
 extern int ilog(int32 n);
 
 #ifndef M_PI
@@ -3576,7 +3572,7 @@ stb_vorbis * stb_vorbis_open_memory(const unsigned char *data, int len, int *err
 #define C  (PLAYBACK_LEFT  | PLAYBACK_RIGHT | PLAYBACK_MONO)
 #define R  (PLAYBACK_RIGHT | PLAYBACK_MONO)
 
-static int8 channel_position[7][6] =
+int8 channel_position[7][6] =
 {
    { 0 },
    { C },
@@ -3606,31 +3602,6 @@ static int8 channel_position[7][6] =
    #define FASTDEF(x)
 #endif
 
-
-void compute_samples(int mask, short *output, int num_c, float **data, int d_offset, int len)
-{
-   #define BUFFER_SIZE  32
-   float buffer[BUFFER_SIZE];
-   int i,j,o,n = BUFFER_SIZE;
-   check_endianness();
-   for (o = 0; o < len; o += BUFFER_SIZE) {
-      memset(buffer, 0, sizeof(buffer));
-      if (o + n > len) n = len - o;
-      for (j=0; j < num_c; ++j) {
-         if (channel_position[num_c][j] & mask) {
-            for (i=0; i < n; ++i)
-               buffer[i] += data[j][d_offset+o+i];
-         }
-      }
-      for (i=0; i < n; ++i) {
-         FASTDEF(temp);
-         int v = FAST_SCALED_FLOAT_TO_INT(temp,buffer[i],15);
-         if ((unsigned int) (v + 32768) > 65535)
-            v = v < 0 ? -32768 : 32767;
-         output[o+i] = v;
-      }
-   }
-}
 
 void compute_stereo_samples(short *output, int num_c, float **data, int d_offset, int len)
 {
