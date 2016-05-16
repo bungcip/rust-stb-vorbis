@@ -2995,6 +2995,197 @@ pub unsafe extern fn make_block_array(mem: *mut c_void, count: c_int, size: c_in
    return p as *mut c_void;
 }
 
+// seeking is implemented with a binary search, which narrows down the range to
+// 64K, before using a linear search (because finding the synchronization
+// pattern can be expensive, and the chance we'd find the end page again is
+// relatively high for small ranges)
+//
+// two initial interpolation-style probes are used at the start of the search
+// to try to bound either side of the binary search sensibly, while still
+// working in O(log n) time if they fail.
+
+#[no_mangle]
+pub unsafe extern fn get_seek_page_info(f: &mut stb_vorbis, z: &mut ProbedPage) -> c_int
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   let mut header: [u8; 27] = std::mem::zeroed();
+   let mut lacing: [u8; 255] = std::mem::zeroed();
+//    int i,len;
+
+   // record where the page starts
+   z.page_start = stb_vorbis_get_file_offset(f);
+
+   // parse the header
+   getn(f, header.as_mut_ptr(), 27);
+   if header[0] != b'O' || header[1] != b'g' || header[2] != b'g' || header[3] != b'S'{
+      return 0;
+   }
+   getn(f, lacing.as_mut_ptr(), header[26] as i32);
+
+   // determine the length of the payload
+   let mut len = 0;
+   for i in 0 .. header[26] {
+      len += lacing[i as usize];
+   }
+
+   // this implies where the page ends
+   z.page_end = z.page_start + 27 + header[26] as u32 + len as u32;
+
+   // read the last-decoded sample out of the data
+   z.last_decoded_sample = header[6] as u32 + 
+    ( (header[7] as u32) << 8) + 
+    ( (header[8] as u32) << 16) + 
+    ( (header[9] as u32) << 24);
+
+   // restore file state to where we were
+   set_file_offset(f, z.page_start);
+   return 1;
+}
+
+// create a vorbis decoder by passing in the initial data block containing
+//    the ogg&vorbis headers (you don't need to do parse them, just provide
+//    the first N bytes of the file--you're told if it's not enough, see below)
+// on success, returns an stb_vorbis *, does not set error, returns the amount of
+//    data parsed/consumed on this call in *datablock_memory_consumed_in_bytes;
+// on failure, returns NULL on error and sets *error, does not change *datablock_memory_consumed
+// if returns NULL and *error is VORBIS_need_more_data, then the input block was
+//       incomplete and you need to pass in a larger block from the start of the file
+pub unsafe fn stb_vorbis_open_pushdata(
+         data: *const u8, data_len: c_int, // the memory available for decoding
+         data_used: *mut c_int,              // only defined if result is not NULL
+         error: *mut c_int, alloc: *const stb_vorbis_alloc)
+         -> *mut stb_vorbis
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   let mut p : stb_vorbis = std::mem::zeroed();
+   vorbis_init(&mut p, alloc);
+   p.stream     = data as *mut u8;
+   p.stream_end = data.offset(data_len as isize) as *mut u8;
+   p.push_mode  = 1; // true
+   if start_decoder(&mut p) == 0 {
+      if p.eof != 0 {
+         *error = STBVorbisError::VORBIS_need_more_data as c_int;
+      } else {
+         *error = p.error;
+      }
+      return std::ptr::null_mut();
+   }
+   let mut f = vorbis_alloc(&mut p);
+   if f.is_null() == false {
+      *f = p;
+      *data_used = ((*f).stream as usize - data as usize) as c_int;
+      *error = 0;
+      return f;
+   } else {
+      vorbis_deinit(&mut p);
+      return std::ptr::null_mut();
+   }
+}
+
+// decode a frame of audio sample data if possible from the passed-in data block
+//
+// return value: number of bytes we used from datablock
+//
+// possible cases:
+//     0 bytes used, 0 samples output (need more data)
+//     N bytes used, 0 samples output (resynching the stream, keep going)
+//     N bytes used, M samples output (one frame of data)
+// note that after opening a file, you will ALWAYS get one N-bytes,0-sample
+// frame, because Vorbis always "discards" the first frame.
+//
+// Note that on resynch, stb_vorbis will rarely consume all of the buffer,
+// instead only datablock_length_in_bytes-3 or less. This is because it wants
+// to avoid missing parts of a page header if they cross a datablock boundary,
+// without writing state-machiney code to record a partial detection.
+//
+// The number of channels returned are stored in *channels (which can be
+// NULL--it is always the same as the number of channels reported by
+// get_info). *output will contain an array of float* buffers, one per
+// channel. In other words, (*output)[0][0] contains the first sample from
+// the first channel, and (*output)[1][0] contains the first sample from
+// the second channel.
+
+// return value: number of bytes we used
+pub unsafe fn stb_vorbis_decode_frame_pushdata(
+         f: &mut stb_vorbis,                   // the file we're decoding
+         data: *const u8, data_len: c_int , // the memory available for decoding
+         channels: *mut c_int,                   // place to write number of float * buffers
+         output: *mut *mut *mut f32,                 // place to write float ** array of float * buffers
+         samples: *mut c_int                     // place to write number of output samples
+     ) -> c_int
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+
+   if IS_PUSH_MODE!(f) == false{ return error(f, STBVorbisError::VORBIS_invalid_api_mixing as c_int) };
+
+   if f.page_crc_tests >= 0 {
+      *samples = 0;
+      return vorbis_search_for_page_pushdata(f, data as *mut u8, data_len);
+   }
+
+   f.stream     = data as *mut u8;
+   f.stream_end = data.offset(data_len as isize) as *mut u8;
+   f.error      = STBVorbisError::VORBIS__no_error as c_int;
+
+   // check that we have the entire packet in memory
+   if is_whole_packet_present(f, 0) == 0 { // false
+      *samples = 0;
+      return 0;
+   }
+
+   let mut len : i32 = 0;
+   let mut left: i32 = 0;
+   let mut right: i32 = 0;
+   if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == 0 {
+      // save the actual error we encountered
+      let error = f.error;
+      if error == STBVorbisError::VORBIS_bad_packet_type as c_int {
+         // flush and resynch
+         f.error = STBVorbisError::VORBIS__no_error as c_int;
+         while get8_packet(f) != EOP{
+            if f.eof != 0 {break;}
+         }
+         *samples = 0;
+         return (f.stream as usize - data as usize) as c_int;
+      }
+      if error == STBVorbisError::VORBIS_continued_packet_flag_invalid as c_int {
+         if f.previous_length == 0 {
+            // we may be resynching, in which case it's ok to hit one
+            // of these; just discard the packet
+            f.error = STBVorbisError::VORBIS__no_error as c_int;
+            while get8_packet(f) != EOP{
+                if f.eof != 0 {break;}
+            }
+            *samples = 0;
+            return (f.stream as usize - data as usize) as c_int;
+         }
+      }
+      // if we get an error while parsing, what to do?
+      // well, it DEFINITELY won't work to continue from where we are!
+      stb_vorbis_flush_pushdata(f);
+      // restore the error that actually made us bail
+      f.error = error;
+      *samples = 0;
+      return 1;
+   }
+
+   // success!
+   let len = vorbis_finish_frame(f, len, left, right);
+   for i in 0 .. f.channels {
+      f.outputs[i as usize] = f.channel_buffers[i as usize].offset(left as isize);
+   }
+
+   if channels.is_null() == false {
+       *channels = f.channels;
+   }
+   *samples = len;
+   *output = f.outputs.as_mut_ptr();
+    return (f.stream as usize - data as usize) as c_int;
+}
+
 
 // Below is function that still live in C code
 extern {
@@ -3004,7 +3195,9 @@ extern {
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
     pub fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> c_int;
-    
+    pub fn vorbis_search_for_page_pushdata(f: &mut vorb, data: *mut u8, data_len: c_int) -> c_int;
+    pub fn is_whole_packet_present(f: &mut stb_vorbis, end_page: c_int) -> c_int;
+
     // Real API
     pub fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> c_uint;
 

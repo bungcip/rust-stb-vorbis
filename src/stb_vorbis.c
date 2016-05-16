@@ -2177,7 +2177,7 @@ extern int vorbis_finish_frame(stb_vorbis *f, int len, int left, int right);
 extern void vorbis_pump_first_frame(stb_vorbis *f);
 
 #ifndef STB_VORBIS_NO_PUSHDATA_API
-static int is_whole_packet_present(stb_vorbis *f, int end_page)
+int is_whole_packet_present(stb_vorbis *f, int end_page)
 {
    // make sure that we have the packet available before continuing...
    // this requires a full ogg parse, but we know we can fetch from f->stream
@@ -2801,7 +2801,7 @@ extern void vorbis_init(stb_vorbis *p, const stb_vorbis_alloc *z);
 #ifndef STB_VORBIS_NO_PUSHDATA_API
 
 
-static int vorbis_search_for_page_pushdata(vorb *f, uint8 *data, int data_len)
+int vorbis_search_for_page_pushdata(vorb *f, uint8 *data, int data_len)
 {
    int i,n;
    for (i=0; i < f->page_crc_tests; ++i)
@@ -2891,105 +2891,77 @@ static int vorbis_search_for_page_pushdata(vorb *f, uint8 *data, int data_len)
    return data_len;
 }
 
-// return value: number of bytes we used
-int stb_vorbis_decode_frame_pushdata(
-         stb_vorbis *f,                   // the file we're decoding
-         const uint8 *data, int data_len, // the memory available for decoding
-         int *channels,                   // place to write number of float * buffers
-         float ***output,                 // place to write float ** array of float * buffers
-         int *samples                     // place to write number of output samples
-     )
-{
-   int i;
-   int len,right,left;
+// // return value: number of bytes we used
+// int stb_vorbis_decode_frame_pushdata(
+//          stb_vorbis *f,                   // the file we're decoding
+//          const uint8 *data, int data_len, // the memory available for decoding
+//          int *channels,                   // place to write number of float * buffers
+//          float ***output,                 // place to write float ** array of float * buffers
+//          int *samples                     // place to write number of output samples
+//      )
+// {
+//    int i;
+//    int len,right,left;
 
-   if (!IS_PUSH_MODE(f)) return error(f, VORBIS_invalid_api_mixing);
+//    if (!IS_PUSH_MODE(f)) return error(f, VORBIS_invalid_api_mixing);
 
-   if (f->page_crc_tests >= 0) {
-      *samples = 0;
-      return vorbis_search_for_page_pushdata(f, (uint8 *) data, data_len);
-   }
+//    if (f->page_crc_tests >= 0) {
+//       *samples = 0;
+//       return vorbis_search_for_page_pushdata(f, (uint8 *) data, data_len);
+//    }
 
-   f->stream     = (uint8 *) data;
-   f->stream_end = (uint8 *) data + data_len;
-   f->error      = VORBIS__no_error;
+//    f->stream     = (uint8 *) data;
+//    f->stream_end = (uint8 *) data + data_len;
+//    f->error      = VORBIS__no_error;
 
-   // check that we have the entire packet in memory
-   if (!is_whole_packet_present(f, FALSE)) {
-      *samples = 0;
-      return 0;
-   }
+//    // check that we have the entire packet in memory
+//    if (!is_whole_packet_present(f, FALSE)) {
+//       *samples = 0;
+//       return 0;
+//    }
 
-   if (!vorbis_decode_packet(f, &len, &left, &right)) {
-      // save the actual error we encountered
-      enum STBVorbisError error = f->error;
-      if (error == VORBIS_bad_packet_type) {
-         // flush and resynch
-         f->error = VORBIS__no_error;
-         while (get8_packet(f) != EOP)
-            if (f->eof) break;
-         *samples = 0;
-         return (int) (f->stream - data);
-      }
-      if (error == VORBIS_continued_packet_flag_invalid) {
-         if (f->previous_length == 0) {
-            // we may be resynching, in which case it's ok to hit one
-            // of these; just discard the packet
-            f->error = VORBIS__no_error;
-            while (get8_packet(f) != EOP)
-               if (f->eof) break;
-            *samples = 0;
-            return (int) (f->stream - data);
-         }
-      }
-      // if we get an error while parsing, what to do?
-      // well, it DEFINITELY won't work to continue from where we are!
-      stb_vorbis_flush_pushdata(f);
-      // restore the error that actually made us bail
-      f->error = error;
-      *samples = 0;
-      return 1;
-   }
+//    if (!vorbis_decode_packet(f, &len, &left, &right)) {
+//       // save the actual error we encountered
+//       enum STBVorbisError error = f->error;
+//       if (error == VORBIS_bad_packet_type) {
+//          // flush and resynch
+//          f->error = VORBIS__no_error;
+//          while (get8_packet(f) != EOP)
+//             if (f->eof) break;
+//          *samples = 0;
+//          return (int) (f->stream - data);
+//       }
+//       if (error == VORBIS_continued_packet_flag_invalid) {
+//          if (f->previous_length == 0) {
+//             // we may be resynching, in which case it's ok to hit one
+//             // of these; just discard the packet
+//             f->error = VORBIS__no_error;
+//             while (get8_packet(f) != EOP)
+//                if (f->eof) break;
+//             *samples = 0;
+//             return (int) (f->stream - data);
+//          }
+//       }
+//       // if we get an error while parsing, what to do?
+//       // well, it DEFINITELY won't work to continue from where we are!
+//       stb_vorbis_flush_pushdata(f);
+//       // restore the error that actually made us bail
+//       f->error = error;
+//       *samples = 0;
+//       return 1;
+//    }
 
-   // success!
-   len = vorbis_finish_frame(f, len, left, right);
-   for (i=0; i < f->channels; ++i)
-      f->outputs[i] = f->channel_buffers[i] + left;
+//    // success!
+//    len = vorbis_finish_frame(f, len, left, right);
+//    for (i=0; i < f->channels; ++i)
+//       f->outputs[i] = f->channel_buffers[i] + left;
 
-   if (channels) *channels = f->channels;
-   *samples = len;
-   *output = f->outputs;
-   return (int) (f->stream - data);
-}
+//    if (channels) *channels = f->channels;
+//    *samples = len;
+//    *output = f->outputs;
+//    return (int) (f->stream - data);
+// }
 
-stb_vorbis *stb_vorbis_open_pushdata(
-         const unsigned char *data, int data_len, // the memory available for decoding
-         int *data_used,              // only defined if result is not NULL
-         int *error, const stb_vorbis_alloc *alloc)
-{
-   stb_vorbis *f, p;
-   vorbis_init(&p, alloc);
-   p.stream     = (uint8 *) data;
-   p.stream_end = (uint8 *) data + data_len;
-   p.push_mode  = TRUE;
-   if (!start_decoder(&p)) {
-      if (p.eof)
-         *error = VORBIS_need_more_data;
-      else
-         *error = p.error;
-      return NULL;
-   }
-   f = vorbis_alloc(&p);
-   if (f) {
-      *f = p;
-      *data_used = (int) (f->stream - data);
-      *error = 0;
-      return f;
-   } else {
-      vorbis_deinit(&p);
-      return NULL;
-   }
-}
 #endif // STB_VORBIS_NO_PUSHDATA_API
 
 
@@ -3003,44 +2975,16 @@ uint32 vorbis_find_page(stb_vorbis *f, uint32 *end, uint32 *last);
 
 #define SAMPLE_unknown  0xffffffff
 
-// seeking is implemented with a binary search, which narrows down the range to
-// 64K, before using a linear search (because finding the synchronization
-// pattern can be expensive, and the chance we'd find the end page again is
-// relatively high for small ranges)
-//
-// two initial interpolation-style probes are used at the start of the search
-// to try to bound either side of the binary search sensibly, while still
-// working in O(log n) time if they fail.
+// // seeking is implemented with a binary search, which narrows down the range to
+// // 64K, before using a linear search (because finding the synchronization
+// // pattern can be expensive, and the chance we'd find the end page again is
+// // relatively high for small ranges)
+// //
+// // two initial interpolation-style probes are used at the start of the search
+// // to try to bound either side of the binary search sensibly, while still
+// // working in O(log n) time if they fail.
 
-static int get_seek_page_info(stb_vorbis *f, ProbedPage *z)
-{
-   uint8 header[27], lacing[255];
-   int i,len;
-
-   // record where the page starts
-   z->page_start = stb_vorbis_get_file_offset(f);
-
-   // parse the header
-   getn(f, header, 27);
-   if (header[0] != 'O' || header[1] != 'g' || header[2] != 'g' || header[3] != 'S')
-      return 0;
-   getn(f, lacing, header[26]);
-
-   // determine the length of the payload
-   len = 0;
-   for (i=0; i < header[26]; ++i)
-      len += lacing[i];
-
-   // this implies where the page ends
-   z->page_end = z->page_start + 27 + header[26] + len;
-
-   // read the last-decoded sample out of the data
-   z->last_decoded_sample = header[6] + (header[7] << 8) + (header[8] << 16) + (header[9] << 24);
-
-   // restore file state to where we were
-   set_file_offset(f, z->page_start);
-   return 1;
-}
+int get_seek_page_info(stb_vorbis *f, ProbedPage *z);
 
 // rarely used function to seek back to the preceeding page while finding the
 // start of a packet
