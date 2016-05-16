@@ -2535,6 +2535,95 @@ pub extern fn stb_vorbis_flush_pushdata(f: &mut stb_vorbis)
    f.channel_buffer_end = 0;
 }
 
+// create an ogg vorbis decoder from an ogg vorbis stream in memory (note
+// this must be the entire stream!). on failure, returns NULL and sets *error
+#[no_mangle]
+pub unsafe extern fn stb_vorbis_open_memory(data: *const u8, len: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+//    stb_vorbis *f, p;
+   if data.is_null() {
+     return std::ptr::null_mut();       
+   } 
+   
+   let mut p : stb_vorbis = std::mem::zeroed();
+   vorbis_init(&mut p, alloc);
+   
+   p.stream = data as *mut u8;
+   p.stream_end = data.offset(len as isize) as *mut u8;
+   p.stream_start = p.stream;
+   p.stream_len = len as u32;
+   p.push_mode = 0; // false
+   
+   if start_decoder(&mut p) != 0 {
+      let f = vorbis_alloc(&mut p);
+      if f.is_null() == false {
+         *f = p;
+         vorbis_pump_first_frame(std::mem::transmute(f));
+         return f;
+      }
+   }
+   if error.is_null() == false {
+       *error = p.error;
+   }
+   vorbis_deinit(&mut p);
+   return std::ptr::null_mut();
+}
+
+// decode an entire file and output the data interleaved into a malloc()ed
+// buffer stored in *output. The return value is the number of samples
+// decoded, or -1 if the file could not be opened or was not an ogg vorbis file.
+// When you're done with it, just free() the pointer returned in *output.
+#[no_mangle]
+pub unsafe extern fn stb_vorbis_decode_memory(mem: *const u8, len: c_int , channels: *mut c_int, sample_rate: *mut c_int, output: *mut *mut i16) -> c_int
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+    let mut error : i32 = 0;
+   let v : *mut stb_vorbis = stb_vorbis_open_memory(mem, len, &mut error, std::ptr::null_mut());
+   if v.is_null() {
+       return -1;
+   }
+   let v : &mut stb_vorbis = std::mem::transmute(v);
+   
+   let limit : i32 = v.channels as i32 * 4096;
+   *channels = v.channels;
+   if sample_rate.is_null() == false {
+      *sample_rate = v.sample_rate as i32;
+   }
+   let mut offset = 0;
+   let mut data_len = 0;
+   let mut total = limit;
+   let mut data : *mut i16 = libc::malloc( (total as usize * std::mem::size_of::<i16>()) ) as *mut i16;
+   if data.is_null() {
+      stb_vorbis_close(v);
+      return -2;
+   }
+   loop {
+       let ch = v.channels;
+      let n = stb_vorbis_get_frame_short_interleaved(v, ch, data.offset(offset as isize), total-offset);
+      
+      if n == 0 {break;}
+      data_len += n;
+      offset += n * v.channels;
+      if offset + limit > total {
+         total *= 2;
+         let data2: *mut i16 = libc::realloc(data as *mut c_void, (total as usize * std::mem::size_of::<i16>()) ) as *mut i16;
+         if data2.is_null() {
+            libc::free(data as *mut c_void);
+            stb_vorbis_close(v);
+            return -2;
+         }
+         data = data2;
+      }
+   }
+   *output = data;
+   stb_vorbis_close(v);
+   return data_len;
+}
+
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
