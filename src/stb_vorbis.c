@@ -62,9 +62,6 @@
 #ifndef STB_VORBIS_INCLUDE_STB_VORBIS_H
 #define STB_VORBIS_INCLUDE_STB_VORBIS_H
 
-#if defined(STB_VORBIS_NO_CRT) && !defined(STB_VORBIS_NO_STDIO)
-#define STB_VORBIS_NO_STDIO 1
-#endif
 
 #ifndef STB_VORBIS_NO_STDIO
 #include <stdio.h>
@@ -883,20 +880,8 @@ extern int error(vorb *f, enum STBVorbisError e);
 
 #define temp_block_array(f,count,size)  make_block_array(temp_alloc(f,array_size_required(count,size)), count, size)
 
-// given a sufficiently large block of memory, make an array of pointers to subblocks of it
-static void *make_block_array(void *mem, int count, int size)
-{
-   int i;
-   void ** p = (void **) mem;
-   char *q = (char *) (p + count);
-   for (i=0; i < count; ++i) {
-      p[i] = q;
-      q += size;
-   }
-   return p;
-}
-
 /// NOTE: moved to rust
+void *make_block_array(void *mem, int count, int size);
 void *setup_malloc(vorb *f, int sz);
 void setup_free(vorb *f, void *p);
 void *setup_temp_malloc(vorb *f, int sz);

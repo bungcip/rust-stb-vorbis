@@ -2982,6 +2982,19 @@ unsafe fn crc32_update(crc: u32, byte: u8) -> u32
    return (crc << 8) ^ crc_table[ (byte as u32 ^ (crc >> 24)) as usize];
 }
 
+// given a sufficiently large block of memory, make an array of pointers to subblocks of it
+#[no_mangle]
+pub unsafe extern fn make_block_array(mem: *mut c_void, count: c_int, size: c_int) -> *mut c_void
+{
+   let p : *mut *mut c_void  = std::mem::transmute(mem);
+   let mut q : *mut i8 = p.offset(count as isize) as *mut i8;
+   for i in 0 .. count {
+      *p.offset(i as isize) = q as *mut c_void;
+      q = q.offset(size as isize);
+   }
+   return p as *mut c_void;
+}
+
 
 // Below is function that still live in C code
 extern {
