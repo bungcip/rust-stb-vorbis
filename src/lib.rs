@@ -2623,6 +2623,159 @@ pub unsafe extern fn stb_vorbis_decode_memory(mem: *const u8, len: c_int , chann
    return data_len;
 }
 
+// gets num_samples samples, not necessarily on a frame boundary--this requires
+// buffering so you have to supply the buffers. DOES NOT APPLY THE COERCION RULES.
+// Returns the number of samples stored per channel; it may be less than requested
+// at the end of the file. If there are no more samples in the file, returns 0.
+pub unsafe fn stb_vorbis_get_samples_float(f: &mut stb_vorbis, channels: c_int , buffer: *mut *mut f32, num_samples: c_int ) -> c_int
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   let mut outputs: *mut *mut f32 = std::mem::zeroed();
+   let mut n = 0;
+   let mut z = f.channels;
+   if z > channels {z = channels;}
+   while n < num_samples {
+      let mut k = f.channel_buffer_end - f.channel_buffer_start;
+      if n + k >= num_samples { k = num_samples - n; }
+      if k != 0 {
+          let mut i = 0;
+          while i < z {
+            // memcpy(buffer[i]+n, f.channel_buffers[i]+f.channel_buffer_start, sizeof(float)*k);
+            std::ptr::copy_nonoverlapping(
+                (*buffer.offset(i as isize)).offset(n as isize),
+                f.channel_buffers[i as usize].offset(f.channel_buffer_start as isize),
+                std::mem::size_of::<f32>() * k as usize
+            );
+            i += 1;
+          }
+          
+          while i < channels {
+            // memset(buffer[i]+n, 0, sizeof(float) * k);
+            std::ptr::write_bytes(
+                (*buffer.offset(i as isize)).offset(n as isize),
+                0,
+                std::mem::size_of::<f32>() * k as usize
+            );
+            i += 1;
+          }          
+      }
+      n += k;
+      f.channel_buffer_start += k;
+      if n == num_samples{
+         break;
+      }
+      if stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut outputs) == 0 {
+         break;
+      }
+   }
+   return n;
+}
+
+// gets num_samples samples, not necessarily on a frame boundary--this requires
+// buffering so you have to supply the buffers. DOES NOT APPLY THE COERCION RULES.
+// Returns the number of samples stored per channel; it may be less than requested
+// at the end of the file. If there are no more samples in the file, returns 0.
+pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut stb_vorbis, channels: c_int , mut buffer: *mut f32, num_floats: c_int ) -> c_int 
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   let mut outputs: *mut *mut f32 = std::mem::zeroed();
+   let len : i32 = num_floats / channels;
+   let mut n=0;
+   let mut z = f.channels;
+   if z > channels {z = channels;}
+   while n < len {
+    //   int i,j;
+      let mut k = f.channel_buffer_end - f.channel_buffer_start;
+      if n+k >= len {k = len - n;}
+      for j in 0 .. k  {
+          let mut i = 0;
+          while i < z {
+            *buffer = *f.channel_buffers[i as usize].offset( (f.channel_buffer_start+j) as isize);
+            buffer = buffer.offset(1);
+              i += 1;
+          }
+          
+          while i < channels {
+            *buffer = 0.0;
+            buffer = buffer.offset(1);
+              i += 1;
+          }
+      }
+      n += k;
+      f.channel_buffer_start += k;
+      if n == len{
+         break;
+      }
+      if stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut outputs) == 0{
+         break;
+      }
+   }
+   return n;
+}
+
+// gets num_samples samples, not necessarily on a frame boundary--this requires
+// buffering so you have to supply the buffers. Applies the coercion rules above
+// to produce 'channels' channels. Returns the number of samples stored per channel;
+// it may be less than requested at the end of the file. If there are no more
+// samples in the file, returns 0.
+
+pub unsafe fn stb_vorbis_get_samples_short(f: &mut stb_vorbis, channels: c_int, buffer: *mut *mut i16, len: c_int) -> c_int
+{
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   let mut outputs: *mut *mut f32 = std::mem::zeroed();
+   let mut n = 0;
+   let z = f.channels;
+   
+   // NOTE(bungcip): useless code?
+//    if z > channels {z = channels;}
+
+   while n < len {
+      let mut k = f.channel_buffer_end - f.channel_buffer_start;
+      if n+k >= len {k = len - n;}
+      if k != 0 {
+         convert_samples_short(channels, buffer, n, f.channels, f.channel_buffers.as_mut_ptr(), f.channel_buffer_start, k);
+      }
+      n += k;
+      f.channel_buffer_start += k;
+      if n == len{ break;}
+      if stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut outputs) == 0 {break;}
+   }
+   return n;
+}
+
+// gets num_samples samples, not necessarily on a frame boundary--this requires
+// buffering so you have to supply the buffers. Applies the coercion rules above
+// to produce 'channels' channels. Returns the number of samples stored per channel;
+// it may be less than requested at the end of the file. If there are no more
+// samples in the file, returns 0.
+pub unsafe fn stb_vorbis_get_samples_short_interleaved(f: &mut stb_vorbis, channels: c_int, mut buffer: *mut i16, num_shorts: c_int ) -> c_int
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   let mut outputs: *mut *mut f32 = std::mem::zeroed();
+   let len = num_shorts / channels;
+   let mut n = 0;
+   let z = f.channels;
+   // NOTE(bungcip): useless code?
+//    if z > channels {z = channels;}
+   while n < len {
+      let mut k = f.channel_buffer_end - f.channel_buffer_start;
+      if n+k >= len {k = len - n;}
+      if k != 0 {
+         convert_channels_short_interleaved(channels, buffer, f.channels, f.channel_buffers.as_mut_ptr(), f.channel_buffer_start, k);
+      }
+      buffer = buffer.offset( (k*channels) as isize);
+      n += k;
+      f.channel_buffer_start += k;
+      if n == len{ break;}
+      if stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut outputs) == 0 {break;}
+   }
+   return n;
+}
+
 
 // Below is function that still live in C code
 extern {
