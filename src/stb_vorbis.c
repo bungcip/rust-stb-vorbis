@@ -1030,37 +1030,7 @@ extern uint8 get8(vorb *z);
 extern uint32 get32(vorb *f);
 extern int getn(vorb *z, uint8 *data, int n);
 extern void skip(vorb *z, int n);
-
-int set_file_offset(stb_vorbis *f, unsigned int loc)
-{
-   #ifndef STB_VORBIS_NO_PUSHDATA_API
-   if (f->push_mode) return 0;
-   #endif
-   f->eof = 0;
-   if (USE_MEMORY(f)) {
-      if (f->stream_start + loc >= f->stream_end || f->stream_start + loc < f->stream_start) {
-         f->stream = f->stream_end;
-         f->eof = 1;
-         return 0;
-      } else {
-         f->stream = f->stream_start + loc;
-         return 1;
-      }
-   }
-   #ifndef STB_VORBIS_NO_STDIO
-   if (loc + f->f_start < loc || loc >= 0x80000000) {
-      loc = 0x7fffffff;
-      f->eof = 1;
-   } else {
-      loc += f->f_start;
-   }
-   if (!fseek(f->f, loc, SEEK_SET))
-      return 1;
-   f->eof = 1;
-   fseek(f->f, f->f_start, SEEK_END);
-   return 0;
-   #endif
-}
+extern int set_file_offset(stb_vorbis *f, unsigned int loc);
 
 
 static uint8 ogg_page_header[4] = { 0x4f, 0x67, 0x67, 0x53 };
@@ -3043,75 +3013,7 @@ stb_vorbis *stb_vorbis_open_pushdata(
 // DATA-PULLING API
 //
 
-static uint32 vorbis_find_page(stb_vorbis *f, uint32 *end, uint32 *last)
-{
-   for(;;) {
-      int n;
-      if (f->eof) return 0;
-      n = get8(f);
-      if (n == 0x4f) { // page header candidate
-         unsigned int retry_loc = stb_vorbis_get_file_offset(f);
-         int i;
-         // check if we're off the end of a file_section stream
-         if (retry_loc - 25 > f->stream_len)
-            return 0;
-         // check the rest of the header
-         for (i=1; i < 4; ++i)
-            if (get8(f) != ogg_page_header[i])
-               break;
-         if (f->eof) return 0;
-         if (i == 4) {
-            uint8 header[27];
-            uint32 i, crc, goal, len;
-            for (i=0; i < 4; ++i)
-               header[i] = ogg_page_header[i];
-            for (; i < 27; ++i)
-               header[i] = get8(f);
-            if (f->eof) return 0;
-            if (header[4] != 0) goto invalid;
-            goal = header[22] + (header[23] << 8) + (header[24]<<16) + (header[25]<<24);
-            for (i=22; i < 26; ++i)
-               header[i] = 0;
-            crc = 0;
-            for (i=0; i < 27; ++i)
-               crc = crc32_update(crc, header[i]);
-            len = 0;
-            for (i=0; i < header[26]; ++i) {
-               int s = get8(f);
-               crc = crc32_update(crc, s);
-               len += s;
-            }
-            if (len && f->eof) return 0;
-            for (i=0; i < len; ++i)
-               crc = crc32_update(crc, get8(f));
-            // finished parsing probable page
-            if (crc == goal) {
-               // we could now check that it's either got the last
-               // page flag set, OR it's followed by the capture
-               // pattern, but I guess TECHNICALLY you could have
-               // a file with garbage between each ogg page and recover
-               // from it automatically? So even though that paranoia
-               // might decrease the chance of an invalid decode by
-               // another 2^32, not worth it since it would hose those
-               // invalid-but-useful files?
-               if (end)
-                  *end = stb_vorbis_get_file_offset(f);
-               if (last) {
-                  if (header[5] & 0x04)
-                     *last = 1;
-                  else
-                     *last = 0;
-               }
-               set_file_offset(f, retry_loc-1);
-               return 1;
-            }
-         }
-        invalid:
-         // not a valid page, so rewind and look for next one
-         set_file_offset(f, retry_loc);
-      }
-   }
-}
+uint32 vorbis_find_page(stb_vorbis *f, uint32 *end, uint32 *last);
 
 
 #define SAMPLE_unknown  0xffffffff
@@ -3157,26 +3059,7 @@ static int get_seek_page_info(stb_vorbis *f, ProbedPage *z)
 
 // rarely used function to seek back to the preceeding page while finding the
 // start of a packet
-static int go_to_page_before(stb_vorbis *f, unsigned int limit_offset)
-{
-   unsigned int previous_safe, end;
-
-   // now we want to seek back 64K from the limit
-   if (limit_offset >= 65536 && limit_offset-65536 >= f->first_audio_page_offset)
-      previous_safe = limit_offset - 65536;
-   else
-      previous_safe = f->first_audio_page_offset;
-
-   set_file_offset(f, previous_safe);
-
-   while (vorbis_find_page(f, &end, NULL)) {
-      if (end >= limit_offset && stb_vorbis_get_file_offset(f) < limit_offset)
-         return 1;
-      set_file_offset(f, end);
-   }
-
-   return 0;
-}
+int go_to_page_before(stb_vorbis *f, unsigned int limit_offset);
 
 // implements the search logic for finding a page and starting decoding. if
 // the function succeeds, current_loc_valid will be true and current_loc will
@@ -3326,33 +3209,6 @@ error:
    stb_vorbis_seek_start(f);
    return error(f, VORBIS_seek_failed);
 }
-
-// the same as vorbis_decode_initial, but without advancing
-int peek_decode_initial(vorb *f, int *p_left_start, int *p_left_end, int *p_right_start, int *p_right_end, int *mode)
-{
-   int bits_read, bytes_read;
-
-   if (!vorbis_decode_initial(f, p_left_start, p_left_end, p_right_start, p_right_end, mode))
-      return 0;
-
-   // either 1 or 2 bytes were read, figure out which so we can rewind
-   bits_read = 1 + ilog(f->mode_count-1);
-   if (f->mode_config[*mode].blockflag)
-      bits_read += 2;
-   bytes_read = (bits_read + 7) / 8;
-
-   f->bytes_in_seg += bytes_read;
-   f->packet_bytes -= bytes_read;
-   skip(f, -bytes_read);
-   if (f->next_seg == -1)
-      f->next_seg = f->segment_count - 1;
-   else
-      f->next_seg--;
-   f->valid_bits = 0;
-
-   return 1;
-}
-
 
 
 unsigned int stb_vorbis_stream_length_in_samples(stb_vorbis *f)

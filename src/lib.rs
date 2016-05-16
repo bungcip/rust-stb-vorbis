@@ -134,6 +134,9 @@ static channel_position: [[i8; 6]; 7] = [
 ];
 
 
+static ogg_page_header: [u8; 4] = [ 0x4f, 0x67, 0x67, 0x53 ];
+
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct stb_vorbis_alloc
@@ -2776,6 +2779,209 @@ pub unsafe fn stb_vorbis_get_samples_short_interleaved(f: &mut stb_vorbis, chann
    return n;
 }
 
+// the same as vorbis_decode_initial, but without advancing
+unsafe fn peek_decode_initial(f: &mut vorb, p_left_start: &mut c_int, p_left_end: &mut c_int, p_right_start: &mut c_int, p_right_end: &mut c_int, mode: &mut c_int) -> c_int
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    int bits_read, bytes_read;
+
+   if vorbis_decode_initial(f, p_left_start, p_left_end, p_right_start, p_right_end, mode) == 0 {
+      return 0;
+   }
+
+   // either 1 or 2 bytes were read, figure out which so we can rewind
+   let mut bits_read = 1 + ilog(f.mode_count-1);
+   if f.mode_config[*mode as usize].blockflag != 0 {
+      bits_read += 2;
+   }
+   let bytes_read = (bits_read + 7) / 8;
+
+   f.bytes_in_seg += bytes_read as u8;
+   f.packet_bytes -= bytes_read;
+   skip(f, -bytes_read);
+   if f.next_seg == -1{
+      f.next_seg = f.segment_count - 1;
+   }
+   else{
+      f.next_seg -= 1;
+   }
+   f.valid_bits = 0;
+
+   return 1;
+}
+
+#[no_mangle]
+pub unsafe extern fn set_file_offset(f: &mut stb_vorbis, loc: c_uint) -> c_int
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   if f.push_mode != 0 {return 0;}
+   f.eof = 0;
+   if USE_MEMORY!(f) {
+      if f.stream_start.offset(loc as isize)  >= f.stream_end || f.stream_start.offset(loc as isize) < f.stream_start {
+         f.stream = f.stream_end;
+         f.eof = 1;
+         return 0;
+      } else {
+         f.stream = f.stream_start.offset(loc as isize);
+         return 1;
+      }
+   }
+   if loc + f.f_start < loc || loc >= 0x80000000 {
+      loc = 0x7fffffff;
+      f.eof = 1;
+   } else {
+      loc += f.f_start;
+   }
+   if libc::fseek(f.f, loc as i32, SEEK_SET) == 0{
+      return 1;
+   }
+   f.eof = 1;
+   libc::fseek(f.f, f.f_start as i32, SEEK_END);
+   return 0;
+}
+
+// rarely used function to seek back to the preceeding page while finding the
+// start of a packet
+#[no_mangle]
+pub unsafe extern fn go_to_page_before(f: &mut stb_vorbis, limit_offset: c_uint) -> c_int
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   let previous_safe : c_uint;
+   let mut end: c_uint = 0;
+
+   // now we want to seek back 64K from the limit
+   if limit_offset >= 65536 && limit_offset-65536 >= f.first_audio_page_offset{
+      previous_safe = limit_offset - 65536;
+   }
+   else{
+      previous_safe = f.first_audio_page_offset;
+   }
+
+   set_file_offset(f, previous_safe);
+
+   while vorbis_find_page(f, &mut end, std::ptr::null_mut()) != 0 {
+      if end >= limit_offset && stb_vorbis_get_file_offset(f) < limit_offset{
+         return 1;          
+      }
+      set_file_offset(f, end);
+   }
+
+   return 0;
+}
+
+#[no_mangle]
+pub unsafe extern fn vorbis_find_page(f: &mut stb_vorbis, end: *mut u32, last: *mut u32) -> u32
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   loop {
+      if f.eof != 0 {return 0;}
+      let n : i32 = get8(f) as i32;
+      if n == 0x4f { // page header candidate
+         let retry_loc = stb_vorbis_get_file_offset(f);
+         
+         'invalid : loop {
+        //  int i;
+         // check if we're off the end of a file_section stream
+         if retry_loc - 25 > f.stream_len{
+            return 0;
+         }
+         // check the rest of the header
+         let mut i = 1;
+         while i < 4 {
+            if get8(f) != ogg_page_header[i]{
+               break;
+            }
+             i += 1;
+         }
+         if f.eof != 0 {return 0;}
+         if i == 4 {
+            let mut header: [u8; 27] = std::mem::zeroed();
+            // uint32 i, crc, goal, len;
+            let mut i : usize = 0;
+            while i < 4 {
+               header[i] = ogg_page_header[i];
+                i += 1;
+            }
+            while i < 27 {
+               header[i] = get8(f);
+                
+                i += 1;
+            }
+            
+            if f.eof != 0 {return 0;}
+            
+            if header[4] != 0 {
+                // goto invalid;
+                break 'invalid;
+            }
+            let goal : u32 = header[22] as u32 + 
+                ((header[23] as u32) << 8) + 
+                ((header[24] as u32) << 16) + 
+                ((header[25] as u32) << 24);
+            
+            i = 22;
+            while i < 26 {
+               header[i] = 0;
+                i += 1;
+            }
+            let mut crc = 0;
+            for i in 0usize .. 27 {
+               crc = crc32_update(crc, header[i]);
+            }
+            let mut len = 0;
+            for i in 0 .. header[26] {
+               let s = get8(f) as i32;
+               crc = crc32_update(crc, s as u8);
+               len += s;
+            }
+            if len != 0 && f.eof != 0 {return 0;}
+            for i in 0 .. len {
+               crc = crc32_update(crc, get8(f));
+            }
+            // finished parsing probable page
+            if crc == goal as u32 {
+               // we could now check that it's either got the last
+               // page flag set, OR it's followed by the capture
+               // pattern, but I guess TECHNICALLY you could have
+               // a file with garbage between each ogg page and recover
+               // from it automatically? So even though that paranoia
+               // might decrease the chance of an invalid decode by
+               // another 2^32, not worth it since it would hose those
+               // invalid-but-useful files?
+               if end.is_null() == false {
+                  *end = stb_vorbis_get_file_offset(f);
+               }
+               if last.is_null() == false {
+                  if (header[5] & 0x04) != 0 {
+                     *last = 1;
+                  }else{
+                     *last = 0;
+                  }
+               }
+               set_file_offset(f, retry_loc-1);
+               return 1;
+            }
+         }
+         
+         break;
+         }// loop 
+        // invalid:
+         // not a valid page, so rewind and look for next one
+         set_file_offset(f, retry_loc);
+      }
+   }
+}
+
+#[inline(always)]
+unsafe fn crc32_update(crc: u32, byte: u8) -> u32
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+   return (crc << 8) ^ crc_table[ (byte as u32 ^ (crc >> 24)) as usize];
+}
+
 
 // Below is function that still live in C code
 extern {
@@ -2785,8 +2991,6 @@ extern {
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
     pub fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> c_int;
-    pub fn peek_decode_initial(f: &mut vorb, p_left_start: &mut c_int, p_left_end: &mut c_int, p_right_start: &mut c_int, p_right_end: &mut c_int, mode: &mut c_int) -> c_int;
-    pub fn set_file_offset(f: &mut stb_vorbis, loc: c_uint) -> c_int;
     
     // Real API
     pub fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> c_uint;
