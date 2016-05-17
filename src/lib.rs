@@ -1224,8 +1224,7 @@ pub unsafe extern fn vorbis_pump_first_frame(f: &mut stb_vorbis)
 }
 
 // NOTE(bungcip): p must be zeroed before using it
-#[no_mangle]
-pub unsafe extern fn vorbis_init(p: &mut stb_vorbis, z: *const stb_vorbis_alloc)
+unsafe fn vorbis_init(p: &mut stb_vorbis, z: *const stb_vorbis_alloc)
 {
    
    if z.is_null() == false {
@@ -2248,8 +2247,7 @@ pub unsafe extern fn vorbis_alloc(f: &mut stb_vorbis) -> *mut stb_vorbis
    return p;
 }
 
-#[no_mangle]
-pub unsafe fn vorbis_deinit(p: &mut stb_vorbis)
+unsafe fn vorbis_deinit(p: &mut stb_vorbis)
 {
    if p.residue_config.is_null() == false {
       for i in 0 .. p.residue_count {
@@ -3186,6 +3184,379 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
     return (f.stream as usize - data as usize) as c_int;
 }
 
+#[no_mangle]
+pub unsafe extern fn is_whole_packet_present(f: &mut stb_vorbis, end_page: c_int) -> c_int
+{
+   // make sure that we have the packet available before continuing...
+   // this requires a full ogg parse, but we know we can fetch from f->stream
+
+   // instead of coding this out explicitly, we could save the current read state,
+   // read the next packet with get8() until end-of-packet, check f->eof, then
+   // reset the state? but that would be slower, esp. since we'd have over 256 bytes
+   // of state to restore (primarily the page segment table)
+
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   let mut s = f.next_seg;
+   let mut first = 1; // true
+   let mut p = f.stream;
+
+   if s != -1 { // if we're not starting the packet with a 'continue on next page' flag
+      while s < f.segment_count {
+         p = p.offset( f.segments[s as usize] as isize);
+         if f.segments[s as usize] < 255{               // stop at first short segment
+            break;
+         }
+          
+          s += 1;
+      }
+      
+      // either this continues, or it ends it...
+      if end_page != 0 {
+         if s < f.segment_count-1 {
+            return error(f, STBVorbisError::VORBIS_invalid_stream as c_int);
+         }
+      }
+      
+      if s == f.segment_count {
+         s = -1; // set 'crosses page' flag
+      }
+      if p > f.stream_end {
+        return error(f, STBVorbisError::VORBIS_need_more_data as c_int);
+      }
+      first = 0; // false
+   }
+   
+   while s == -1 {
+    //   uint8 *q; 
+    //   int n;
+
+      // check that we have the page header ready
+      if p.offset(26) >= f.stream_end               {return error(f, STBVorbisError::VORBIS_need_more_data as c_int);}
+      // validate the page
+      if libc::memcmp(p as *const c_void, ogg_page_header.as_ptr() as *const c_void, 4) != 0         {return error(f, STBVorbisError::VORBIS_invalid_stream as c_int);}
+      if *p.offset(4) != 0                             {return error(f, STBVorbisError::VORBIS_invalid_stream as c_int);}
+      if first != 0 { // the first segment must NOT have 'continued_packet', later ones MUST
+         if f.previous_length != 0 {
+            if (*p.offset(5) & PAGEFLAG_continued_packet as u8) != 0 { return error(f, STBVorbisError::VORBIS_invalid_stream as c_int);}
+         }
+         // if no previous length, we're resynching, so we can come in on a continued-packet,
+         // which we'll just drop
+      } else {
+         if (*p.offset(5) & PAGEFLAG_continued_packet as u8) == 0 {return error(f, STBVorbisError::VORBIS_invalid_stream as c_int);}
+      }
+      let n = *p.offset(26); // segment counts
+      let q = p.offset(27);  // q points to segment table
+      p = q.offset(n as isize); // advance past header
+      // make sure we've read the segment table
+      if p > f.stream_end                     {return error(f, STBVorbisError::VORBIS_need_more_data as c_int);}
+      for s in 0 .. n {
+         p = p.offset( *q.offset(s as isize) as isize);
+         if *q.offset(s as isize) < 255{
+            break;
+         }
+      }
+      if end_page != 0 {
+         if s < (n-1) as i32                            {return error(f, STBVorbisError::VORBIS_invalid_stream as c_int);}
+      }
+      if s == n as i32 {
+         s = -1; // set 'crosses page' flag
+      }
+      if p > f.stream_end                     {return error(f,STBVorbisError::VORBIS_need_more_data as c_int);}
+      first = 0; // false
+   }
+   return 1; // true
+}
+
+const SAMPLE_unknown : u32 = 0xffffffff;
+
+
+// these functions return the total length of the vorbis stream
+pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> c_uint
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+    
+//    unsigned int restore_offset, previous_safe;
+//    unsigned int end, last_page_loc;
+
+    use STBVorbisError::*;
+    
+    let restore_offset : u32;
+    let previous_safe :u32;
+    let mut end: u32 = 0;
+    let mut last_page_loc :u32;
+
+   if IS_PUSH_MODE!(f) { return error(f, VORBIS_invalid_api_mixing as c_int) as c_uint; }
+   if f.total_samples == 0 {
+      let mut last : u32 = 0;
+      let mut lo : u32;
+      let hi : u32;
+      let mut header: [i8; 6] = std::mem::zeroed();
+    //   uint32 lo,hi;
+    //   char header[6];
+    
+      'done: loop {
+      // first, store the current decode position so we can restore it
+      restore_offset = stb_vorbis_get_file_offset(f);
+
+      // now we want to seek back 64K from the end (the last page must
+      // be at most a little less than 64K, but let's allow a little slop)
+      if f.stream_len >= 65536 && f.stream_len-65536 >= f.first_audio_page_offset {
+         previous_safe = f.stream_len - 65536;
+      } else {
+         previous_safe = f.first_audio_page_offset;
+      }
+
+      set_file_offset(f, previous_safe);
+      // previous_safe is now our candidate 'earliest known place that seeking
+      // to will lead to the final page'
+
+      if vorbis_find_page(f, &mut end, &mut last) == 0 {
+         // if we can't find a page, we're hosed!
+         f.error = VORBIS_cant_find_last_page as c_int;
+         f.total_samples = 0xffffffff;
+        //  goto done;
+        break 'done;
+      }
+
+      // check if there are more pages
+      last_page_loc = stb_vorbis_get_file_offset(f);
+
+      // stop when the last_page flag is set, not when we reach eof;
+      // this allows us to stop short of a 'file_section' end without
+      // explicitly checking the length of the section
+      while last == 0 {
+         set_file_offset(f, end);
+         if vorbis_find_page(f, &mut end, &mut last) == 0 {
+            // the last page we found didn't have the 'last page' flag
+            // set. whoops!
+            break;
+         }
+         // NOTE(bungcip): not used?
+        //  previous_safe = last_page_loc+1;
+
+         last_page_loc = stb_vorbis_get_file_offset(f);
+      }
+
+      set_file_offset(f, last_page_loc);
+
+      // parse the header
+      getn(f, header.as_mut_ptr() as *mut u8, 6);
+      // extract the absolute granule position
+      lo = get32(f);
+      hi = get32(f);
+      if lo == 0xffffffff && hi == 0xffffffff {
+         f.error = VORBIS_cant_find_last_page as c_int;
+         f.total_samples = SAMPLE_unknown;
+        //  goto done;
+        break 'done;
+      }
+      if hi != 0{
+         lo = 0xfffffffe; // saturate
+      }
+      f.total_samples = lo;
+
+      f.p_last.page_start = last_page_loc;
+      f.p_last.page_end   = end;
+      f.p_last.last_decoded_sample = lo;
+
+      break 'done;
+     }
+
+    //  done:
+      set_file_offset(f, restore_offset);
+   }
+   return if f.total_samples == SAMPLE_unknown {0} else {f.total_samples};
+}
+
+// implements the search logic for finding a page and starting decoding. if
+// the function succeeds, current_loc_valid will be true and current_loc will
+// be less than or equal to the provided sample number (the closer the
+// better).
+unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> c_int
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+   
+   let mut left : ProbedPage;
+   let mut right: ProbedPage;
+   let mut mid: ProbedPage = std::mem::zeroed();
+   let mut start_seg_with_known_loc : i32;
+   let mut end_pos : i32;
+   let mut page_start : i32;
+   let mut delta: u32;
+   let stream_length : u32;
+   let padding : u32;
+   let mut offset: f64 = 0.0;
+   let mut bytes_per_sample : f64 = 0.0;
+   let mut probe = 0; 
+   
+   use STBVorbisError::*;
+
+   // find the last page and validate the target sample
+   stream_length = stb_vorbis_stream_length_in_samples(f);
+   if stream_length == 0            {return error(f, VORBIS_seek_without_length as c_int);}
+   if sample_number > stream_length { return error(f, VORBIS_seek_invalid as c_int);}
+
+   'error: loop {
+   // this is the maximum difference between the window-center (which is the
+   // actual granule position value), and the right-start (which the spec
+   // indicates should be the granule position (give or take one)).
+   padding = ((f.blocksize_1 - f.blocksize_0) >> 2) as u32;
+   if sample_number < padding{
+      sample_number = 0;
+   }else{
+      sample_number -= padding;
+   }
+   
+   left = f.p_first;
+   while left.last_decoded_sample == !0 {
+      // (untested) the first page does not have a 'last_decoded_sample'
+      set_file_offset(f, left.page_end);
+      if get_seek_page_info(f, &mut left) == 0 {
+        //   goto error;
+        break 'error;
+        }
+   }
+
+   right = f.p_last;
+   assert!(right.last_decoded_sample != !0 );
+
+   // starting from the start is handled differently
+   if sample_number <= left.last_decoded_sample {
+      stb_vorbis_seek_start(f);
+      return 1;
+   }
+
+   while left.page_end != right.page_start {
+      assert!(left.page_end < right.page_start);
+      // search range in bytes
+      delta = right.page_start - left.page_end;
+      if delta <= 65536 {
+         // there's only 64K left to search - handle it linearly
+         set_file_offset(f, left.page_end);
+      } else {
+         if probe < 2 {
+            if probe == 0 {
+               // first probe (interpolate)
+               let data_bytes : f64 = (right.page_end - left.page_start) as f64;
+               bytes_per_sample = data_bytes / right.last_decoded_sample as f64;
+               offset = left.page_start as f64 + bytes_per_sample * (sample_number - left.last_decoded_sample) as f64;
+            } else {
+               // second probe (try to bound the other side)
+               let mut error: f64 = (sample_number as f64 - mid.last_decoded_sample as f64) * bytes_per_sample;
+               if error >= 0.0 && error <  8000.0 {error =  8000.0;}
+               if error <  0.0 && error > -8000.0 {error = -8000.0;}
+               offset += error * 2.0;
+            }
+
+            // ensure the offset is valid
+            if offset < left.page_end as f64{
+               offset = left.page_end as f64;
+            }
+            if offset > (right.page_start - 65536) as f64{
+               offset = (right.page_start - 65536) as f64;
+            }
+            
+            set_file_offset(f, offset as c_uint);
+         } else {
+            // binary search for large ranges (offset by 32K to ensure
+            // we don't hit the right page)
+            set_file_offset(f, left.page_end + (delta / 2) - 32768);
+         }
+
+         if vorbis_find_page(f, std::ptr::null_mut(), std::ptr::null_mut()) == 0 {
+            //  goto error;
+            break 'error;
+        }
+      }
+
+      loop {
+         if get_seek_page_info(f, &mut mid) == 0 {
+            //  goto error;
+            break 'error;
+         }
+         if mid.last_decoded_sample != !0 {break;}
+         // (untested) no frames end on this page
+         set_file_offset(f, mid.page_end);
+         assert!(mid.page_start < right.page_start);
+      }
+
+      // if we've just found the last page again then we're in a tricky file,
+      // and we're close enough.
+      if mid.page_start == right.page_start{
+         break;
+      }
+      
+      if sample_number < mid.last_decoded_sample{
+         right = mid;
+      }else{
+         left = mid;
+      }
+      
+      probe += 1;
+   }
+
+   // seek back to start of the last packet
+   page_start = left.page_start as i32;
+   set_file_offset(f, page_start as u32);
+   if start_page(f) == 0 { return error(f, VORBIS_seek_failed as c_int);}
+   end_pos = f.end_seg_with_known_loc;
+   assert!(end_pos >= 0);
+
+   loop {
+       let mut i = end_pos;
+       while i > 0 {
+            if f.segments[ (i-1) as usize] != 255{
+                break;
+            }
+           i -= 1;
+       }
+
+      start_seg_with_known_loc = i;
+
+      if start_seg_with_known_loc > 0 || (f.page_flag & PAGEFLAG_continued_packet as u8) == 0{
+         break;
+      }
+
+      // (untested) the final packet begins on an earlier page
+      if go_to_page_before(f, page_start as u32) == 0{
+        //  goto error;
+        break 'error;
+      }
+
+      page_start = stb_vorbis_get_file_offset(f) as i32;
+      if start_page(f) == 0 {
+        //   goto error;
+        break 'error;
+        }
+        
+      end_pos = f.segment_count - 1;
+   }
+
+   // prepare to start decoding
+   f.current_loc_valid = 0; // false
+   f.last_seg = 0; // false
+   f.valid_bits = 0;
+   f.packet_bytes = 0;
+   f.bytes_in_seg = 0;
+   f.previous_length = 0;
+   f.next_seg = start_seg_with_known_loc;
+
+   for i in 0 .. start_seg_with_known_loc {
+       let seg = f.segments[i as usize] as i32;
+      skip(f, seg);
+   }
+
+   // start decoding (optimizable - this frame is generally discarded)
+   vorbis_pump_first_frame(f);
+   return 1;
+   } // loop -- 'error
+// error:
+   // try to restore the file to a valid state
+   stb_vorbis_seek_start(f);
+   return error(f, VORBIS_seek_failed as c_int);
+}
+
 
 // Below is function that still live in C code
 extern {
@@ -3194,11 +3565,10 @@ extern {
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
-    pub fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> c_int;
+    // pub fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> c_int;
     pub fn vorbis_search_for_page_pushdata(f: &mut vorb, data: *mut u8, data_len: c_int) -> c_int;
-    pub fn is_whole_packet_present(f: &mut stb_vorbis, end_page: c_int) -> c_int;
 
     // Real API
-    pub fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> c_uint;
+    // pub fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> c_uint;
 
 }
