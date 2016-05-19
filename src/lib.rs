@@ -787,8 +787,7 @@ unsafe fn compute_bitreverse(n: c_int, rev: *mut u16)
    }
 }
 
-#[no_mangle]
-pub extern fn uint32_compare(p: *const c_void, q: *const c_void) -> c_int
+fn uint32_compare(p: *const c_void, q: *const c_void) -> c_int
 {
     unsafe {
         let x = std::ptr::read(p as *const u32);        
@@ -1196,8 +1195,7 @@ pub unsafe extern fn next_segment(f: &mut vorb) -> c_int
 
 
 
-#[no_mangle]
-pub unsafe extern fn vorbis_decode_packet(f: &mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int
+unsafe fn vorbis_decode_packet(f: &mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int
 {
     let mut mode : c_int = 0;
     let mut left_end: c_int = 0;
@@ -1214,8 +1212,7 @@ pub unsafe extern fn vorbis_decode_packet(f: &mut vorb, len: &mut c_int, p_left:
 }
 
 
-#[no_mangle]
-pub unsafe extern fn vorbis_pump_first_frame(f: &mut stb_vorbis)
+unsafe fn vorbis_pump_first_frame(f: &mut stb_vorbis)
 {
     let mut len: c_int = 0;
     let mut right: c_int = 0;
@@ -1404,8 +1401,7 @@ pub unsafe extern fn vorbis_decode_initial(f: &mut vorb, p_left_start: *mut c_in
    return 1; // true
 }
 
-#[no_mangle]
-pub unsafe extern fn vorbis_finish_frame(f: &mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int
+unsafe fn vorbis_finish_frame(f: &mut stb_vorbis, len: c_int, left: c_int, right: c_int) -> c_int
 {
 //    int prev,i,j;
    // we use right&left (the start of the right- and left-window sin()-regions)
@@ -1594,8 +1590,7 @@ const PLAYBACK_LEFT  : c_int =   2;
 const PLAYBACK_RIGHT : c_int =   4;
 
 
-#[no_mangle]
-pub unsafe extern fn convert_samples_short(buf_c: c_int, buffer: *mut *mut i16, b_offset: c_int, data_c: c_int, data: *mut *mut f32, d_offset: c_int, samples: c_int)
+unsafe fn convert_samples_short(buf_c: c_int, buffer: *mut *mut i16, b_offset: c_int, data_c: c_int, data: *mut *mut f32, d_offset: c_int, samples: c_int)
 {
    if buf_c != data_c && buf_c <= 2 && data_c <= 6 {
     //   static int channel_selector[3][2] = { {0}, {PLAYBACK_MONO}, {PLAYBACK_LEFT, PLAYBACK_RIGHT} };
@@ -1629,9 +1624,7 @@ pub unsafe extern fn convert_samples_short(buf_c: c_int, buffer: *mut *mut i16, 
 }
 
 
-
-#[no_mangle]
-pub unsafe extern fn convert_channels_short_interleaved(buf_c: c_int, buffer: *mut i16, data_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int)
+unsafe fn convert_channels_short_interleaved(buf_c: c_int, buffer: *mut i16, data_c: c_int, data: *mut *mut f32, d_offset: c_int, len: c_int)
 {
    if buf_c != data_c && buf_c <= 2 && data_c <= 6 {
        assert!(buf_c == 2);
@@ -1767,8 +1760,7 @@ pub unsafe extern fn stb_vorbis_get_file_offset(f: &stb_vorbis) -> c_uint
    return (libc::ftell(f.f) - f.f_start as i32) as c_uint;
 }
 
-#[no_mangle]
-pub unsafe extern fn start_page_no_capturepattern(f: &mut vorb) -> c_int
+unsafe fn start_page_no_capturepattern(f: &mut vorb) -> c_int
 {
     use STBVorbisError::*;
     

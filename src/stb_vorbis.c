@@ -926,7 +926,6 @@ extern void compute_accelerated_huffman(Codebook *c);
 #endif
 
 /// NOTE: moved to rust
-extern STBV_CDECL uint32_compare(const void *p, const void *q);
 extern int include_in_sort(Codebook *c, uint8 len);
 void compute_sorted_huffman(Codebook *c, uint8 *lengths, uint32 *values);
 extern int vorbis_validate(uint8 *data);
@@ -947,12 +946,6 @@ extern int STBV_CDECL point_compare(const void *p, const void *q);
 /////////////////////// END LEAF SETUP FUNCTIONS //////////////////////////
 
 
-#if defined(STB_VORBIS_NO_STDIO)
-   #define USE_MEMORY(z)    TRUE
-#else
-   #define USE_MEMORY(z)    ((z)->stream)
-#endif
-
 
 // NOTE: moved to Rust
 extern uint8 get8(vorb *z);
@@ -962,14 +955,11 @@ extern void skip(vorb *z, int n);
 extern int set_file_offset(stb_vorbis *f, unsigned int loc);
 
 
-static uint8 ogg_page_header[4] = { 0x4f, 0x67, 0x67, 0x53 };
-
 
 #define PAGEFLAG_continued_packet   1
 #define PAGEFLAG_first_page         2
 #define PAGEFLAG_last_page          4
 
-extern int start_page_no_capturepattern(vorb *f);
 
 /// NOTE: moved to rust
 extern int start_page(vorb *f);
@@ -1047,41 +1037,17 @@ enum
 
 
 
-
-
-
-// CODEBOOK_ELEMENT_FAST is an optimization for the CODEBOOK_FLOATS case
-// where we avoid one addition
-// #define CODEBOOK_ELEMENT(c,off)          (c->multiplicands[off])
-// #define CODEBOOK_ELEMENT_FAST(c,off)     (c->multiplicands[off])
-// #define CODEBOOK_ELEMENT_BASE(c)         (0)
-
-
-extern int codebook_decode_deinterleave_repeat(vorb *f, Codebook *c, float **outputs, int ch, int *c_inter_p, int *p_inter_p, int len, int total_decode);
-
 /// NOTE: moved to rust
+extern int codebook_decode_deinterleave_repeat(vorb *f, Codebook *c, float **outputs, int ch, int *c_inter_p, int *p_inter_p, int len, int total_decode);
 int predict_point(int x, int x0, int x1, int y0, int y1);
 
 
 
-// @OPTIMIZE: if you want to replace this bresenham line-drawing routine,
-// note that you must produce bit-identical output to decode correctly;
-// this specific sequence of operations is specified in the spec (it's
-// drawing integer-quantized frequency-space lines that the encoder
-// expects to be exactly the same)
-//     ... also, isn't the whole point of Bresenham's algorithm to NOT
-// have to divide in the setup? sigh.
-#ifndef STB_VORBIS_NO_DEFER_FLOOR
-#define LINE_OP(a,b)   a *= b
-#else
-#define LINE_OP(a,b)   a = b
-#endif
-
-#ifdef STB_VORBIS_DIVIDE_TABLE
-#define DIVTAB_NUMER   32
-#define DIVTAB_DENOM   64
-int8 integer_divide_table[DIVTAB_NUMER][DIVTAB_DENOM]; // 2KB
-#endif
+// #ifdef STB_VORBIS_DIVIDE_TABLE
+// #define DIVTAB_NUMER   32
+// #define DIVTAB_DENOM   64
+// int8 integer_divide_table[DIVTAB_NUMER][DIVTAB_DENOM]; // 2KB
+// #endif
 
 
 /// NOTE: moved to rust
@@ -2115,10 +2081,6 @@ int vorbis_decode_packet_rest(vorb *f, int *len, Mode *m, int left_start, int le
    return TRUE;
 }
 
-/// NOTE: moved to rust
-extern int vorbis_decode_packet(vorb *f, int *len, int *p_left, int *p_right);
-extern int vorbis_finish_frame(stb_vorbis *f, int len, int left, int right);
-extern void vorbis_pump_first_frame(stb_vorbis *f);
 
 #ifndef STB_VORBIS_NO_PUSHDATA_API
 int is_whole_packet_present(stb_vorbis *f, int end_page);
