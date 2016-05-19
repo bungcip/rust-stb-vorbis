@@ -411,6 +411,8 @@ pub struct stb_vorbis
 
 pub type vorb = stb_vorbis;
 
+#[repr(C)]
+#[derive(Copy, Clone)]
 pub struct stb_vorbis_info
 {
    sample_rate: c_uint,
@@ -3668,6 +3670,78 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut vorb, data: *mut u8, mut data_
    return data_len;
 }
 
+// if the fast table above doesn't work, we want to binary
+// search them... need to reverse the bits
+#[no_mangle]
+pub unsafe extern fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mut u32)
+{
+   // build a list of all the entries
+   // OPTIMIZATION: don't include the short ones, since they'll be caught by FAST_HUFFMAN.
+   // this is kind of a frivolous optimization--I don't see any performance improvement,
+   // but it's like 4 extra lines of code, so.
+   if c.sparse == 0 {
+      let mut k = 0;
+      for i in 0 .. c.entries {
+         if include_in_sort(c, *lengths.offset(i as isize)) != 0 {
+            *c.sorted_codewords.offset(k as isize) = bit_reverse(
+                *c.codewords.offset(i as isize));
+            k += 1;
+         }
+      }
+      assert!(k == c.sorted_entries);
+   } else {
+      for i in 0 .. c.sorted_entries {
+         *c.sorted_codewords.offset(i as isize) = bit_reverse(
+                *c.codewords.offset(i as isize));
+      }
+   }
+
+   qsort(
+       c.sorted_codewords as *mut c_void, 
+       c.sorted_entries as usize, 
+       std::mem::size_of::<i32>(), 
+       uint32_compare as *const c_void);
+       
+   *c.sorted_codewords.offset(c.sorted_entries as isize) = 0xffffffff;
+
+   let len = if c.sparse != 0  { c.sorted_entries } else { c.entries };
+   // now we need to indicate how they correspond; we could either
+   //   #1: sort a different data structure that says who they correspond to
+   //   #2: for each sorted entry, search the original list to find who corresponds
+   //   #3: for each original entry, find the sorted entry
+   // #1 requires extra storage, #2 is slow, #3 can use binary search!
+   for i in 0 .. len {
+      let huff_len = if c.sparse != 0 {
+          *lengths.offset(*values.offset(i as isize) as isize)
+      } else {
+          *lengths.offset(i as isize)
+      };
+
+      if include_in_sort(c,huff_len) != 0 {
+         let code: u32 = bit_reverse(*c.codewords.offset(i as isize));
+         let mut x : i32 = 0;
+         let mut n : i32 = c.sorted_entries;
+         while n > 1 {
+            // invariant: sc[x] <= code < sc[x+n]
+            let m : i32 = x + (n >> 1);
+            if *c.sorted_codewords.offset(m as isize) <= code {
+               x = m;
+               n -= n >> 1;
+            } else {
+               n >>= 1;
+            }
+         }
+         assert!(*c.sorted_codewords.offset(x as isize) == code);
+         if c.sparse != 0 {
+            *c.sorted_values.offset(x as isize) = *values.offset(i as isize) as i32;
+            *c.codeword_lengths.offset(x as isize) = huff_len;
+         } else {
+            *c.sorted_values.offset(x as isize) = i;
+         }
+      }
+
+   }
+}
 
 
 // Below is function that still live in C code
@@ -3678,4 +3752,5 @@ extern {
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
 
+    fn qsort(base: *mut c_void, nmemb: size_t, size: size_t, compar: *const c_void);
 }

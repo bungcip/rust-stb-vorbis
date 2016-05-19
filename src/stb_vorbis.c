@@ -928,63 +928,7 @@ extern void compute_accelerated_huffman(Codebook *c);
 /// NOTE: moved to rust
 extern STBV_CDECL uint32_compare(const void *p, const void *q);
 extern int include_in_sort(Codebook *c, uint8 len);
-
-// if the fast table above doesn't work, we want to binary
-// search them... need to reverse the bits
-static void compute_sorted_huffman(Codebook *c, uint8 *lengths, uint32 *values)
-{
-   int i, len;
-   // build a list of all the entries
-   // OPTIMIZATION: don't include the short ones, since they'll be caught by FAST_HUFFMAN.
-   // this is kind of a frivolous optimization--I don't see any performance improvement,
-   // but it's like 4 extra lines of code, so.
-   if (!c->sparse) {
-      int k = 0;
-      for (i=0; i < c->entries; ++i)
-         if (include_in_sort(c, lengths[i])) 
-            c->sorted_codewords[k++] = bit_reverse(c->codewords[i]);
-      assert(k == c->sorted_entries);
-   } else {
-      for (i=0; i < c->sorted_entries; ++i)
-         c->sorted_codewords[i] = bit_reverse(c->codewords[i]);
-   }
-
-   qsort(c->sorted_codewords, c->sorted_entries, sizeof(c->sorted_codewords[0]), uint32_compare);
-   c->sorted_codewords[c->sorted_entries] = 0xffffffff;
-
-   len = c->sparse ? c->sorted_entries : c->entries;
-   // now we need to indicate how they correspond; we could either
-   //   #1: sort a different data structure that says who they correspond to
-   //   #2: for each sorted entry, search the original list to find who corresponds
-   //   #3: for each original entry, find the sorted entry
-   // #1 requires extra storage, #2 is slow, #3 can use binary search!
-   for (i=0; i < len; ++i) {
-      int huff_len = c->sparse ? lengths[values[i]] : lengths[i];
-      if (include_in_sort(c,huff_len)) {
-         uint32 code = bit_reverse(c->codewords[i]);
-         int x=0, n=c->sorted_entries;
-         while (n > 1) {
-            // invariant: sc[x] <= code < sc[x+n]
-            int m = x + (n >> 1);
-            if (c->sorted_codewords[m] <= code) {
-               x = m;
-               n -= (n>>1);
-            } else {
-               n >>= 1;
-            }
-         }
-         assert(c->sorted_codewords[x] == code);
-         if (c->sparse) {
-            c->sorted_values[x] = values[i];
-            c->codeword_lengths[x] = huff_len;
-         } else {
-            c->sorted_values[x] = i;
-         }
-      }
-   }
-}
-
-/// NOTE: moved to rust
+void compute_sorted_huffman(Codebook *c, uint8 *lengths, uint32 *values);
 extern int vorbis_validate(uint8 *data);
 extern int lookup1_values(int entries, int dim);
 extern int init_blocksize(vorb *f, int b, int n);
