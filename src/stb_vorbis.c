@@ -525,16 +525,6 @@ enum STBVorbisError
 
 #ifndef STB_VORBIS_NO_INTEGER_CONVERSION
 #ifndef STB_VORBIS_NO_FAST_SCALED_FLOAT
-
-   // only need endianness for fast-float-to-int, which we don't
-   // use for pushdata
-
-   #ifndef STB_VORBIS_BIG_ENDIAN
-     #define STB_VORBIS_ENDIAN  0
-   #else
-     #define STB_VORBIS_ENDIAN  1
-   #endif
-
 #endif
 #endif
 
@@ -555,10 +545,6 @@ enum STBVorbisError
 #endif
 #endif
 #else // STB_VORBIS_NO_CRT
-#define NULL 0
-#define malloc(s)   0
-#define free(s)     ((void) 0)
-#define realloc(s)  0
 #endif // STB_VORBIS_NO_CRT
 
 #include <limits.h>
@@ -887,24 +873,12 @@ void setup_free(vorb *f, void *p);
 void *setup_temp_malloc(vorb *f, int sz);
 void setup_temp_free(vorb *f, void *p, int sz);
 
-// #define CRC32_POLY    0x04c11db7   // from spec
-
 uint32 crc_table[256];
-extern void crc32_init(void);
-
-static __forceinline uint32 crc32_update(uint32 crc, uint8 byte)
-{
-   return (crc << 8) ^ crc_table[byte ^ (crc >> 24)];
-}
-
-
 /// NOTE: moved to rust
+extern void crc32_init(void);
 extern unsigned int bit_reverse(unsigned int n);
 extern int ilog(int32 n);
 
-#ifndef M_PI
-  #define M_PI  3.14159265358979323846264f  // from CRC
-#endif
 
 // code length assigned to a value with no huffman encoding
 #define NO_CODE   255
