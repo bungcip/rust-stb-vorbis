@@ -279,6 +279,7 @@ pub struct Mode
 
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct CRCscan
 {
    goal_crc: u32,    // expected crc if match
@@ -3557,6 +3558,117 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> c_int
    return error(f, VORBIS_seek_failed as c_int);
 }
 
+unsafe fn vorbis_search_for_page_pushdata(f: &mut vorb, data: *mut u8, mut data_len: c_int) -> c_int
+{
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+
+   let mut n;
+    for i in 0 .. f.page_crc_tests {
+      f.scan[i as usize].bytes_done = 0;
+    } 
+
+   // if we have room for more scans, search for them first, because
+   // they may cause us to stop early if their header is incomplete
+   if f.page_crc_tests < STB_VORBIS_PUSHDATA_CRC_COUNT {
+      if data_len < 4 {return 0;}
+      data_len -= 3; // need to look for 4-byte sequence, so don't miss
+                     // one that straddles a boundary
+      for i in 0 .. data_len {
+         if *data.offset(i as isize) == 0x4f {
+            if 0 == libc::memcmp(data.offset(i as isize) as *mut c_void, ogg_page_header.as_ptr() as *const c_void, 4) {
+            //    int j,len;
+               let mut crc : u32;
+               // make sure we have the whole page header
+               if i+26 >= data_len || i + 27 + *data.offset(i as isize+26) as i32 >= data_len {
+                  // only read up to this page start, so hopefully we'll
+                  // have the whole page header start next time
+                  data_len = i;
+                  break;
+               }
+               // ok, we have it all; compute the length of the page
+               let mut len : i32 = 27 + *data.offset(i as isize+26) as i32;
+               for j in 0 .. *data.offset(i as isize + 26) {
+                  len += *data.offset(i as isize+27 + j as isize) as i32;
+               }
+               // scan everything up to the embedded crc (which we must 0)
+               crc = 0;
+               for j in 0 .. 22 {
+                  crc = crc32_update(crc, *data.offset(i as isize + j as isize));
+               }
+               // now process 4 0-bytes
+               for j in 0 .. 4 {
+                  crc = crc32_update(crc, 0);
+               }
+               let j = 26;
+               // len is the total number of bytes we need to scan
+               n = f.page_crc_tests;
+               f.page_crc_tests += 1;
+               f.scan[n as usize].bytes_left = len-j;
+               f.scan[n as usize].crc_so_far = crc;
+               f.scan[n as usize].goal_crc = *data.offset(i as isize + 22) as u32
+                    + ((*data.offset(i as isize + 23) as u32) << 8)
+                    + ((*data.offset(i as isize + 24) as u32) <<16)
+                    + ((*data.offset(i as isize + 25) as u32) <<24);
+               // if the last frame on a page is continued to the next, then
+               // we can't recover the sample_loc immediately
+               if *data.offset((i+ 27 + *data.offset(i as isize+26) as i32 - 1) as isize) == 255 {
+                  f.scan[n as usize].sample_loc = !0;
+               }else{
+                  f.scan[n as usize].sample_loc = *data.offset(i as isize + 6) as u32
+                    + ((*data.offset(i as isize + 7) as u32) <<  8)
+                    + ((*data.offset(i as isize + 8) as u32) << 16)
+                    + ((*data.offset(i as isize + 9) as u32) << 24);
+               }
+               f.scan[n as usize].bytes_done = i+j;
+               if f.page_crc_tests == STB_VORBIS_PUSHDATA_CRC_COUNT{
+                  break;
+               }
+               // keep going if we still have room for more
+            }
+         }
+      }
+   }
+
+   let mut i = 0;
+   while i < f.page_crc_tests {
+      let mut crc : u32;
+      let j : i32;
+      let n = f.scan[i as usize].bytes_done;
+      let mut m = f.scan[i as usize].bytes_left;
+      if m > data_len - n {m = data_len - n;}
+      // m is the bytes to scan in the current chunk
+      crc = f.scan[i as usize].crc_so_far;
+      for j in 0 .. m {
+         crc = crc32_update(crc, *data.offset( (n+j) as isize));
+      }
+      f.scan[i as usize].bytes_left -= m;
+      f.scan[i as usize].crc_so_far = crc;
+      if f.scan[i as usize].bytes_left == 0 {
+         // does it match?
+         if f.scan[i as usize].crc_so_far == f.scan[i as usize].goal_crc {
+            // Houston, we have page
+            data_len = n+m; // consumption amount is wherever that scan ended
+            f.page_crc_tests = -1; // drop out of page scan mode
+            f.previous_length = 0; // decode-but-don't-output one frame
+            f.next_seg = -1;       // start a new page
+            f.current_loc = f.scan[i as usize].sample_loc; // set the current sample location
+                                    // to the amount we'd have decoded had we decoded this page
+            f.current_loc_valid =!0; 
+            f.current_loc != !0;
+            return data_len;
+         }
+         // delete entry
+         f.page_crc_tests -= 1;
+         f.scan[i as usize] = f.scan[f.page_crc_tests as usize];
+      } else {
+         i += 1;
+      }
+   }
+
+   return data_len;
+}
+
+
 
 // Below is function that still live in C code
 extern {
@@ -3565,10 +3677,5 @@ extern {
     pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
-    // pub fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> c_int;
-    pub fn vorbis_search_for_page_pushdata(f: &mut vorb, data: *mut u8, data_len: c_int) -> c_int;
-
-    // Real API
-    // pub fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> c_uint;
 
 }
