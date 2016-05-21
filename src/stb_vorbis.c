@@ -864,10 +864,8 @@ extern int error(vorb *f, enum STBVorbisError e);
 #define temp_alloc_save(f)              ((f)->temp_offset)
 #define temp_alloc_restore(f,p)         ((f)->temp_offset = (p))
 
-#define temp_block_array(f,count,size)  make_block_array(temp_alloc(f,array_size_required(count,size)), count, size)
 
 /// NOTE: moved to rust
-void *make_block_array(void *mem, int count, int size);
 void *setup_malloc(vorb *f, int sz);
 void setup_free(vorb *f, void *p);
 void *setup_temp_malloc(vorb *f, int sz);
@@ -876,7 +874,6 @@ void setup_temp_free(vorb *f, void *p, int sz);
 uint32 crc_table[256];
 /// NOTE: moved to rust
 extern void crc32_init(void);
-extern unsigned int bit_reverse(unsigned int n);
 extern int ilog(int32 n);
 
 
@@ -925,7 +922,6 @@ extern uint8 get8(vorb *z);
 extern uint32 get32(vorb *f);
 extern int getn(vorb *z, uint8 *data, int n);
 extern void skip(vorb *z, int n);
-extern int set_file_offset(stb_vorbis *f, unsigned int loc);
 
 
 
@@ -943,29 +939,10 @@ extern int next_segment(vorb *f);
 #define INVALID_BITS  (-1)
 
 /// NOTE: moved to rust
-extern int get8_packet_raw(vorb *f);
 extern int get8_packet(vorb *f);
 extern void flush_packet(vorb *f);
 extern uint32 get_bits(vorb *f, int n);
 
-// @OPTIMIZE: primary accumulator for huffman
-// expand the buffer to as many bits as possible without reading off end of packet
-// it might be nice to allow f->valid_bits and f->acc to be stored in registers,
-// e.g. cache them locally and decode locally
-// static __forceinline void prep_huffman(vorb *f)
-// {
-//    if (f->valid_bits <= 24) {
-//       if (f->valid_bits == 0) f->acc = 0;
-//       do {
-//          int z;
-//          if (f->last_seg && !f->bytes_in_seg) return;
-//          z = get8_packet_raw(f);
-//          if (z == EOP) return;
-//          f->acc += (unsigned) z << f->valid_bits;
-//          f->valid_bits += 8;
-//       } while (f->valid_bits <= 24);
-//    }
-// }
 
 enum
 {
@@ -973,41 +950,6 @@ enum
    VORBIS_packet_comment = 3,
    VORBIS_packet_setup = 5
 };
-
-
-// #ifndef STB_VORBIS_NO_INLINE_DECODE
-
-// #define DECODE_RAW(var, f,c)                                  \
-//    if (f->valid_bits < STB_VORBIS_FAST_HUFFMAN_LENGTH)        \
-//       prep_huffman(f);                                        \
-//    var = f->acc & FAST_HUFFMAN_TABLE_MASK;                    \
-//    var = c->fast_huffman[var];                                \
-//    if (var >= 0) {                                            \
-//       int n = c->codeword_lengths[var];                       \
-//       f->acc >>= n;                                           \
-//       f->valid_bits -= n;                                     \
-//       if (f->valid_bits < 0) { f->valid_bits = 0; var = -1; } \
-//    } else {                                                   \
-//       var = codebook_decode_scalar_raw(f,c);                  \
-//    }
-
-// #else
-
-
-// #define DECODE_RAW(var,f,c)    var = codebook_decode_scalar(f,c);
-
-// #endif
-
-// #define DECODE(var,f,c)                                       \
-//    DECODE_RAW(var,f,c)                                        \
-//    if (c->sparse) var = c->sorted_values[var];
-
-// #ifndef STB_VORBIS_DIVIDES_IN_CODEBOOK
-//   #define DECODE_VQ(var,f,c)   DECODE_RAW(var,f,c)
-// #else
-//   #define DECODE_VQ(var,f,c)   DECODE(var,f,c)
-// #endif
-
 
 
 
@@ -1548,9 +1490,6 @@ typedef int16 YTYPE;
 typedef int YTYPE;
 #endif
 
-/// NOTE: moved to rust
-int do_floor(vorb *f, Mapping *map, int i, int n, float *target, YTYPE *finalY, uint8 *step2_flag);
-extern int vorbis_decode_initial(vorb *f, int *p_left_start, int *p_left_end, int *p_right_start, int *p_right_end, int *mode);
 
 
 

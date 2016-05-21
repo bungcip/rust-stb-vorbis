@@ -596,8 +596,7 @@ pub unsafe extern fn crc32_init()
 
 
 // used in setup, and for huffman that doesn't go fast path
-#[no_mangle]
-pub extern fn bit_reverse(n: c_uint) -> c_uint 
+fn bit_reverse(n: c_uint) -> c_uint 
 {
   let n = ((n & 0xAAAAAAAA) >>  1) | ((n & 0x55555555) << 1);
   let n = ((n & 0xCCCCCCCC) >>  2) | ((n & 0x33333333) << 2);
@@ -1042,8 +1041,7 @@ unsafe fn capture_pattern(f: &mut vorb) -> c_int
 const EOP : i32 = -1;
 const INVALID_BITS : i32 = -1;
 
-#[no_mangle]
-pub unsafe extern fn get8_packet_raw(f: *mut vorb) -> c_int
+unsafe fn get8_packet_raw(f: *mut vorb) -> c_int
 {
     let f : &mut vorb = std::mem::transmute(f as *mut vorb); 
     if f.bytes_in_seg == 0 {
@@ -1253,8 +1251,7 @@ unsafe fn vorbis_init(p: &mut stb_vorbis, z: *const stb_vorbis_alloc)
    p.f = std::ptr::null_mut();
 }
 
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_close(p: *mut stb_vorbis)
+pub unsafe fn stb_vorbis_close(p: *mut stb_vorbis)
 {
    if p.is_null(){
        return;
@@ -1264,8 +1261,7 @@ pub unsafe extern fn stb_vorbis_close(p: *mut stb_vorbis)
    setup_free(std::mem::transmute(p),p as *mut c_void);
 }
 
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_open_file_section(file: *mut libc::FILE, close_on_free: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc, length: c_uint) -> *mut stb_vorbis
+pub unsafe fn stb_vorbis_open_file_section(file: *mut libc::FILE, close_on_free: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc, length: c_uint) -> *mut stb_vorbis
 {
     let mut p : stb_vorbis = std::mem::zeroed();
     
@@ -1293,8 +1289,7 @@ pub unsafe extern fn stb_vorbis_open_file_section(file: *mut libc::FILE, close_o
 }
 
 
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_open_file(file: *mut FILE,  close_on_free: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
+pub unsafe fn stb_vorbis_open_file(file: *mut FILE,  close_on_free: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
 {
     let start = libc::ftell(file);
     libc::fseek(file, 0, libc::SEEK_END);
@@ -1306,8 +1301,7 @@ pub unsafe extern fn stb_vorbis_open_file(file: *mut FILE,  close_on_free: c_int
 }
 
 
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_open_filename(filename: *const i8, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
+pub unsafe fn stb_vorbis_open_filename(filename: *const i8, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
 {
    let  mode: &'static [u8; 3] = b"rb\0";
    let f = libc::fopen(filename, mode.as_ptr() as *const i8);
@@ -1336,8 +1330,7 @@ pub unsafe extern fn stb_vorbis_open_filename(filename: *const i8, error: *mut c
 //        has to be the same as frame N+1's left_end-left_start (which they are by
 //        construction)
 
-#[no_mangle]
-pub unsafe extern fn vorbis_decode_initial(f: &mut vorb, p_left_start: *mut c_int, p_left_end: *mut c_int, p_right_start: *mut c_int, p_right_end: *mut c_int, mode: *mut c_int) -> c_int
+unsafe fn vorbis_decode_initial(f: &mut vorb, p_left_start: *mut c_int, p_left_end: *mut c_int, p_right_start: *mut c_int, p_right_end: *mut c_int, mode: *mut c_int) -> c_int
 {
    f.channel_buffer_start = 0;
    f.channel_buffer_end = 0;
@@ -1473,8 +1466,7 @@ unsafe fn vorbis_finish_frame(f: &mut stb_vorbis, len: c_int, left: c_int, right
    return right - left;
 }
 
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_get_frame_short_interleaved(f: &mut stb_vorbis, num_c: c_int, buffer: *mut i16, num_shorts: i32) -> c_int
+pub unsafe fn stb_vorbis_get_frame_short_interleaved(f: &mut stb_vorbis, num_c: c_int, buffer: *mut i16, num_shorts: i32) -> c_int
 {
    let mut output: *mut *mut f32 = std::ptr::null_mut();
    let mut buffer = buffer;
@@ -1493,8 +1485,7 @@ pub unsafe extern fn stb_vorbis_get_frame_short_interleaved(f: &mut stb_vorbis, 
 }
 
 
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_decode_filename(filename: *const i8, channels: *mut c_int, sample_rate: *mut c_int, output: *mut *mut i16) -> c_int
+pub unsafe fn stb_vorbis_decode_filename(filename: *const i8, channels: *mut c_int, sample_rate: *mut c_int, output: *mut *mut i16) -> c_int
 {
 //    int data_len, offset, total, limit, error;
 //    short *data;
@@ -1546,8 +1537,7 @@ pub unsafe extern fn stb_vorbis_decode_filename(filename: *const i8, channels: *
 }
 
 
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_get_frame_float(f: &mut stb_vorbis, channels: *mut c_int, output: *mut *mut *mut f32) -> c_int
+pub unsafe fn stb_vorbis_get_frame_float(f: &mut stb_vorbis, channels: *mut c_int, output: *mut *mut *mut f32) -> c_int
 {
 //    int len, right,left,i;
    if IS_PUSH_MODE!(f){
@@ -1580,8 +1570,7 @@ pub unsafe extern fn stb_vorbis_get_frame_float(f: &mut stb_vorbis, channels: *m
    return len;
 }
 
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_get_frame_short(f: &mut vorb, num_c: c_int, buffer: *mut *mut i16, num_samples: c_int) -> c_int
+pub unsafe fn stb_vorbis_get_frame_short(f: &mut vorb, num_c: c_int, buffer: *mut *mut i16, num_samples: c_int) -> c_int
 {
     let mut output: *mut *mut f32 = std::ptr::null_mut();
    let mut len = stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut output);
@@ -1682,8 +1671,7 @@ unsafe fn copy_samples(dest: *mut i16, src: *mut f32, len: c_int)
    }
 }
 
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_seek(f: &mut stb_vorbis, sample_number: c_uint) -> c_int
+pub unsafe fn stb_vorbis_seek(f: &mut stb_vorbis, sample_number: c_uint) -> c_int
 {
    if stb_vorbis_seek_frame(f, sample_number) == 0 {
       return 0;
@@ -1832,8 +1820,7 @@ unsafe fn start_page_no_capturepattern(f: &mut vorb) -> c_int
    return 1; // true
 }
 
-#[no_mangle]
-pub unsafe extern fn predict_point(x: c_int, x0: c_int , x1: c_int , y0: c_int , y1: c_int ) -> c_int
+unsafe fn predict_point(x: c_int, x0: c_int , x1: c_int , y0: c_int , y1: c_int ) -> c_int
 {
    let dy = y1 - y0;
    let adx = x1 - x0;
@@ -1845,8 +1832,7 @@ pub unsafe extern fn predict_point(x: c_int, x0: c_int , x1: c_int , y0: c_int ,
 
 pub type YTYPE = i16;
 
-#[no_mangle]
-pub unsafe extern fn do_floor(f: &mut vorb, map: &Mapping, i: c_int, n: c_int , target: *mut f32, finalY: *mut YTYPE, _: *mut u8) -> c_int
+unsafe fn do_floor(f: &mut vorb, map: &Mapping, i: c_int, n: c_int , target: *mut f32, finalY: *mut YTYPE, _: *mut u8) -> c_int
 {
    let n2 = n >> 1;
 
@@ -1930,8 +1916,7 @@ unsafe fn draw_line(output: *mut f32, x0: c_int, y0: c_int, mut x1: c_int, y1: c
 }
 
 
-#[no_mangle]
-pub unsafe extern fn residue_decode(f: &mut vorb, book: &Codebook, target: *mut f32, mut offset: c_int, n: c_int, rtype: c_int) -> c_int
+unsafe fn residue_decode(f: &mut vorb, book: &Codebook, target: *mut f32, mut offset: c_int, n: c_int, rtype: c_int) -> c_int
 {
    if rtype == 0 {
       let step = n / book.dimensions;
@@ -2086,8 +2071,7 @@ unsafe fn prep_huffman(f: &mut vorb)
    }
 }
 
-#[no_mangle]
-pub unsafe extern fn codebook_decode_scalar_raw(f: &mut vorb, c: &Codebook) -> c_int
+unsafe fn codebook_decode_scalar_raw(f: &mut vorb, c: &Codebook) -> c_int
 {
 //    int i;
    prep_huffman(f);
@@ -2175,8 +2159,7 @@ unsafe fn codebook_decode_step(f: &mut vorb, c: &Codebook, output: *mut f32, mut
    return 1; // true
 }
 
-#[no_mangle]
-pub unsafe extern fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, outputs: *mut *mut f32, ch: c_int, c_inter_p: &mut c_int, p_inter_p: &mut c_int, len: c_int, mut total_decode: c_int) -> c_int
+unsafe fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, outputs: *mut *mut f32, ch: c_int, c_inter_p: &mut c_int, p_inter_p: &mut c_int, len: c_int, mut total_decode: c_int) -> c_int
 {
    let mut c_inter = *c_inter_p;
    let mut p_inter = *p_inter_p;
@@ -2255,8 +2238,7 @@ unsafe fn compute_window(n: c_int, window: *mut f32)
    }
 }
 
-#[no_mangle]
-pub unsafe extern fn vorbis_alloc(f: &mut stb_vorbis) -> *mut stb_vorbis
+unsafe fn vorbis_alloc(f: &mut stb_vorbis) -> *mut stb_vorbis
 {
    let p : *mut stb_vorbis = setup_malloc(f, std::mem::size_of::<stb_vorbis>() as i32)  as *mut stb_vorbis;
    return p;
@@ -2476,8 +2458,7 @@ pub fn stb_vorbis_get_error(f: &mut stb_vorbis) -> c_int
 }
 
 // this function is equivalent to stb_vorbis_seek(f,0)
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_seek_start(f: &mut stb_vorbis)
+pub unsafe fn stb_vorbis_seek_start(f: &mut stb_vorbis)
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -2537,8 +2518,7 @@ pub fn stb_vorbis_get_info(f: &mut stb_vorbis) -> stb_vorbis_info
 // call stb_vorbis_flush_pushdata(), then start calling decoding, then once
 // decoding is returning you data, call stb_vorbis_get_sample_offset, and
 // if you don't like the result, seek your file again and repeat.
-#[no_mangle]
-pub extern fn stb_vorbis_flush_pushdata(f: &mut stb_vorbis)
+pub fn stb_vorbis_flush_pushdata(f: &mut stb_vorbis)
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    f.previous_length = 0;
@@ -2553,8 +2533,7 @@ pub extern fn stb_vorbis_flush_pushdata(f: &mut stb_vorbis)
 
 // create an ogg vorbis decoder from an ogg vorbis stream in memory (note
 // this must be the entire stream!). on failure, returns NULL and sets *error
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_open_memory(data: *const u8, len: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
+pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -2591,8 +2570,7 @@ pub unsafe extern fn stb_vorbis_open_memory(data: *const u8, len: c_int, error: 
 // buffer stored in *output. The return value is the number of samples
 // decoded, or -1 if the file could not be opened or was not an ogg vorbis file.
 // When you're done with it, just free() the pointer returned in *output.
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_decode_memory(mem: *const u8, len: c_int , channels: *mut c_int, sample_rate: *mut c_int, output: *mut *mut i16) -> c_int
+pub unsafe fn stb_vorbis_decode_memory(mem: *const u8, len: c_int , channels: *mut c_int, sample_rate: *mut c_int, output: *mut *mut i16) -> c_int
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -2823,8 +2801,7 @@ unsafe fn peek_decode_initial(f: &mut vorb, p_left_start: &mut c_int, p_left_end
    return 1;
 }
 
-#[no_mangle]
-pub unsafe extern fn set_file_offset(f: &mut stb_vorbis, loc: c_uint) -> c_int
+unsafe fn set_file_offset(f: &mut stb_vorbis, loc: c_uint) -> c_int
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -2856,8 +2833,7 @@ pub unsafe extern fn set_file_offset(f: &mut stb_vorbis, loc: c_uint) -> c_int
 
 // rarely used function to seek back to the preceeding page while finding the
 // start of a packet
-#[no_mangle]
-pub unsafe extern fn go_to_page_before(f: &mut stb_vorbis, limit_offset: c_uint) -> c_int
+unsafe fn go_to_page_before(f: &mut stb_vorbis, limit_offset: c_uint) -> c_int
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -2884,8 +2860,7 @@ pub unsafe extern fn go_to_page_before(f: &mut stb_vorbis, limit_offset: c_uint)
    return 0;
 }
 
-#[no_mangle]
-pub unsafe extern fn vorbis_find_page(f: &mut stb_vorbis, end: *mut u32, last: *mut u32) -> u32
+unsafe fn vorbis_find_page(f: &mut stb_vorbis, end: *mut u32, last: *mut u32) -> u32
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -2996,8 +2971,7 @@ unsafe fn crc32_update(crc: u32, byte: u8) -> u32
 }
 
 // given a sufficiently large block of memory, make an array of pointers to subblocks of it
-#[no_mangle]
-pub unsafe extern fn make_block_array(mem: *mut c_void, count: c_int, size: usize) -> *mut c_void
+unsafe fn make_block_array(mem: *mut c_void, count: c_int, size: usize) -> *mut c_void
 {
    let p : *mut *mut c_void  = std::mem::transmute(mem);
    let mut q : *mut i8 = p.offset(count as isize) as *mut i8;
@@ -3017,8 +2991,7 @@ pub unsafe extern fn make_block_array(mem: *mut c_void, count: c_int, size: usiz
 // to try to bound either side of the binary search sensibly, while still
 // working in O(log n) time if they fail.
 
-#[no_mangle]
-pub unsafe extern fn get_seek_page_info(f: &mut stb_vorbis, z: &mut ProbedPage) -> c_int
+unsafe fn get_seek_page_info(f: &mut stb_vorbis, z: &mut ProbedPage) -> c_int
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
