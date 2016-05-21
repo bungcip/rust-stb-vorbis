@@ -16,6 +16,7 @@ extern crate alloc_system;
 extern crate libc;
 
 use libc::*;
+use std::mem;
 
 
 // STB_VORBIS_MAX_CHANNELS [number]
@@ -236,6 +237,7 @@ pub struct Floor
 }
 
 #[repr(C)] 
+#[derive(Copy, Clone)]
 pub struct Residue
 {
    begin: u32, end: u32,
@@ -247,6 +249,7 @@ pub struct Residue
 } 
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct MappingChannel
 {
    magnitude: u8,
@@ -256,6 +259,7 @@ pub struct MappingChannel
 
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Mapping
 {
    coupling_steps: u16,
@@ -1197,16 +1201,24 @@ pub unsafe extern fn next_segment(f: &mut vorb) -> c_int
 
 unsafe fn vorbis_decode_packet(f: &mut vorb, len: &mut c_int, p_left: &mut c_int, p_right: &mut c_int) -> c_int
 {
-    let mut mode : c_int = 0;
+    let mut mode_index : c_int = 0;
     let mut left_end: c_int = 0;
     let mut right_end: c_int = 0;
     
-    if vorbis_decode_initial(f, p_left, &mut left_end, p_right, &mut right_end, &mut mode) == 0{
+    if vorbis_decode_initial(f, p_left, &mut left_end, p_right, &mut right_end, &mut mode_index) == 0{
         return 0;
     }
     
+    // hack to fight borrow checker
+    let mode : &Mode = {
+        let p = &f.mode_config[mode_index as usize];
+        let p = p as *const _;
+        let p : &Mode = std::mem::transmute(p);
+        p
+    };
+    
     return vorbis_decode_packet_rest(
-        f, len, &mut f.mode_config[mode as usize], 
+        f, len, mode, 
         *p_left, left_end, *p_right, right_end, p_left
     );
 }
@@ -1835,7 +1847,7 @@ pub unsafe extern fn predict_point(x: c_int, x0: c_int , x1: c_int , y0: c_int ,
 pub type YTYPE = i16;
 
 #[no_mangle]
-pub unsafe extern fn do_floor(f: &mut vorb, map: &mut Mapping, i: c_int, n: c_int , target: *mut f32, finalY: *mut YTYPE, _: *mut u8) -> c_int
+pub unsafe extern fn do_floor(f: &mut vorb, map: &Mapping, i: c_int, n: c_int , target: *mut f32, finalY: *mut YTYPE, _: *mut u8) -> c_int
 {
    let n2 = n >> 1;
 
@@ -1986,6 +1998,15 @@ unsafe fn codebook_decode(f: &mut vorb, c: &Codebook, output: *mut f32, mut len:
    }
 
    return 1; // true
+}
+
+macro_rules! DECODE {
+    ($var: expr, $f: expr, $c: expr) => {
+        DECODE_RAW!($var, $f, $c);
+        if $c.sparse != 0 {
+            $var = *$c.sorted_values.offset($var as isize);
+        }
+    }
 }
 
 
@@ -3735,14 +3756,330 @@ pub unsafe extern fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, 
    }
 }
 
+unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut c_int, m: &Mode, mut left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int
+{
+//    Mapping *map;
+//    int i,j,k,n,n2;
+    let mut zero_channel: [bool; 256] = std::mem::zeroed();
+    let mut really_zero_channel : [bool; 256] = std::mem::zeroed();
+
+// WINDOWING
+
+    let n : i32 = f.blocksize[m.blockflag as usize];
+    let map: &Mapping = std::mem::transmute(f.mapping.offset(m.mapping as isize));
+
+// FLOORS
+   let n2 : i32 = n >> 1;
+
+   CHECK!(f);
+
+   use STBVorbisError::*;
+
+   for i in 0 .. f.channels {
+      let s: i32 = (*map.chan.offset(i as isize)).mux as i32;
+      zero_channel[ i as usize ] = false; // false
+      let floor : i32 = map.submap_floor[s as usize] as i32;
+      if f.floor_types[floor as usize] == 0 {
+         return error(f, VORBIS_invalid_stream as c_int);
+      } else {
+          let g : &Floor1 = &(*f.floor_config.offset(floor as isize)).floor1;
+         if get_bits(f, 1) != 0 {
+//             short *finalY;
+//             uint8 step2_flag[256];
+            static range_list: [i32; 4] = [ 256, 128, 86, 64 ];
+            let range = range_list[ (g.floor1_multiplier-1) as usize];
+            let mut offset = 2;
+            let finalY : *mut i16 = f.finalY[i as usize];
+            *finalY.offset(0) = get_bits(f, ilog(range)-1) as i16;
+            *finalY.offset(1) = get_bits(f, ilog(range)-1) as i16;
+            for j in 0 .. g.partitions {
+               let pclass = g.partition_class_list[j as usize] as usize;
+               let cdim = g.class_dimensions[pclass];
+               let cbits = g.class_subclasses[pclass];
+               let csub = (1 << cbits)-1;
+               let mut cval = 0;
+               if cbits != 0 {
+                  let c: &mut Codebook = std::mem::transmute(f.codebooks.offset( g.class_masterbooks[pclass] as isize));
+                  DECODE!(cval,f,c);
+               }
+               for k in 0 .. cdim {
+                  let book = g.subclass_books[pclass][ (cval & csub) as usize];
+                  cval = cval >> cbits;
+                  if book >= 0 {
+                     let mut temp : i32;
+                     let c: &mut Codebook = std::mem::transmute(f.codebooks.offset(book as isize));
+                     DECODE!(temp,f,c);
+                     *finalY.offset(offset) = temp as i16;
+                  } else {
+                     *finalY.offset(offset) = 0;
+                  }
+                    offset += 1;
+               }
+            }
+
+            if f.valid_bits == INVALID_BITS {
+                // goto error;
+                zero_channel[i as usize] = true;
+                continue;
+            } // behavior according to spec
+            
+            let mut step2_flag: [u8; 256] = mem::zeroed();
+            step2_flag[0] = 1; 
+            step2_flag[1] = 1;
+            for j in 2 .. g.values {
+//                int low, high, pred, highroom, lowroom, room, val;
+               let j = j as usize;
+               let low = g.neighbors[j][0];
+               let high = g.neighbors[j][1];
+               //neighbors(g.Xlist, j, &low, &high);
+               let pred = predict_point(
+                   g.Xlist[j] as i32, 
+                   g.Xlist[low as usize] as i32,
+                   g.Xlist[high as usize] as i32, 
+                   *finalY.offset(low as isize) as i32, 
+                   *finalY.offset(high as isize) as i32
+               );
+               let val = *finalY.offset(j as isize);
+               let highroom = range - pred;
+               let lowroom = pred;
+               let room;
+               if highroom < lowroom {
+                  room = highroom * 2;
+               }else{
+                  room = lowroom * 2;
+               }
+               if val != 0 {
+                  step2_flag[low as usize] = 1;
+                  step2_flag[high as usize] = 1;
+                  step2_flag[j] = 1;
+                  
+                  if val >= room as i16 {
+                     if highroom > lowroom {
+                        *finalY.offset(j as isize) = (val - lowroom as i16 + pred as i16) as i16;
+                     } else {
+                        *finalY.offset(j as isize) = (pred as i16 - val + highroom as i16 - 1) as i16;
+                     }
+                  } else {
+                     if (val & 1) != 0 {
+                        *finalY.offset(j as isize) = pred as i16 - ((val+1)>>1);
+                     } else {
+                        *finalY.offset(j as isize) = pred as i16+ (val>>1);
+                     }
+                  }
+               } else {
+                  step2_flag[j] = 0;
+                  *finalY.offset(j as isize) = pred as i16;
+               }
+            }
+
+            // defer final floor computation until _after_ residue
+            for j in 0 .. g.values {
+               if step2_flag[j as usize] == 0 {
+                  *finalY.offset(j as isize) = -1;
+               }
+            }
+         } else {
+//            error:
+            zero_channel[i as usize] = true;
+         }
+         // So we just defer everything else to later
+
+         // at this point we've decoded the floor into buffer
+      }
+   }
+   // at this point we've decoded all floors
+
+   if f.alloc.alloc_buffer.is_null() == false{
+      assert!(f.alloc.alloc_buffer_length_in_bytes == f.temp_offset);
+   }
+
+   // re-enable coupled channels if necessary
+   CHECK!(f);
+   std::ptr::copy_nonoverlapping(zero_channel.as_ptr(), really_zero_channel.as_mut_ptr(), f.channels as usize);
+
+   for i in 0 .. map.coupling_steps {
+      let magnitude = (*map.chan.offset(i as isize)).magnitude as usize;
+      let angle = (*map.chan.offset(i as isize)).angle as usize;
+      
+      if zero_channel[magnitude] == false || zero_channel[angle] == false {
+         zero_channel[magnitude] = false;
+         zero_channel[angle] = false;
+      }
+   }
+
+   CHECK!(f);
+// RESIDUE DECODE
+   for i in 0 .. map.submaps {
+      let mut residue_buffers: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize] = mem::zeroed();
+    //   int r;
+      let mut do_not_decode: [u8; 256] = mem::zeroed();
+      let mut ch : usize = 0;
+      for j in 0 .. f.channels {
+         if (*map.chan.offset(j as isize)).mux == i {
+            if zero_channel[j as usize] {
+               do_not_decode[ch] = 1; // true
+               residue_buffers[ch] = std::ptr::null_mut();
+            } else {
+               do_not_decode[ch] = 0; // false
+               residue_buffers[ch] = f.channel_buffers[j as usize];
+            }
+            ch += 1;
+         }
+      }
+      let r = map.submap_residue[i as usize];
+      // FIXME(bungcip): change do_not_decode to bool
+      decode_residue(f, residue_buffers.as_mut_ptr(), ch as i32, n2, r as i32, do_not_decode.as_mut_ptr());
+   }
+
+   if f.alloc.alloc_buffer.is_null() == false {
+      assert!(f.alloc.alloc_buffer_length_in_bytes == f.temp_offset);
+   }
+   CHECK!(f);
+
+// INVERSE COUPLING
+   let mut i : i32 = map.coupling_steps as i32 - 1; 
+   while i >= 0 {
+      let n2 = n >> 1;
+      let ref c = *map.chan.offset(i as isize);
+      let m : *mut f32 = f.channel_buffers[c.magnitude as usize];
+      let a : *mut f32 = f.channel_buffers[c.angle  as usize];
+      for j in 0 .. n2 {
+         let a2 : f32;
+         let m2 : f32;
+         
+         let j = j as isize;
+         if *m.offset(j) > 0.0 {
+            if *a.offset(j) > 0.0 {
+               m2 = *m.offset(j);
+               a2 = *m.offset(j) - *a.offset(j);
+            } else {
+               a2 = *m.offset(j);
+               m2 = *m.offset(j) + *a.offset(j);
+            }
+         } else {
+            if *a.offset(j) > 0.0 {
+               m2 = *m.offset(j);
+               a2 = *m.offset(j) + *a.offset(j);
+            } else {
+               a2 = *m.offset(j);
+               m2 = *m.offset(j) - *a.offset(j);
+            }
+         }
+         *m.offset(j) = m2;
+         *a.offset(j) = a2;
+      }
+    i -= 1;
+   }
+   CHECK!(f);
+
+   // finish decoding the floors
+   for i in 0 .. f.channels {
+      if really_zero_channel[i as usize] {
+        //  memset(f.channel_buffers[i], 0, sizeof(*f.channel_buffers[i]) * n2);
+        std::ptr::write_bytes(f.channel_buffers[i as usize], b'0', n2 as usize);
+      } else {
+          let cb = f.channel_buffers[i as usize];
+          let fy = f.finalY[i as usize]; 
+         do_floor(f, map, i, n, cb,
+            fy, std::ptr::null_mut());
+      }
+   }
+
+// INVERSE MDCT
+   CHECK!(f);
+   for i in 0 .. f.channels{
+      inverse_mdct(f.channel_buffers[i as usize], n, f, m.blockflag as i32);
+   }
+   CHECK!(f);
+
+   // this shouldn't be necessary, unless we exited on an error
+   // and want to flush to get to the next packet
+   flush_packet(f);
+
+   if f.first_decode != 0 {
+      // assume we start so first non-discarded sample is sample 0
+      // this isn't to spec, but spec would require us to read ahead
+      // and decode the size of all current frames--could be done,
+      // but presumably it's not a commonly used feature
+      // NOTE(bungcip): maybe this is bug?
+      f.current_loc = -n2 as u32; // start of first frame is positioned for discard
+      // we might have to discard samples "from" the next frame too,
+      // if we're lapping a large block then a small at the start?
+      f.discard_samples_deferred = n - right_end;
+      f.current_loc_valid = 1; // true
+      f.first_decode = 0; // false
+   } else if f.discard_samples_deferred != 0 {
+      if f.discard_samples_deferred >= right_start - left_start {
+         f.discard_samples_deferred -= right_start - left_start;
+         left_start = right_start;
+         *p_left = left_start;
+      } else {
+         left_start += f.discard_samples_deferred;
+         *p_left = left_start;
+         f.discard_samples_deferred = 0;
+      }
+   } else if f.previous_length == 0 && f.current_loc_valid != 0 {
+      // we're recovering from a seek... that means we're going to discard
+      // the samples from this packet even though we know our position from
+      // the last page header, so we need to update the position based on
+      // the discarded samples here
+      // but wait, the code below is going to add this in itself even
+      // on a discard, so we don't need to do it here...
+   }
+   
+   // check if we have ogg information about the sample # for this packet
+   if f.last_seg_which == f.end_seg_with_known_loc {
+      // if we have a valid current loc, and this is final:
+      if f.current_loc_valid != 0 && (f.page_flag & PAGEFLAG_last_page as u8) != 0 {
+         let current_end : u32 = f.known_loc_for_packet - (n-right_end) as u32;
+         // then let's infer the size of the (probably) short final frame
+         if current_end < f.current_loc + (right_end-left_start) as u32 {
+            if current_end < f.current_loc {
+               // negative truncation, that's impossible!
+               *len = 0;
+            } else {
+               *len = (current_end - f.current_loc) as i32;
+            }
+            *len += left_start;
+            if *len > right_end {
+                *len = right_end; // this should never happen
+            }
+            f.current_loc += *len as u32;
+            return 1; // true
+         }
+      }
+      // otherwise, just set our sample loc
+      // guess that the ogg granule pos refers to the _middle_ of the
+      // last frame?
+      // set f.current_loc to the position of left_start
+      f.current_loc = f.known_loc_for_packet - (n2-left_start) as u32;
+      f.current_loc_valid = 1; // true
+   }
+
+   if f.current_loc_valid != 0 {
+       let temp_1 = (right_start - left_start) as u32;
+      // NOTE(bungcip): maybe this is bug?
+      f.current_loc = f.current_loc.wrapping_add(temp_1);
+   }
+
+   if f.alloc.alloc_buffer.is_null() == false {
+      assert!(f.alloc.alloc_buffer_length_in_bytes == f.temp_offset);
+   }
+   *len = right_end;  // ignore samples after the window goes to 0
+   CHECK!(f);
+
+   return 1; // true
+}
 
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
  
-    pub fn vorbis_decode_packet_rest(f: *mut vorb, len: *mut c_int, m: *mut Mode, left_start: c_int, left_end: c_int, right_start: c_int, right_end: c_int, p_left: *mut c_int) -> c_int;
+    pub fn decode_residue(f: *mut vorb, residue_buffers: *mut *mut f32, ch: c_int, n: c_int, rn: c_int, do_not_decode: *mut u8);
 
     pub fn start_decoder(f: *mut vorb) -> c_int;
+    pub fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, blocktype: c_int);
 
     fn qsort(base: *mut c_void, nmemb: size_t, size: size_t, compar: *const c_void);
+    
 }
