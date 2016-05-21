@@ -4309,13 +4309,580 @@ unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: c_int
    temp_alloc_restore!(f,temp_alloc_point);
 }
 
+// the following were split out into separate functions while optimizing;
+// they could be pushed back up but eh. __forceinline showed no change;
+// they're probably already being inlined.
+#[no_mangle]
+pub unsafe extern fn imdct_step3_iter0_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int , mut A: *mut f32)
+{
+   let mut ee0 = e.offset(i_off as isize);
+   let mut ee2 = ee0.offset(k_off as isize);
+   let mut i : i32;
+
+   assert!((n & 3) == 0);
+   i = n>>2;
+   while i > 0 {
+      let mut k00_20: f32;
+      let mut k01_21: f32;
+      k00_20  = *ee0.offset(0) - *ee2.offset(0);
+      k01_21  = *ee0.offset(-1) - *ee2.offset(-1);
+      *ee0.offset(-0) += *ee2.offset(0);
+      *ee0.offset(-1) += *ee2.offset(-1);
+      *ee2.offset(-0) = k00_20 * *A.offset(0) - k01_21 * *A.offset(1);
+      *ee2.offset(-1) = k01_21 * *A.offset(0) + k00_20 * *A.offset(1);
+      A = A.offset(8);
+
+      k00_20  = *ee0.offset(-2) - *ee2.offset(-2);
+      k01_21  = *ee0.offset(-3) - *ee2.offset(-3);
+      *ee0.offset(-2) += *ee2.offset(-2);
+      *ee0.offset(-3) += *ee2.offset(-3);
+      *ee2.offset(-2) = k00_20 * *A.offset(0) - k01_21 * *A.offset(1);
+      *ee2.offset(-3) = k01_21 * *A.offset(0) + k00_20 * *A.offset(1);
+      A = A.offset(8);
+
+      k00_20  = *ee0.offset(-4) - *ee2.offset(-4);
+      k01_21  = *ee0.offset(-5) - *ee2.offset(-5);
+      *ee0.offset(-4) += *ee2.offset(-4);
+      *ee0.offset(-5) += *ee2.offset(-5);
+      *ee2.offset(-4) = k00_20 * *A.offset(0) - k01_21 * *A.offset(1);
+      *ee2.offset(-5) = k01_21 * *A.offset(0) + k00_20 * *A.offset(1);
+      A = A.offset(8);
+
+      k00_20  = *ee0.offset(-6) - *ee2.offset(-6);
+      k01_21  = *ee0.offset(-7) - *ee2.offset(-7);
+      *ee0.offset(-6) += *ee2.offset(-6);
+      *ee0.offset(-7) += *ee2.offset(-7);
+      *ee2.offset(-6) = k00_20 * *A.offset(0) - k01_21 * *A.offset(1);
+      *ee2.offset(-7) = k01_21 * *A.offset(0) + k00_20 * *A.offset(1);
+      A = A.offset(8);
+      ee0 = ee0.offset(-8);
+      ee2 = ee2.offset(-8);
+
+        i -= 1;
+   }
+}
+
+#[no_mangle]
+pub unsafe extern fn imdct_step3_inner_r_loop(lim: c_int, e: *mut f32, d0: c_int , k_off: c_int , mut A: *mut f32, k1: c_int)
+{
+   let mut i : i32;
+   let mut k00_20 : f32; 
+   let mut k01_21 : f32;
+
+   let mut e0 = e.offset(d0 as isize);
+   let mut e2 = e0.offset(k_off as isize);
+
+   i = lim >> 2;
+   while i > 0 {
+      k00_20 = *e0.offset(-0) - *e2.offset(-0);
+      k01_21 = *e0.offset(-1) - *e2.offset(-1);
+      *e0.offset(-0) += *e2.offset(-0);
+      *e0.offset(-1) += *e2.offset(-1);
+      *e2.offset(-0) = (k00_20)**A.offset(0) - (k01_21) * *A.offset(1);
+      *e2.offset(-1) = (k01_21)**A.offset(0) + (k00_20) * *A.offset(1);
+
+      A = A.offset(k1 as isize);
+
+      k00_20 = *e0.offset(-2) - *e2.offset(-2);
+      k01_21 = *e0.offset(-3) - *e2.offset(-3);
+      *e0.offset(-2) += *e2.offset(-2);
+      *e0.offset(-3) += *e2.offset(-3);
+      *e2.offset(-2) = (k00_20)**A.offset(0) - (k01_21) * *A.offset(1);
+      *e2.offset(-3) = (k01_21)**A.offset(0) + (k00_20) * *A.offset(1);
+
+      A = A.offset(k1 as isize);
+
+      k00_20 = *e0.offset(-4) - *e2.offset(-4);
+      k01_21 = *e0.offset(-5) - *e2.offset(-5);
+      *e0.offset(-4) += *e2.offset(-4);
+      *e0.offset(-5) += *e2.offset(-5);
+      *e2.offset(-4) = (k00_20)**A.offset(0) - (k01_21) * *A.offset(1);
+      *e2.offset(-5) = (k01_21)**A.offset(0) + (k00_20) * *A.offset(1);
+
+      A = A.offset(k1 as isize);
+
+      k00_20 = *e0.offset(-6) - *e2.offset(-6);
+      k01_21 = *e0.offset(-7) - *e2.offset(-7);
+      *e0.offset(-6) += *e2.offset(-6);
+      *e0.offset(-7) += *e2.offset(-7);
+      *e2.offset(-6) = (k00_20)**A.offset(0) - (k01_21) * *A.offset(1);
+      *e2.offset(-7) = (k01_21)**A.offset(0) + (k00_20) * *A.offset(1);
+
+      e0 = e0.offset(-8);
+      e2 = e2.offset(-8);
+
+      A = A.offset(k1 as isize);
+    
+        i -= 1;
+   }
+}
+
+#[no_mangle]
+pub unsafe extern fn imdct_step3_inner_s_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int, A: *mut f32, a_off: c_int , k0: c_int)
+{
+   let mut i : i32;
+   let a_off = a_off as isize;
+   
+   let A0 = *A.offset(0);
+   let A1 = *A.offset(0+1);
+   let A2 = *A.offset(0+a_off);
+   let A3 = *A.offset(0+a_off+1);
+   let A4 = *A.offset(0+a_off*2+0);
+   let A5 = *A.offset(0+a_off*2+1);
+   let A6 = *A.offset(0+a_off*3+0);
+   let A7 = *A.offset(0+a_off*3+1);
+
+    let mut k00: f32;
+    let mut k11: f32;
+
+   let mut ee0 = e.offset(i_off as isize);
+   let mut ee2 = ee0.offset(k_off as isize);
+
+   i = n;
+   while i > 0 {
+      k00     = *ee0.offset(0) - *ee2.offset(0);
+      k11     = *ee0.offset(-1) - *ee2.offset(-1);
+      *ee0.offset(0) =  *ee0.offset(0) + *ee2.offset(0);
+      *ee0.offset(-1) =  *ee0.offset(-1) + *ee2.offset(-1);
+      *ee2.offset(0) = (k00) * A0 - (k11) * A1;
+      *ee2.offset(-1) = (k11) * A0 + (k00) * A1;
+
+      k00     = *ee0.offset(-2) - *ee2.offset(-2);
+      k11     = *ee0.offset(-3) - *ee2.offset(-3);
+      *ee0.offset(-2) =  *ee0.offset(-2) + *ee2.offset(-2);
+      *ee0.offset(-3) =  *ee0.offset(-3) + *ee2.offset(-3);
+      *ee2.offset(-2) = (k00) * A2 - (k11) * A3;
+      *ee2.offset(-3) = (k11) * A2 + (k00) * A3;
+
+      k00     = *ee0.offset(-4) - *ee2.offset(-4);
+      k11     = *ee0.offset(-5) - *ee2.offset(-5);
+      *ee0.offset(-4) =  *ee0.offset(-4) + *ee2.offset(-4);
+      *ee0.offset(-5) =  *ee0.offset(-5) + *ee2.offset(-5);
+      *ee2.offset(-4) = (k00) * A4 - (k11) * A5;
+      *ee2.offset(-5) = (k11) * A4 + (k00) * A5;
+
+      k00     = *ee0.offset(-6) - *ee2.offset(-6);
+      k11     = *ee0.offset(-7) - *ee2.offset(-7);
+      *ee0.offset(-6) =  *ee0.offset(-6) + *ee2.offset(-6);
+      *ee0.offset(-7) =  *ee0.offset(-7) + *ee2.offset(-7);
+      *ee2.offset(-6) = (k00) * A6 - (k11) * A7;
+      *ee2.offset(-7) = (k11) * A6 + (k00) * A7;
+
+      ee0 = ee0.offset(-k0 as isize);
+      ee2 = ee2.offset(-k0 as isize);
+
+        i -= 1;
+   }
+}
+
+#[no_mangle]
+pub unsafe extern fn imdct_step3_inner_s_loop_ld654(n: c_int, e: *mut f32, i_off: c_int, A: *mut f32, base_n: c_int)
+{
+   let a_off = base_n >> 3;
+   let A2 = *A.offset( 0 + a_off as isize);
+   let mut z = e.offset(i_off as isize);
+   let base = z.offset(- (16 * n) as isize);
+
+   while z > base {
+      let mut k00 : f32;
+      let mut k11 : f32;
+
+      k00   = *z.offset(-0) - *z.offset(-8);
+      k11   = *z.offset(-1) - *z.offset(-9);
+      *z.offset(-0) = *z.offset(-0) + *z.offset(-8);
+      *z.offset(-1) = *z.offset(-1) + *z.offset(-9);
+      *z.offset(-8) =  k00;
+      *z.offset(-9) =  k11 ;
+
+      k00    = *z.offset(-2) - *z.offset(-10);
+      k11    = *z.offset(-3) - *z.offset(-11);
+      *z.offset(-2) = *z.offset(-2) + *z.offset(-10);
+      *z.offset(-3) = *z.offset(-3) + *z.offset(-11);
+      *z.offset(-10) = (k00+k11) * A2;
+      *z.offset(-11) = (k11-k00) * A2;
+
+      k00    = *z.offset(-12) - *z.offset(-4);  // reverse to avoid a unary negation
+      k11    = *z.offset(-5) - *z.offset(-13);
+      *z.offset(-4) = *z.offset(-4) + *z.offset(-12);
+      *z.offset(-5) = *z.offset(-5) + *z.offset(-13);
+      *z.offset(-12) = k11;
+      *z.offset(-13) = k00;
+
+      k00    = *z.offset(-14) - *z.offset(-6);  // reverse to avoid a unary negation
+      k11    = *z.offset(-7) - *z.offset(-15);
+      *z.offset(-6) = *z.offset(-6) + *z.offset(-14);
+      *z.offset(-7) = *z.offset(-7) + *z.offset(-15);
+      *z.offset(-14) = (k00+k11) * A2;
+      *z.offset(-15) = (k00-k11) * A2;
+
+      iter_54(z);
+      iter_54(z.offset(-8));
+      z = z.offset(-16);
+   }
+}
+
+#[inline(always)]
+unsafe fn iter_54(z: *mut f32)
+{
+//    float k00,k11,k22,k33;
+//    float y0,y1,y2,y3;
+
+   let k00  = *z.offset(0) - *z.offset(-4);
+   let y0   = *z.offset(0) + *z.offset(-4);
+   let y2   = *z.offset(-2) + *z.offset(-6);
+   let k22  = *z.offset(-2) - *z.offset(-6);
+
+   *z.offset(-0) = y0 + y2;      // z0 + z4 + z2 + z6
+   *z.offset(-2) = y0 - y2;      // z0 + z4 - z2 - z6
+
+   // done with y0,y2
+
+   let k33  = *z.offset(-3) - *z.offset(-7);
+
+   *z.offset(-4) = k00 + k33;    // z0 - z4 + z3 - z7
+   *z.offset(-6) = k00 - k33;    // z0 - z4 - z3 + z7
+
+   // done with k33
+
+   let k11  = *z.offset(-1) - *z.offset(-5);
+   let y1   = *z.offset(-1) + *z.offset(-5);
+   let y3   = *z.offset(-3) + *z.offset(-7);
+
+   *z.offset(-1) = y1 + y3;      // z1 + z5 + z3 + z7
+   *z.offset(-3) = y1 - y3;      // z1 + z5 - z3 - z7
+   *z.offset(-5) = k11 - k22;    // z1 - z5 + z2 - z6
+   *z.offset(-7) = k11 + k22;    // z1 - z5 - z2 + z6
+}
+
+
+#[no_mangle]
+pub unsafe extern fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, blocktype: c_int)
+{
+   let n2 : i32 = n >> 1;
+   let n4 : i32 = n >> 2; 
+   let n8 : i32 = n >> 3;
+   let mut l : i32;
+   let ld: i32;
+   // @OPTIMIZE: reduce register pressure by using fewer variables?
+   let save_point : i32 = temp_alloc_save!(f);
+   let buf2 : *mut f32 = temp_alloc!(f, n2 as usize * mem::size_of::<f32>() ) as *mut f32;
+   let u: *mut f32;
+   let v: *mut f32;
+//    twiddle factors
+   let A: *mut f32 = f.A[blocktype as usize];
+
+   // IMDCT algorithm from "The use of multirate filter banks for coding of high quality digital audio"
+   // See notes about bugs in that paper in less-optimal implementation 'inverse_mdct_old' after this function.
+
+   // kernel from paper
+
+
+   // merged:
+   //   copy and reflect spectral data
+   //   step 0
+
+   // note that it turns out that the items added together during
+   // this step are, in fact, being added to themselves (as reflected
+   // by step 0). inexplicable inefficiency! this became obvious
+   // once I combined the passes.
+
+   // so there's a missing 'times 2' here (for adding X to itself).
+   // this propogates through linearly to the end, where the numbers
+   // are 1/2 too small, and need to be compensated for.
+
+   {
+       let mut d: *mut f32; let mut e: *mut f32; let mut AA: *mut f32; let e_stop: *mut f32;
+      d = buf2.offset( (n2-2) as isize);
+      AA = A;
+      e = buffer.offset(0);
+      e_stop = buffer.offset(n2 as isize);
+      while e != e_stop {
+         *d.offset(1) = *e.offset(0) * *AA.offset(0) - *e.offset(2) * *AA.offset(1);
+         *d.offset(0) = *e.offset(0) * *AA.offset(1) + *e.offset(2) * *AA.offset(0);
+         d = d.offset(-2);
+         AA = AA.offset(2);
+         e = e.offset(4);
+      }
+
+      e = buffer.offset( (n2-3) as isize);
+      while d >= buf2 {
+         *d.offset(1) = -*e.offset(2) * *AA.offset(0) - -*e.offset(0) * *AA.offset(1);
+         *d.offset(0) = -*e.offset(2) * *AA.offset(1) + -*e.offset(0) * *AA.offset(0);
+         d = d.offset(-2);
+         AA = AA.offset(2);
+         e = e.offset(-4);
+      }
+   }
+
+   // now we use symbolic names for these, so that we can
+   // possibly swap their meaning as we change which operations
+   // are in place
+
+   u = buffer;
+   v = buf2;
+
+   // step 2    (paper output is w, now u)
+   // this could be in place, but the data ends up in the wrong
+   // place... _somebody_'s got to swap it, so this is nominated
+   {
+      let mut AA : *mut f32 = A.offset( (n2-8) as isize);
+      let mut d0 : *mut f32; let mut d1: *mut f32; let mut e0: *mut f32; let mut e1: *mut f32;
+
+      e0 = v.offset(n4 as isize);
+      e1 = v.offset(0);
+
+      d0 = u.offset(n4 as isize);
+      d1 = u.offset(0);
+
+      while AA >= A {
+         let mut v40_20 : f32; let mut v41_21: f32;
+
+         v41_21 = *e0.offset(1) - *e1.offset(1);
+         v40_20 = *e0.offset(0) - *e1.offset(0);
+         *d0.offset(1)  = *e0.offset(1) + *e1.offset(1);
+         *d0.offset(0)  = *e0.offset(0) + *e1.offset(0);
+         *d1.offset(1)  = v41_21 * *AA.offset(4) - v40_20 * *AA.offset(5);
+         *d1.offset(0)  = v40_20 * *AA.offset(4) + v41_21 * *AA.offset(5);
+
+         v41_21 = *e0.offset(3) - *e1.offset(3);
+         v40_20 = *e0.offset(2) - *e1.offset(2);
+         *d0.offset(3)  = *e0.offset(3) + *e1.offset(3);
+         *d0.offset(2)  = *e0.offset(2) + *e1.offset(2);
+         *d1.offset(3)  = v41_21 * *AA.offset(0) - v40_20 * *AA.offset(1);
+         *d1.offset(2)  = v40_20 * *AA.offset(0) + v41_21 * *AA.offset(1);
+
+         AA = AA.offset(-8);
+
+         d0 = d0.offset(4);
+         d1 = d1.offset(4);
+         e0 = e0.offset(4);
+         e1 = e1.offset(4);
+      }
+   }
+
+   // step 3
+   ld = ilog(n) - 1; // ilog is off-by-one from normal definitions
+
+   // optimized step 3:
+
+   // the original step3 loop can be nested r inside s or s inside r;
+   // it's written originally as s inside r, but this is dumb when r
+   // iterates many times, and s few. So I have two copies of it and
+   // switch between them halfway.
+
+   // this is iteration 0 of step 3
+   imdct_step3_iter0_loop(n >> 4, u, n2-1-n4*0, -(n >> 3), A);
+   imdct_step3_iter0_loop(n >> 4, u, n2-1-n4*1, -(n >> 3), A);
+
+   // this is iteration 1 of step 3
+   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*0, -(n >> 4), A, 16);
+   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*1, -(n >> 4), A, 16);
+   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*2, -(n >> 4), A, 16);
+   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*3, -(n >> 4), A, 16);
+
+   l=2;
+   while l < (ld-3)>>1 {
+      let k0 : i32 = n >> (l+2);
+      let k0_2 : i32 = k0>>1;
+      let lim : i32 = 1 << (l+1);
+      for i in 0 .. lim {
+         imdct_step3_inner_r_loop(n >> (l+4), u, n2-1 - k0*i, -k0_2, A, 1 << (l+3));
+      }
+    l += 1;
+   }
+
+   while l < ld-6 {
+      let k0 : i32 = n >> (l+2);
+      let k1 = 1 << (l+3);
+      let k0_2 = k0>>1;
+      let rlim : i32 = n >> (l+6);
+      let mut r : i32;
+      let lim : i32 = 1 << (l+1);
+      let mut i_off : i32;
+      let mut A0 : *mut f32 = A;
+      i_off = n2-1;
+      r = rlim;
+      while r > 0 {
+         imdct_step3_inner_s_loop(lim, u, i_off, -k0_2, A0, k1, k0);
+         A0 = A0.offset( (k1*4) as isize);
+         i_off -= 8;
+         
+        r -= 1;
+      }
+    l += 1;
+   }
+
+   // iterations with count:
+   //   ld-6,-5,-4 all interleaved together
+   //       the big win comes from getting rid of needless flops
+   //         due to the constants on pass 5 & 4 being all 1 and 0;
+   //       combining them to be simultaneous to improve cache made little difference
+   imdct_step3_inner_s_loop_ld654(n >> 5, u, n2-1, A, n);
+
+   // output is u
+
+   // step 4, 5, and 6
+   // cannot be in-place because of step 5
+   {
+      let mut bitrev : *mut u16 = f.bit_reverse[blocktype as usize];
+      // weirdly, I'd have thought reading sequentially and writing
+      // erratically would have been better than vice-versa, but in
+      // fact that's not what my testing showed. (That is, with
+      // j = bitreverse(i), do you read i and write j, or read j and write i.)
+
+      let mut d0 : *mut f32 = v.offset( (n4-4) as isize);
+      let mut d1 : *mut f32 = v.offset( (n2-4) as isize);
+      while d0 >= v {
+         let mut k4;
+
+         k4 = *bitrev.offset(0);
+         *d1.offset(3) = *u.offset((k4+0) as isize);
+         *d1.offset(2) = *u.offset((k4+1) as isize);
+         *d0.offset(3) = *u.offset((k4+2) as isize);
+         *d0.offset(2) = *u.offset((k4+3) as isize);
+
+         k4 = *bitrev.offset(1);
+         *d1.offset(1) = *u.offset((k4+0) as isize);
+         *d1.offset(0) = *u.offset((k4+1) as isize);
+         *d0.offset(1) = *u.offset((k4+2) as isize);
+         *d0.offset(0) = *u.offset((k4+3) as isize);
+         
+         d0 = d0.offset(-4);
+         d1 = d1.offset(-4);
+         bitrev = bitrev.offset(2);
+      }
+   }
+   // (paper output is u, now v)
+
+
+   // data must be in buf2
+   assert!(v == buf2);
+
+   // step 7   (paper output is v, now v)
+   // this is now in place
+   {
+      let mut C = f.C[blocktype as usize];
+      let mut d : *mut f32; let mut e : *mut f32;
+
+      d = v;
+      e = v.offset( (n2 - 4) as isize );
+
+      while d < e {
+         let mut a02: f32; let mut a11: f32;let mut b0: f32;let mut b1: f32;let mut b2: f32;let mut b3: f32;
+
+         a02 = *d.offset(0) - *e.offset(2);
+         a11 = *d.offset(1) + *e.offset(3);
+
+         b0 = *C.offset(1) * a02 + *C.offset(0)*a11;
+         b1 = *C.offset(1) * a11 - *C.offset(0)*a02;
+
+         b2 = *d.offset(0) + *e.offset( 2);
+         b3 = *d.offset(1) - *e.offset( 3);
+
+         *d.offset(0) = b2 + b0;
+         *d.offset(1) = b3 + b1;
+         *e.offset(2) = b2 - b0;
+         *e.offset(3) = b1 - b3;
+
+         a02 = *d.offset(2) - *e.offset(0);
+         a11 = *d.offset(3) + *e.offset(1);
+
+         b0 = *C.offset(3)*a02 + *C.offset(2)*a11;
+         b1 = *C.offset(3)*a11 - *C.offset(2)*a02;
+
+         b2 = *d.offset(2) + *e.offset( 0);
+         b3 = *d.offset(3) - *e.offset( 1);
+
+         *d.offset(2) = b2 + b0;
+         *d.offset(3) = b3 + b1;
+         *e.offset(0) = b2 - b0;
+         *e.offset(1) = b1 - b3;
+
+         C = C.offset(4);
+         d = d.offset(4);
+         e = e.offset(-4);
+      }
+   }
+
+   // data must be in buf2
+
+
+   // step 8+decode   (paper output is X, now buffer)
+   // this generates pairs of data a la 8 and pushes them directly through
+   // the decode kernel (pushing rather than pulling) to avoid having
+   // to make another pass later
+
+   // this cannot POSSIBLY be in place, so we refer to the buffers directly
+
+   {
+//       float *d0,*d1,*d2,*d3;
+
+      let mut B = f.B[blocktype as usize].offset( (n2 - 8) as isize);
+      let mut e = buf2.offset( (n2 - 8) as isize );
+      let mut d0 = buffer.offset(0);
+      let mut d1 = buffer.offset( (n2-4) as isize);
+      let mut d2 = buffer.offset( n2 as isize);
+      let mut d3 = buffer.offset( (n-4) as isize);
+      while e >= v {
+//          float p0,p1,p2,p3;
+
+         let mut p3 =  *e.offset(6)* *B.offset(7) - *e.offset(7) * *B.offset(6);
+         let mut p2 = -*e.offset(6)* *B.offset(6) - *e.offset(7) * *B.offset(7); 
+
+         *d0.offset(0) =   p3;
+         *d1.offset(3) = - p3;
+         *d2.offset(0) =   p2;
+         *d3.offset(3) =   p2;
+
+         let mut p1 =  *e.offset(4)**B.offset(5) - *e.offset(5)**B.offset(4);
+         let mut p0 = -*e.offset(4)**B.offset(4) - *e.offset(5)**B.offset(5); 
+
+         *d0.offset(1) =   p1;
+         *d1.offset(2) = - p1;
+         *d2.offset(1) =   p0;
+         *d3.offset(2) =   p0;
+
+         p3 =  *e.offset(2)**B.offset(3) - *e.offset(3)**B.offset(2);
+         p2 = -*e.offset(2)**B.offset(2) - *e.offset(3)**B.offset(3); 
+
+         *d0.offset(2) =   p3;
+         *d1.offset(1) = - p3;
+         *d2.offset(2) =   p2;
+         *d3.offset(1) =   p2;
+
+         p1 =  *e.offset(0)**B.offset(1) - *e.offset(1)**B.offset(0);
+         p0 = -*e.offset(0)**B.offset(0) - *e.offset(1)**B.offset(1); 
+
+         *d0.offset(3) =   p1;
+         *d1.offset(0) = - p1;
+         *d2.offset(3) =   p0;
+         *d3.offset(0) =   p0;
+
+         B = B.offset(-8);
+         e = e.offset(-8);
+         d0 = d0.offset(4);
+         d2 = d2.offset(4);
+         d1 = d1.offset(-4);
+         d3 = d3.offset(-4);
+      }
+   }
+
+   temp_free!(f,buf2);
+   temp_alloc_restore!(f,save_point);
+}
 
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
  
     pub fn start_decoder(f: *mut vorb) -> c_int;
-    pub fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, blocktype: c_int);
+    // pub fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, blocktype: c_int);
+    // pub fn imdct_step3_iter0_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int , A: *mut f32);
+    // pub fn imdct_step3_inner_r_loop(lim: c_int, e: *mut f32, d0: c_int , k_off: c_int , A: *mut f32, k1: c_int);
+    // pub fn imdct_step3_inner_s_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int, A: *mut f32, a_off: c_int , k0: c_int);
+    // pub fn imdct_step3_inner_s_loop_ld654(n: c_int, e: *mut f32, i_off: c_int, A: *mut f32, base_n: c_int);
+    // pub fn iter_54(z: *mut f32);
+    
 
     fn qsort(base: *mut c_void, nmemb: size_t, size: size_t, compar: *const c_void);
     
