@@ -506,8 +506,7 @@ pub fn error(f: &mut vorb, e: c_int) -> c_int
     return 0;
 }
 
-#[no_mangle]
-pub fn include_in_sort(c: &Codebook, len: u8) -> c_int
+fn include_in_sort(c: &Codebook, len: u8) -> c_int
 {
    if c.sparse != 0 { 
        assert!(len as c_int != NO_CODE); 
@@ -2177,7 +2176,7 @@ unsafe fn codebook_decode_step(f: &mut vorb, c: &Codebook, output: *mut f32, mut
 }
 
 #[no_mangle]
-pub unsafe extern fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, outputs: *mut *mut f32, ch: c_int, c_inter_p: *mut c_int, p_inter_p: *mut c_int, len: c_int, mut total_decode: c_int) -> c_int
+pub unsafe extern fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, outputs: *mut *mut f32, ch: c_int, c_inter_p: &mut c_int, p_inter_p: &mut c_int, len: c_int, mut total_decode: c_int) -> c_int
 {
    let mut c_inter = *c_inter_p;
    let mut p_inter = *p_inter_p;
@@ -2998,7 +2997,7 @@ unsafe fn crc32_update(crc: u32, byte: u8) -> u32
 
 // given a sufficiently large block of memory, make an array of pointers to subblocks of it
 #[no_mangle]
-pub unsafe extern fn make_block_array(mem: *mut c_void, count: c_int, size: c_int) -> *mut c_void
+pub unsafe extern fn make_block_array(mem: *mut c_void, count: c_int, size: usize) -> *mut c_void
 {
    let p : *mut *mut c_void  = std::mem::transmute(mem);
    let mut q : *mut i8 = p.offset(count as isize) as *mut i8;
@@ -3928,7 +3927,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut c_int, m: &Mode, mut
       }
       let r = map.submap_residue[i as usize];
       // FIXME(bungcip): change do_not_decode to bool
-      decode_residue(f, residue_buffers.as_mut_ptr(), ch as i32, n2, r as i32, do_not_decode.as_mut_ptr());
+      decode_residue(f, mem::transmute(&mut residue_buffers), ch as i32, n2, r as i32, do_not_decode.as_mut_ptr());
    }
 
    if f.alloc.alloc_buffer.is_null() == false {
@@ -4071,12 +4070,277 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut c_int, m: &Mode, mut
    return 1; // true
 }
 
+macro_rules! array_size_required {
+    ($count: expr, $size: expr) => {
+        ($count as usize * (::std::mem::size_of::<c_void>() + ($size as usize)))
+    }
+}
+
+macro_rules! temp_alloc {
+    ($f: expr, $size: expr) => {
+        if $f.alloc.alloc_buffer.is_null() == false {
+            setup_temp_malloc($f, $size as i32)
+        }else{
+            // NOTE(bungcip): for now just allocate using libc malloc & leak....
+            //                rust don't have alloca() 
+            // alloca(size)
+            libc::malloc($size)
+        }
+    }
+}
+
+macro_rules! temp_alloc_save {
+    ($f: expr) => {
+        $f.temp_offset
+    }
+}
+
+macro_rules! temp_alloc_restore {
+    ($f: expr, $p: expr) => {
+        $f.temp_offset = $p        
+    }
+}
+
+macro_rules! temp_free {
+    ($f: expr, $p: expr) => {
+        0
+    }
+}
+
+macro_rules! temp_alloc_save {
+    ($f: expr) => ($f.temp_offset)
+}
+
+
+macro_rules! temp_block_array {
+    ($f: expr, $count: expr, $size: expr) => {
+        make_block_array(
+            temp_alloc!(
+                $f,
+                array_size_required!($count,$size)
+            ) as *mut c_void, 
+            $count, $size)        
+    }
+}
+
+
+
+unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: c_int, n: c_int, rn: c_int, do_not_decode: *mut u8)
+{
+//    int i,j,pass;
+   let r: &Residue = mem::transmute(f.residue_config.offset(rn as isize));
+   let rtype : i32 = f.residue_types[rn as usize] as i32;
+   let c : i32 = r.classbook as i32;
+   let classwords : i32 = (*f.codebooks.offset(c as isize)).dimensions;
+   let n_read : i32 = (r.end - r.begin) as i32;
+   let part_read : i32 = n_read / r.part_size as i32;
+   let temp_alloc_point : i32 = temp_alloc_save!(f);
+   let part_classdata: *mut *mut *mut u8 = {
+       let temp_1 = f.channels;
+       let zz = temp_block_array!(f,
+            temp_1, part_read as usize * mem::size_of::<*mut *mut u8>() 
+        );
+      zz 
+   } as *mut *mut *mut u8;
+
+   CHECK!(f);
+
+   for i in 0 .. ch {
+      if *do_not_decode.offset(i as isize) == 0 {
+          std::ptr::write_bytes(*residue_buffers.offset(i as isize), 0, n as usize);
+      }
+   }
+   
+   // note(bungcip): simulate goto
+   'done: loop {
+
+   if rtype == 2 && ch != 1 {
+       let mut j = 0;
+       while j < ch {
+         if *do_not_decode.offset(j as isize) == 0 {
+            break;
+         }
+         j += 1;
+       }
+       
+      if j == ch {
+        //  goto done;
+        break 'done;
+      }
+
+      for pass in 0 .. 8 {
+         let mut pcount : i32 = 0;
+         let mut class_set: i32 = 0;
+         if ch == 2 {
+            while pcount < part_read {
+               let z : i32 = r.begin as i32 + (pcount*r.part_size as i32);
+               let mut c_inter : i32 = z & 1;
+               let mut p_inter : i32 = z>>1;
+               if pass == 0 {
+                  let c: &Codebook = mem::transmute(f.codebooks.offset(r.classbook as isize));
+                  let mut q : i32;
+                  DECODE!(q,f,c);
+                  if q == EOP {
+                    // goto done;
+                    break 'done;  
+                  } 
+                  *(*part_classdata.offset(0)).offset(class_set as isize) = *r.classdata.offset(q as isize);
+               }
+               
+               let mut i = 0;
+               while i < classwords && pcount < part_read {
+                  let mut z : i32 = r.begin as i32 + (pcount*r.part_size as i32);
+                  let c : i32 = *(*(*part_classdata.offset(0)).offset(class_set as isize)).offset(i as isize) as i32;
+                  let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
+                  if b >= 0 {
+                      let book : &Codebook = mem::transmute(f.codebooks.offset(b as isize));
+//                      // saves 1%
+                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut c_inter, &mut p_inter, n, r.part_size as i32) == 0{
+                        // goto done;
+                        break 'done;
+                     }
+                  } else {
+                     z += r.part_size as i32;
+                     c_inter = z & 1;
+                     p_inter = z >> 1;
+                  }
+                    i += 1; pcount += 1;
+               }
+               class_set += 1;
+            }
+         } else if ch == 1 {
+            while pcount < part_read {
+               let z : i32 = r.begin as i32 + pcount*r.part_size as i32;
+               let mut c_inter : i32 = 0;
+               let mut p_inter = z;
+               if pass == 0 {
+                  let c : &Codebook = mem::transmute(f.codebooks.offset(r.classbook as isize));
+                  let mut q;
+                  DECODE!(q,f,c);
+                  if q == EOP{
+                    // goto done;
+                    break 'done; 
+                  } 
+                  *(*part_classdata.offset(0)).offset(class_set as isize) = *r.classdata.offset(q as isize);
+               }
+               let mut i = 0;
+               while i < classwords && pcount < part_read {
+                  let mut z : i32 = r.begin as i32 + pcount*r.part_size as i32;
+                  let c : i32 = *(*(*part_classdata.offset(0)).offset(class_set as isize)).offset(i as isize) as i32;
+                  let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
+                  if b >= 0 {
+                      let book : &Codebook = mem::transmute(f.codebooks.offset(b as isize));
+                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut c_inter, &mut p_inter, n, r.part_size as i32) == 0{
+                        // goto done;
+                        break 'done;
+                     }
+                  } else {
+                     z += r.part_size as i32;
+                     c_inter = 0;
+                     p_inter = z;
+                  }
+                    i += 1; pcount += 1;
+               }
+               class_set += 1;
+            }
+         } else {
+            while pcount < part_read {
+                let z : i32 = r.begin as i32 + pcount*r.part_size as i32;
+               let mut c_inter : i32 = z % ch;
+               let mut p_inter = z/ch;
+               if pass == 0 {
+                  let c : &Codebook = mem::transmute(f.codebooks.offset(r.classbook as isize));
+                  let mut q;
+                  DECODE!(q,f,c);
+                  if q == EOP{
+                    // goto done;
+                    break 'done;  
+                  } 
+                  *(*part_classdata.offset(0)).offset(class_set as isize) = *r.classdata.offset(q as isize);
+               }
+               let mut i = 0;
+               while i < classwords && pcount < part_read {
+                  let mut z : i32 = r.begin as i32 + pcount*r.part_size as i32;
+                  let c : i32 = *(*(*part_classdata.offset(0)).offset(class_set as isize)).offset(i as isize) as i32;
+                  let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
+                  if b >= 0 {
+                      let book : &Codebook = mem::transmute(f.codebooks.offset(b as isize));
+                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut c_inter, &mut p_inter, n, r.part_size as i32) == 0{
+                        // goto done;
+                        break 'done;
+                     }
+                  } else {
+                     z += r.part_size as i32;
+                     c_inter = z % ch;
+                     p_inter = z / ch;
+                  }
+                    i += 1; pcount += 1;
+               }
+               class_set += 1;
+            }
+         }
+      }
+    //   goto done;
+    break 'done;
+   }
+   CHECK!(f);
+
+   for pass in 0 .. 8 {
+      let mut pcount : i32 = 0;
+      let mut class_set : i32 = 0;
+      while pcount < part_read {
+         if pass == 0 {
+            for j in 0 .. ch {
+               if *do_not_decode.offset(j as isize) == 0 {
+                  let c : &Codebook = mem::transmute(f.codebooks.offset(r.classbook as isize));
+                  let mut temp;
+                  DECODE!(temp,f,c);
+                  if temp == EOP {
+                    //   goto done;
+                    break 'done;
+                  }
+                  *(*part_classdata.offset(j as isize)).offset(class_set as isize) = *r.classdata.offset(temp as isize);
+               }
+            }
+         }
+            let mut i = 0;
+            while i < classwords && pcount < part_read {
+            for j in 0 .. ch {
+               if *do_not_decode.offset(j as isize) == 0 {
+                  let c : i32 = *(*(*part_classdata.offset(j as isize)).offset(class_set as isize)).offset(i as isize) as i32;
+                  let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
+                  if b >= 0 {
+                      let target = *residue_buffers.offset(j as isize);
+                      let offset : i32 =  r.begin as i32 + pcount*r.part_size as i32;
+                      let n : i32 = r.part_size as i32;
+                      let book : &Codebook = mem::transmute(f.codebooks.offset(b as isize));
+                     if residue_decode(f, book, target, offset, n, rtype) == 0{
+                        // goto done;
+                        break 'done;
+                     }
+                  }
+
+                }
+            }
+            i += 1; pcount += 1;
+         }
+         class_set += 1;
+      }
+   }
+
+    break;
+    } // loop done
+//   done:
+   CHECK!(f);
+   temp_free!(f,part_classdata);
+   temp_alloc_restore!(f,temp_alloc_point);
+}
+
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
  
-    pub fn decode_residue(f: *mut vorb, residue_buffers: *mut *mut f32, ch: c_int, n: c_int, rn: c_int, do_not_decode: *mut u8);
-
     pub fn start_decoder(f: *mut vorb) -> c_int;
     pub fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, blocktype: c_int);
 
