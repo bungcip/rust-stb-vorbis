@@ -4,15 +4,25 @@
 #![allow(non_camel_case_types)]
 #![allow(unreachable_code)]
 #![allow(unused_variables)]
-// #![allow(unused_imports)]
-// #![allow(unused_parens)]
 #![allow(non_upper_case_globals)]
 
 #![feature(question_mark, custom_derive, box_syntax, float_extras)]
 #![feature(alloc_system)]
 
-extern crate alloc_system;
+/**
+ * Rust Stb Vorbis
+ * 
+ * Ogg vorbis audio decoder in pure rust.
+ * This is ported from stb_vorbis (http://nothings.org/stb_vorbis) 
+ * v1.09 by Sean Barrett
+ *
+ * MIT License
+ * bungcip (gigih aji ibrahim)
+ * 2016
+ */
 
+
+extern crate alloc_system;
 extern crate libc;
 
 use libc::*;
@@ -49,6 +59,10 @@ const STB_VORBIS_PUSHDATA_CRC_COUNT : i32 = 4;
 //     but the table size is larger so worse cache missing, so you'll have
 //     to probe (and try multiple ogg vorbis files) to find the sweet spot.
 const STB_VORBIS_FAST_HUFFMAN_LENGTH : i32 = 10;
+
+
+static mut crc_table: [u32; 256] = [0; 256];
+
 
 // the following table is block-copied from the specification
 static inverse_db_table: [f32; 256] =
@@ -134,9 +148,27 @@ static channel_position: [[i8; 6]; 7] = [
    [ CP_L, CP_C, CP_R, CP_L, CP_R, CP_C ],
 ];
 
-
 static ogg_page_header: [u8; 4] = [ 0x4f, 0x67, 0x67, 0x53 ];
 
+// normally stb_vorbis uses malloc() to allocate memory at startup,
+// and alloca() to allocate temporary memory during a frame on the
+// stack. (Memory consumption will depend on the amount of setup
+// data in the file and how you set the compile flags for speed
+// vs. size. In my test files the maximal-size usage is ~150KB.)
+//
+// You can modify the wrapper functions in the source (setup_malloc,
+// setup_temp_malloc, temp_malloc) to change this behavior, or you
+// can use a simpler allocation model: you pass in a buffer from
+// which stb_vorbis will allocate _all_ its memory (including the
+// temp memory). "open" may fail with a VORBIS_outofmem if you
+// do not pass in enough data; there is no way to determine how
+// much you do need except to succeed (at which point you can
+// query get_info to find the exact amount required. yes I know
+// this is lame).
+//
+// If you pass in a non-NULL buffer of the type below, allocation
+// will occur from it as described above. Otherwise just pass NULL
+// to use malloc()/alloca()
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -1251,6 +1283,7 @@ unsafe fn vorbis_init(p: &mut stb_vorbis, z: *const stb_vorbis_alloc)
    p.f = std::ptr::null_mut();
 }
 
+// close an ogg vorbis file and free all memory in use
 pub unsafe fn stb_vorbis_close(p: *mut stb_vorbis)
 {
    if p.is_null(){
@@ -1261,6 +1294,11 @@ pub unsafe fn stb_vorbis_close(p: *mut stb_vorbis)
    setup_free(std::mem::transmute(p),p as *mut c_void);
 }
 
+// create an ogg vorbis decoder from an open FILE *, looking for a stream at
+// the _current_ seek point (ftell); the stream will be of length 'len' bytes.
+// on failure, returns NULL and sets *error. note that stb_vorbis must "own"
+// this stream; if you seek it in between calls to stb_vorbis, it will become
+// confused.
 pub unsafe fn stb_vorbis_open_file_section(file: *mut libc::FILE, close_on_free: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc, length: c_uint) -> *mut stb_vorbis
 {
     let mut p : stb_vorbis = std::mem::zeroed();
@@ -1289,6 +1327,13 @@ pub unsafe fn stb_vorbis_open_file_section(file: *mut libc::FILE, close_on_free:
 }
 
 
+// create an ogg vorbis decoder from an open FILE *, looking for a stream at
+// the _current_ seek point (ftell). on failure, returns NULL and sets *error.
+// note that stb_vorbis must "own" this stream; if you seek it in between
+// calls to stb_vorbis, it will become confused. Morever, if you attempt to
+// perform stb_vorbis_seek_*() operations on this file, it will assume it
+// owns the _entire_ rest of the file after the start point. Use the next
+// function, stb_vorbis_open_file_section(), to limit it.
 pub unsafe fn stb_vorbis_open_file(file: *mut FILE,  close_on_free: c_int, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
 {
     let start = libc::ftell(file);
@@ -1301,6 +1346,8 @@ pub unsafe fn stb_vorbis_open_file(file: *mut FILE,  close_on_free: c_int, error
 }
 
 
+// create an ogg vorbis decoder from a filename via fopen(). on failure,
+// returns NULL and sets *error (possibly to VORBIS_file_open_failure).
 pub unsafe fn stb_vorbis_open_filename(filename: *const i8, error: *mut c_int, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
 {
    let  mode: &'static [u8; 3] = b"rb\0";
@@ -1466,6 +1513,30 @@ unsafe fn vorbis_finish_frame(f: &mut stb_vorbis, len: c_int, left: c_int, right
    return right - left;
 }
 
+// decode the next frame and return the number of *samples* per channel.
+// Note that for interleaved data, you pass in the number of shorts (the
+// size of your array), but the return value is the number of samples per
+// channel, not the total number of samples.
+//
+// The data is coerced to the number of channels you request according to the
+// channel coercion rules (see below). You must pass in the size of your
+// buffer(s) so that stb_vorbis will not overwrite the end of the buffer.
+// The maximum buffer size needed can be gotten from get_info(); however,
+// the Vorbis I specification implies an absolute maximum of 4096 samples
+// per channel.
+
+// Channel coercion rules:
+//    Let M be the number of channels requested, and N the number of channels present,
+//    and Cn be the nth channel; let stereo L be the sum of all L and center channels,
+//    and stereo R be the sum of all R and center channels (channel assignment from the
+//    vorbis spec).
+//        M    N       output
+//        1    k      sum(Ck) for all k
+//        2    *      stereo L, stereo R
+//        k    l      k > l, the first l channels, then 0s
+//        k    l      k <= l, the first k channels
+//    Note that this is not _good_ surround etc. mixing at all! It's just so
+//    you get something useful.
 pub unsafe fn stb_vorbis_get_frame_short_interleaved(f: &mut stb_vorbis, num_c: c_int, buffer: *mut i16, num_shorts: i32) -> c_int
 {
    let mut output: *mut *mut f32 = std::ptr::null_mut();
@@ -1484,6 +1555,10 @@ pub unsafe fn stb_vorbis_get_frame_short_interleaved(f: &mut stb_vorbis, num_c: 
    return len;
 }
 
+// decode an entire file and output the data interleaved into a malloc()ed
+// buffer stored in *output. The return value is the number of samples
+// decoded, or -1 if the file could not be opened or was not an ogg vorbis file.
+// When you're done with it, just free() the pointer returned in *output.
 
 pub unsafe fn stb_vorbis_decode_filename(filename: *const i8, channels: *mut c_int, sample_rate: *mut c_int, output: *mut *mut i16) -> c_int
 {
@@ -1537,6 +1612,14 @@ pub unsafe fn stb_vorbis_decode_filename(filename: *const i8, channels: *mut c_i
 }
 
 
+// decode the next frame and return the number of samples. the number of
+// channels returned are stored in *channels (which can be NULL--it is always
+// the same as the number of channels reported by get_info). *output will
+// contain an array of float* buffers, one per channel. These outputs will
+// be overwritten on the next call to stb_vorbis_get_frame_*.
+//
+// You generally should not intermix calls to stb_vorbis_get_frame_*()
+// and stb_vorbis_get_samples_*(), since the latter calls the former.
 pub unsafe fn stb_vorbis_get_frame_float(f: &mut stb_vorbis, channels: *mut c_int, output: *mut *mut *mut f32) -> c_int
 {
 //    int len, right,left,i;
@@ -1671,6 +1754,12 @@ unsafe fn copy_samples(dest: *mut i16, src: *mut f32, len: c_int)
    }
 }
 
+// these functions seek in the Vorbis file to (approximately) 'sample_number'.
+// after calling seek_frame(), the next call to get_frame_*() will include
+// the specified sample. after calling stb_vorbis_seek(), the next call to
+// stb_vorbis_get_samples_* will start with the specified sample. If you
+// do not need to seek to EXACTLY the target sample when using get_samples_*,
+// you can also use seek_frame().
 pub unsafe fn stb_vorbis_seek(f: &mut stb_vorbis, sample_number: c_uint) -> c_int
 {
    if stb_vorbis_seek_frame(f, sample_number) == 0 {
@@ -1751,6 +1840,8 @@ pub unsafe extern fn compute_accelerated_huffman(c: &mut Codebook)
    }
 }
 
+// returns the current seek point within the file, or offset from the beginning
+// of the memory buffer. In pushdata mode it returns 0.
 #[no_mangle]
 pub unsafe extern fn stb_vorbis_get_file_offset(f: &stb_vorbis) -> c_uint
 {
@@ -2398,6 +2489,12 @@ unsafe fn compute_stereo_samples(output: *mut i16, num_c: c_int, data: *mut *mut
 
 }
 
+// these functions seek in the Vorbis file to (approximately) 'sample_number'.
+// after calling seek_frame(), the next call to get_frame_*() will include
+// the specified sample. after calling stb_vorbis_seek(), the next call to
+// stb_vorbis_get_samples_* will start with the specified sample. If you
+// do not need to seek to EXACTLY the target sample when using get_samples_*,
+// you can also use seek_frame().
 pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: c_uint) -> c_int
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
@@ -2713,7 +2810,6 @@ pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut stb_vorbis, chann
 // to produce 'channels' channels. Returns the number of samples stored per channel;
 // it may be less than requested at the end of the file. If there are no more
 // samples in the file, returns 0.
-
 pub unsafe fn stb_vorbis_get_samples_short(f: &mut stb_vorbis, channels: c_int, buffer: *mut *mut i16, len: c_int) -> c_int
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
@@ -5513,7 +5609,6 @@ pub unsafe fn start_decoder(f: &mut vorb) -> c_int
 
 // Below is function that still live in C code
 extern {
-    static mut crc_table: [u32; 256];
  
     // pub fn start_decoder(f: *mut vorb) -> c_int;
     // pub fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, blocktype: c_int);
