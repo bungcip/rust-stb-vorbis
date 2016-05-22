@@ -200,7 +200,7 @@ impl Clone for Codebook {
 }
 
 #[repr(C)]
-pub struct  Floor0
+pub struct Floor0
 {
    order: u8,
    rate: u16,
@@ -356,7 +356,7 @@ pub struct stb_vorbis
    residue_types: [u16; 64], // varies
    residue_config: *mut Residue,
    mapping_count: c_int,
-   mapping: *const Mapping,
+   mapping: *mut Mapping,
    mode_count: c_int,
    mode_config: [Mode; 64],  // varies
 
@@ -1511,7 +1511,7 @@ pub unsafe fn stb_vorbis_decode_filename(filename: *const i8, channels: *mut c_i
       stb_vorbis_close(v);
       return -2;
    }
-   
+
    loop {
        let ch = v.channels;
       let  n = stb_vorbis_get_frame_short_interleaved(v, ch, data.offset(offset as isize), total-offset);
@@ -2258,7 +2258,6 @@ unsafe fn vorbis_deinit(p: &mut stb_vorbis)
          setup_free(p, r.residue_books as *mut c_void);
       }
    }
-
    if p.codebooks.is_null() == false {
       CHECK!(p);
       for i in 0 .. p.codebook_count {
@@ -2649,8 +2648,8 @@ pub unsafe fn stb_vorbis_get_samples_float(f: &mut stb_vorbis, channels: c_int ,
             std::ptr::write_bytes(
                 (*buffer.offset(i as isize)).offset(n as isize),
                 0,
-                std::mem::size_of::<f32>() * k as usize
-            );
+                k as usize
+            );        
             i += 1;
           }          
       }
@@ -4871,11 +4870,652 @@ pub unsafe extern fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, bloc
    temp_alloc_restore!(f,save_point);
 }
 
+const VORBIS_packet_id : u8 = 1;
+const VORBIS_packet_comment : u8 = 3;
+const VORBIS_packet_setup : u8 = 5;
+
+
+pub unsafe fn start_decoder(f: &mut vorb) -> c_int
+{
+    let mut header : [u8; 6] = mem::zeroed();
+    let mut x : u8;
+    let mut y : u8;
+//    int len,i,j,k, max_submaps = 0;
+   let mut max_submaps = 0;
+   let mut longest_floorlist = 0;
+    use STBVorbisError::*;
+
+   // first page, first packet
+
+   if start_page(f) == 0                              {return 0;} // false
+   // validate page flag
+   if (f.page_flag & PAGEFLAG_first_page as u8) == 0       {return error(f, VORBIS_invalid_first_page as c_int)}
+   if (f.page_flag & PAGEFLAG_last_page as u8) != 0           {return error(f, VORBIS_invalid_first_page as c_int);}
+   if (f.page_flag & PAGEFLAG_continued_packet as u8) != 0   {return error(f, VORBIS_invalid_first_page as c_int);}
+   // check for expected packet length
+   if f.segment_count != 1                       {return error(f, VORBIS_invalid_first_page as c_int);}
+   if f.segments[0] != 30                        {return error(f, VORBIS_invalid_first_page as c_int);}
+   // read packet
+   // check packet header
+   if get8(f) != VORBIS_packet_id                 {return error(f, VORBIS_invalid_first_page as c_int);}
+   if getn(f, header.as_mut_ptr(), 6) == 0                         {return error(f, VORBIS_unexpected_eof as c_int);}
+   if vorbis_validate(header.as_ptr()) == 0                    {return error(f, VORBIS_invalid_first_page as c_int);}
+   // vorbis_version
+   if get32(f) != 0                               {return error(f, VORBIS_invalid_first_page as c_int);}
+   f.channels = get8(f) as i32; if f.channels == 0        { return error(f, VORBIS_invalid_first_page as c_int);}
+   if f.channels > STB_VORBIS_MAX_CHANNELS       {return error(f, VORBIS_too_many_channels as c_int);}
+   f.sample_rate = get32(f); if f.sample_rate == 0  {return error(f, VORBIS_invalid_first_page as c_int);}
+   get32(f); // bitrate_maximum
+   get32(f); // bitrate_nominal
+   get32(f); // bitrate_minimum
+   x  = get8(f);
+   {
+      let log0 : c_int = (x & 15) as c_int;
+      let log1 : c_int = (x >> 4) as c_int;
+      f.blocksize_0 = 1 << log0;
+      f.blocksize_1 = 1 << log1;
+      if log0 < 6 || log0 > 13                       {return error(f, VORBIS_invalid_setup as c_int);}
+      if log1 < 6 || log1 > 13                       {return error(f, VORBIS_invalid_setup as c_int);}
+      if log0 > log1                                 {return error(f, VORBIS_invalid_setup as c_int);}
+   }
+   // framing_flag
+   x = get8(f);
+   if (x & 1) == 0                                    {return error(f, VORBIS_invalid_first_page as c_int);}
+
+   // second packet!
+   if start_page(f) == 0                              {return 0;} // false
+
+   if start_packet(f) == 0                            {return 0;} // false
+   
+   let mut len;
+   while {
+      len = next_segment(f);
+      skip(f, len);
+      f.bytes_in_seg = 0;
+      len != 0
+   } {/* do nothing */}
+
+   // third packet!
+   if start_packet(f) == 0                            {return 0;} // false
+
+   if IS_PUSH_MODE!(f) {
+      if is_whole_packet_present(f, 1) == 0 {
+         // convert error in ogg header to write type
+         if f.error == VORBIS_invalid_stream as c_int {
+            f.error = VORBIS_invalid_setup as c_int;
+         }
+         return 0; // false
+      }
+   }
+
+   crc32_init(); // always init it, to avoid multithread race conditions
+
+   if get8_packet(f) != VORBIS_packet_setup as i32       {return error(f, VORBIS_invalid_setup as c_int);}
+   for i in 0usize .. 6 {header[i] = get8_packet(f) as u8;}
+   if vorbis_validate(header.as_ptr()) == 0                    {return error(f, VORBIS_invalid_setup as c_int);}
+
+   // codebooks
+
+   f.codebook_count = (get_bits(f,8) + 1) as i32;
+   f.codebooks = {
+       let codebook_count = f.codebook_count as usize;
+       setup_malloc(f, (mem::size_of::<Codebook>() * codebook_count) as i32)
+   } as *mut Codebook;
+    if f.codebooks.is_null()                        {return error(f, VORBIS_outofmem as c_int);}
+    std::ptr::write_bytes(f.codebooks, 0, f.codebook_count as usize);
+    
+   for i in 0 .. f.codebook_count {
+      let mut values: *mut u32;
+      let ordered: i32;
+      let mut sorted_count: i32;
+      let mut total : i32 = 0;
+      let mut lengths: *mut u8;
+      let mut c : &mut Codebook= mem::transmute(f.codebooks.offset(i as isize));
+      CHECK!(f);
+      x = get_bits(f, 8) as u8; if x != 0x42            {return error(f, VORBIS_invalid_setup as c_int);}
+      x = get_bits(f, 8) as u8; if x != 0x43            {return error(f, VORBIS_invalid_setup as c_int);}
+      x = get_bits(f, 8) as u8; if x != 0x56            {return error(f, VORBIS_invalid_setup as c_int);}
+      x = get_bits(f, 8) as u8;
+      c.dimensions = ((get_bits(f, 8) << 8) as i32 + x as i32) as i32;
+      x = get_bits(f, 8) as u8;
+      y = get_bits(f, 8) as u8;
+      c.entries = ((get_bits(f, 8)<<16) + ( (y as u32) <<8) + x as u32) as i32;
+      ordered = get_bits(f,1) as i32;
+      c.sparse = if ordered != 0 {0} else {get_bits(f,1) as u8};
+
+      if c.dimensions == 0 && c.entries != 0    {return error(f, VORBIS_invalid_setup as c_int);}
+
+      if c.sparse != 0 {
+         lengths = setup_temp_malloc(f, c.entries) as *mut u8;
+      }else{
+         c.codeword_lengths = setup_malloc(f, c.entries) as *mut u8 ;
+        lengths = c.codeword_lengths;
+      }
+
+      if lengths.is_null() {return error(f, VORBIS_outofmem as c_int);}
+
+      if ordered != 0 {
+         let mut current_entry : i32 = 0;
+         let mut current_length : i32 = (get_bits(f,5) + 1) as i32;
+         while current_entry < c.entries {
+            let limit : i32 = c.entries - current_entry;
+            let n : i32 = get_bits(f, ilog(limit)) as i32;
+            if current_entry + n > c.entries as i32 { return error(f, VORBIS_invalid_setup as c_int); }
+            std::ptr::write_bytes(lengths.offset(current_entry as isize), current_length as u8, n as usize);
+//             memset(lengths + current_entry, current_length, n);
+            current_entry += n;
+            current_length += 1;
+         }
+      } else {
+         for j in 0 .. c.entries {
+            let present : i32 = if c.sparse != 0 { get_bits(f,1) } else { 1 } as i32;
+            if present != 0 {
+               *lengths.offset(j as isize) = ( get_bits(f, 5) + 1) as u8;
+               total += 1;
+               if *lengths.offset(j as isize) == 32 {
+                  return error(f, VORBIS_invalid_setup as c_int);
+               }
+            } else {
+               *lengths.offset(j as isize) = NO_CODE as u8;
+            }
+         }
+      }
+
+      if c.sparse != 0 && total >= c.entries >> 2 {
+         // convert sparse items to non-sparse!
+         if c.entries > f.setup_temp_memory_required as i32 {
+            f.setup_temp_memory_required = c.entries as u32;
+         }
+
+         c.codeword_lengths = setup_malloc(f, c.entries) as *mut u8;
+         if c.codeword_lengths.is_null() {return error(f, VORBIS_outofmem as c_int);}
+         std::ptr::copy_nonoverlapping(lengths, c.codeword_lengths, c.entries as usize);
+//          memcpy(c.codeword_lengths, lengths, c.entries);
+         setup_temp_free(f, lengths as *mut c_void, c.entries); // note this is only safe if there have been no intervening temp mallocs!
+         lengths = c.codeword_lengths;
+         c.sparse = 0;
+      }
+
+      // compute the size of the sorted tables
+      if c.sparse != 0 {
+         sorted_count = total;
+      } else {
+         sorted_count = 0;
+         for j in 0 .. c.entries {
+            if *lengths.offset(j as isize) > STB_VORBIS_FAST_HUFFMAN_LENGTH as u8 && 
+                *lengths.offset(j as isize) != NO_CODE as u8 {
+               sorted_count += 1;
+            }
+         }
+      }
+
+      c.sorted_entries = sorted_count;
+      values = std::ptr::null_mut();
+
+      CHECK!(f);
+      if c.sparse == 0 {
+         c.codewords = setup_malloc(f, mem::size_of_val(&*c.codewords.offset(0)) as i32 * c.entries) as *mut u32;
+         if c.codewords.is_null()                  {return error(f, VORBIS_outofmem as c_int);}
+      } else {
+//          unsigned int size;
+         if c.sorted_entries != 0 {
+            c.codeword_lengths = setup_malloc(f, c.sorted_entries) as *mut u8;
+            if c.codeword_lengths.is_null()           {return error(f, VORBIS_outofmem as c_int);}
+            c.codewords = setup_temp_malloc(f, mem::size_of::<u32>() as i32 * c.sorted_entries) as *mut u32;
+            if c.codewords.is_null()                  {return error(f, VORBIS_outofmem as c_int);}
+            values = setup_temp_malloc(f, mem::size_of::<u32>()  as i32* c.sorted_entries) as *mut u32 ;
+            if values.is_null()                        {return error(f, VORBIS_outofmem as c_int);}
+         }
+         let size: c_uint = c.entries as u32 + (mem::size_of::<u32>() + mem::size_of::<u32>()) as u32 * c.sorted_entries as u32;
+         if size > f.setup_temp_memory_required {
+            f.setup_temp_memory_required = size as u32;
+         }
+      }
+
+      {
+          let temp_entries = c.entries; // note(bungcip): just to satisfy borrow checker
+      if compute_codewords(c, lengths, temp_entries, values) == 0 {
+         if c.sparse != 0 {setup_temp_free(f, values as *mut c_void, 0);}
+         return error(f, VORBIS_invalid_setup as c_int);
+      }
+      }
+
+      if c.sorted_entries != 0 {
+         // allocate an extra slot for sentinels
+         c.sorted_codewords = setup_malloc(f, mem::size_of::<u32>() as i32 * (c.sorted_entries+1)) as *mut u32;
+         if c.sorted_codewords.is_null() {return error(f, VORBIS_outofmem as c_int);}
+         // allocate an extra slot at the front so that c.sorted_values[-1] is defined
+         // so that we can catch that case without an extra if
+         c.sorted_values    = setup_malloc(f, mem::size_of::<i32>() as i32 * (c.sorted_entries+1)) as *mut i32;
+         if c.sorted_values.is_null() { return error(f, VORBIS_outofmem as c_int); }
+         c.sorted_values = c.sorted_values.offset(1);
+         *c.sorted_values.offset(-1) = -1;
+         compute_sorted_huffman(c, lengths, values);
+      }
+
+      if c.sparse != 0 {
+         setup_temp_free(f, values as *mut c_void, mem::size_of::<u32>() as i32 * c.sorted_entries);
+         setup_temp_free(f, c.codewords as *mut c_void, mem::size_of::<u32>() as i32 *c.sorted_entries);
+         setup_temp_free(f, lengths as *mut c_void, c.entries);
+         c.codewords = std::ptr::null_mut();
+      }
+
+      compute_accelerated_huffman(c);
+
+      CHECK!(f);
+      c.lookup_type = get_bits(f, 4) as u8;
+      if c.lookup_type > 2 {return error(f, VORBIS_invalid_setup as c_int);}
+      if c.lookup_type > 0 {
+//          uint16 *mults;
+         c.minimum_value = float32_unpack(get_bits(f, 32));
+         c.delta_value = float32_unpack(get_bits(f, 32));
+         c.value_bits = ( get_bits(f, 4)+1 ) as u8;
+         c.sequence_p = ( get_bits(f,1) ) as u8;
+         if c.lookup_type == 1 {
+            c.lookup_values = lookup1_values(c.entries, c.dimensions) as u32;
+         } else {
+            c.lookup_values = c.entries as u32 * c.dimensions as u32;
+         }
+         if c.lookup_values == 0 {return error(f, VORBIS_invalid_setup as c_int);}
+         let mults : *mut u16 = setup_temp_malloc(f, mem::size_of::<u16>() as i32 * c.lookup_values as i32) as *mut u16;
+         if mults.is_null() {return error(f, VORBIS_outofmem as c_int);}
+         for j in 0 .. c.lookup_values {
+            let q : i32 = get_bits(f, c.value_bits as i32) as i32;
+            if q as u32 == EOP as u32 { 
+                setup_temp_free(f,mults as *mut c_void,mem::size_of::<u16>() as i32 * c.lookup_values as i32); 
+                return error(f, VORBIS_invalid_setup as c_int); 
+            }
+            *mults.offset(j as isize) = q as u16;
+         }
+         
+         'skip: loop {
+         if c.lookup_type == 1 {
+//             int len, sparse = c.sparse;
+            let sparse : i32 = c.sparse as i32;
+            let mut last : f32 = 0.0;
+            // pre-expand the lookup1-style multiplicands, to avoid a divide in the inner loop
+            if sparse != 0 {
+               if c.sorted_entries == 0 { 
+                //    goto skip; FIXME: buat loop
+                break 'skip;
+                }
+               c.multiplicands = setup_malloc(f, mem::size_of::<codetype>() as i32 * c.sorted_entries * c.dimensions) as *mut codetype;
+            } else{
+               c.multiplicands = setup_malloc(f, mem::size_of::<codetype>() as i32 * c.entries        * c.dimensions) as *mut codetype;
+            }
+            if c.multiplicands.is_null() { 
+                setup_temp_free(f, mults as *mut c_void, mem::size_of::<u16>() as i32 * c.lookup_values as i32); 
+                return error(f, VORBIS_outofmem as c_int);
+            }
+            len = if sparse != 0 { c.sorted_entries } else {c.entries};
+            for j in 0 .. len {
+               let z : c_uint = if sparse != 0 { *c.sorted_values.offset(j as isize) } else {j} as c_uint;
+               let mut div: c_uint = 1;
+               for k in 0 .. c.dimensions {
+                  let off: i32 = (z / div) as i32 % c.lookup_values as i32;
+                //   let mut val: f32 = *mults.offset(off as isize) as f32; // NOTE(bungcip) : maybe bugs?
+                  let val = *mults.offset(off as isize) as f32 * c.delta_value + c.minimum_value + last;
+                  *c.multiplicands.offset( (j*c.dimensions + k) as isize) = val;
+                  if c.sequence_p !=0 {
+                     last = val;
+                  }
+                  if k+1 < c.dimensions {
+                      use std::u32;
+                     if div > u32::MAX / c.lookup_values as c_uint {
+                        setup_temp_free(f, mults as *mut c_void, mem::size_of::<u16>() as i32 * c.lookup_values as i32);
+                        return error(f, VORBIS_invalid_setup as c_int);
+                     }
+                     div *= c.lookup_values;
+                  }
+               }
+            }
+            c.lookup_type = 2;
+         }
+         else
+         {
+            let mut last : f32 = 0.0;
+            CHECK!(f);
+            c.multiplicands = setup_malloc(f, mem::size_of::<codetype>() as i32 * c.lookup_values as i32) as *mut codetype;
+            if c.multiplicands.is_null() {
+                 setup_temp_free(f, mults as *mut c_void, mem::size_of::<codetype>() as i32 * c.lookup_values as i32); 
+                 return error(f, VORBIS_outofmem as c_int);
+            }
+            for j in 0 .. c.lookup_values {
+               let val : f32 = *mults.offset(j as isize) as f32 * c.delta_value + c.minimum_value + last;
+               *c.multiplicands.offset(j as isize) = val;
+               if c.sequence_p != 0{
+                  last = val;
+               }
+            }
+         }
+         
+         break;
+         } // loop 'skip
+//         skip:;
+         setup_temp_free(f, mults as *mut c_void, mem::size_of::<codetype>() as i32 * c.lookup_values as i32);
+
+         CHECK!(f);
+      }
+      CHECK!(f);
+   }
+
+   // time domain transfers (notused)
+
+   x = ( get_bits(f, 6) + 1) as u8;
+   for i in 0 .. x {
+      let z : u32 = get_bits(f, 16);
+      if z != 0 { return error(f, VORBIS_invalid_setup as c_int); }
+   }
+
+   // Floors
+   f.floor_count = (get_bits(f, 6)+1) as i32;
+   {
+       // safity borrow checker
+       let fc = f.floor_count * mem::size_of::<Floor>() as i32;
+       f.floor_config = setup_malloc(f, fc) as *mut Floor;
+   }
+   if f.floor_config.is_null() { return error(f, VORBIS_outofmem as c_int);}
+   for i in 0 .. f.floor_count {
+      f.floor_types[i as usize] = get_bits(f, 16) as u16;
+      if f.floor_types[i as usize] > 1 {return error(f, VORBIS_invalid_setup as c_int);}
+      if f.floor_types[i as usize] == 0 {
+      // NOTE(bungcip): using transmute because rust don't have support for union yet.. 
+      //                transmute floor0 to floor1
+          let g: &mut Floor0 = mem::transmute(&mut (*f.floor_config.offset(i as isize)).floor1);
+         g.order = get_bits(f,8) as u8;
+         g.rate = get_bits(f,16) as u16;
+         g.bark_map_size = get_bits(f,16) as u16;
+         g.amplitude_bits = get_bits(f,6) as u8;
+         g.amplitude_offset = get_bits(f,8) as u8;
+         g.number_of_books = (get_bits(f,4) + 1) as u8;
+         for j in 0 .. g.number_of_books{
+            g.book_list[j as usize] = get_bits(f,8) as u8;
+         }
+         return error(f, VORBIS_feature_not_supported as c_int);
+      } else {
+         let mut p : [Point; 31*8+2] = mem::zeroed();
+         let mut g : &mut Floor1 = &mut (*f.floor_config.offset(i as isize)).floor1;
+         let mut max_class : i32 = -1; 
+         g.partitions = get_bits(f, 5) as u8;
+         for j in 0 .. g.partitions {
+            g.partition_class_list[j as usize] = get_bits(f, 4) as u8;
+            if g.partition_class_list[j as usize] as i32 > max_class {
+               max_class = g.partition_class_list[j as usize] as i32;
+            }
+         }
+         for j in 0 .. max_class + 1 {
+            g.class_dimensions[j as usize] = get_bits(f, 3) as u8 + 1;
+            g.class_subclasses[j as usize] = get_bits(f, 2) as u8;
+            if g.class_subclasses[j as usize] != 0 {
+               g.class_masterbooks[j as usize] = get_bits(f, 8) as u8;
+               if g.class_masterbooks[j as usize] >= f.codebook_count as u8 {
+                   return error(f, VORBIS_invalid_setup as c_int);
+               }
+            }
+            for k in 0 ..  (1 << g.class_subclasses[j as usize]) {
+               g.subclass_books[j as usize][k as usize] = get_bits(f,8) as i16 -1;
+               if g.subclass_books[j as usize][k as usize] >= f.codebook_count as i16 {
+                   return error(f, VORBIS_invalid_setup as c_int);
+               }
+            }
+         }
+         g.floor1_multiplier = (get_bits(f,2) +1) as u8;
+         g.rangebits = get_bits(f,4) as u8;
+         g.Xlist[0] = 0;
+         g.Xlist[1] = 1 << g.rangebits;
+         g.values = 2;
+         for j in 0 .. g.partitions {
+            let c : i32 = g.partition_class_list[j as usize] as i32;
+            for k in 0 .. g.class_dimensions[c as usize] {
+               g.Xlist[g.values as usize] = get_bits(f, g.rangebits as i32) as u16;
+               g.values += 1;
+            }
+         }
+         // precompute the sorting
+         for j in 0 .. g.values {
+            p[j as usize].x = g.Xlist[j as usize];
+            p[j as usize].y = j as u16;
+         }
+         qsort(p.as_mut_ptr() as *mut c_void, g.values as usize, mem::size_of::<Point>(), point_compare as *const c_void);
+         for j in 0 .. g.values {
+            g.sorted_order[j as usize] = p[j as usize].y as u8;
+         }
+         // precompute the neighbors
+         for j in 2 .. g.values {
+            let mut low : i32 = 0;
+            let mut hi: i32 = 0;
+            neighbors(g.Xlist.as_mut_ptr(), j, &mut low, &mut hi);
+            g.neighbors[j as usize][0] = low as u8;
+            g.neighbors[j as usize][1] = hi as u8;
+         }
+
+         if g.values > longest_floorlist{
+            longest_floorlist = g.values;
+         }
+      }
+   }
+
+   // Residue
+   f.residue_count = get_bits(f, 6) as i32 + 1;
+   {
+       // to satifying borrow checker
+        let residue_size = f.residue_count * mem::size_of::<Residue>() as i32;
+        f.residue_config = setup_malloc(f, residue_size) as *mut Residue;
+        if f.residue_config.is_null() {return error(f, VORBIS_outofmem as c_int);}
+        std::ptr::write_bytes(f.residue_config, 0, f.residue_count as usize);
+   }
+   for i in 0 .. f.residue_count {
+       let mut residue_cascade: [u8; 64] = mem::zeroed();
+      let mut r : &mut Residue = mem::transmute(f.residue_config.offset(i as isize));
+      f.residue_types[i as usize] = get_bits(f, 16) as u16;
+      if f.residue_types[i as usize] > 2 {return error(f, VORBIS_invalid_setup as c_int);}
+      r.begin = get_bits(f, 24);
+      r.end = get_bits(f, 24);
+      if r.end < r.begin {return error(f, VORBIS_invalid_setup as c_int);}
+      r.part_size = get_bits(f,24)+1;
+      r.classifications = get_bits(f,6) as u8 + 1;
+      r.classbook = get_bits(f,8) as u8;
+      if r.classbook as i32 >= f.codebook_count {return error(f, VORBIS_invalid_setup as c_int);}
+      for j in 0 .. r.classifications {
+         let mut high_bits: u8 = 0;
+         let low_bits: u8 = get_bits(f,3) as u8;
+         if get_bits(f,1) != 0 {
+            high_bits = get_bits(f,5) as u8;
+         }
+         residue_cascade[j as usize] = high_bits*8 + low_bits;
+      }
+      r.residue_books = setup_malloc(f, mem::size_of::<[i16; 8]>() as i32 * r.classifications as i32) as *mut [i16; 8];
+      if r.residue_books.is_null() {return error(f, VORBIS_outofmem as c_int);}
+      for j in 0 .. r.classifications {
+         for k in 0 .. 8 {
+            if (residue_cascade[j as usize] & (1 << k)) != 0 {
+               (*r.residue_books.offset(j as isize))[k as usize] = get_bits(f, 8) as i16;
+               if (*r.residue_books.offset(j as isize))[k as usize] as i32 >= f.codebook_count {
+                   return error(f, VORBIS_invalid_setup as c_int);
+                }
+            } else {
+               (*r.residue_books.offset(j as isize))[k as usize] = -1;
+            }
+         }
+      }
+      // precompute the classifications[] array to avoid inner-loop mod/divide
+      // call it 'classdata' since we already have r.classifications
+      {
+          // satify borrow checker
+          let classdata_size =  mem::size_of::<*mut u8>() as i32 * 
+            (*f.codebooks.offset(r.classbook as isize) ).entries;
+          r.classdata = setup_malloc(f, classdata_size) as *mut *mut u8;
+          if r.classdata.is_null() {return error(f, VORBIS_outofmem as c_int);}
+          std::ptr::write_bytes(r.classdata, 0, (*f.codebooks.offset(r.classbook as isize) ).entries as usize);
+      }
+      for j in 0 .. (*f.codebooks.offset(r.classbook as isize) ).entries {
+         let classwords = (*f.codebooks.offset(r.classbook as isize) ).dimensions;
+         let mut temp = j;
+         
+         *r.classdata.offset(j as isize) = setup_malloc(f, mem::size_of::<u8>() as i32 * classwords) as *mut u8;
+         if (*r.classdata.offset(j as isize)).is_null() {return error(f, VORBIS_outofmem as c_int);}
+         
+         let mut k = classwords-1;
+         while k >= 0 {
+            *(*r.classdata.offset(j as isize)).offset(k as isize) = (temp % r.classifications as i32) as u8;
+            temp /= r.classifications as i32;
+            k -= 1;
+         }
+      }
+   }
+
+   f.mapping_count = get_bits(f,6) as i32 +1;
+   {
+       // satify borrow checker
+       let mapping_size = f.mapping_count * mem::size_of::<Mapping>() as i32;
+       f.mapping = setup_malloc(f, mapping_size) as *mut Mapping;
+       if f.mapping.is_null() {return error(f, VORBIS_outofmem as c_int);}
+       std::ptr::write_bytes(f.mapping, 0, f.mapping_count as usize);
+   }
+   for i in 0 .. f.mapping_count {
+      let m : &mut Mapping = mem::transmute(f.mapping.offset(i as isize));      
+      let mapping_type : i32 = get_bits(f,16) as i32;
+      if mapping_type != 0 {return error(f, VORBIS_invalid_setup as c_int);}
+      {
+        // satify borrow checker   
+        let mapping_channel_size = f.channels * mem::size_of::<MappingChannel>() as i32;   
+          m.chan = setup_malloc(f, mapping_channel_size) as *mut MappingChannel;
+          if m.chan.is_null() {return error(f, VORBIS_outofmem as c_int);}
+      }
+      if get_bits(f,1) != 0 {
+         m.submaps = get_bits(f,4) as u8 + 1;
+      }
+      else{
+         m.submaps = 1;
+      }
+      if m.submaps > max_submaps{
+         max_submaps = m.submaps;
+      }
+      if get_bits(f,1) != 0 {
+         m.coupling_steps = get_bits(f,8) as u16 + 1;
+         for k in 0 .. m.coupling_steps {
+             // satify borrow checker
+             let ilog_result = ilog(f.channels-1);
+            (*m.chan.offset(k as isize)).magnitude = get_bits(f, ilog_result) as u8;
+             let ilog_result = ilog(f.channels-1);
+            (*m.chan.offset(k as isize)).angle = get_bits(f, ilog_result) as u8;
+            if (*m.chan.offset(k as isize)).magnitude as i32 >= f.channels        {return error(f, VORBIS_invalid_setup as c_int);}
+            if (*m.chan.offset(k as isize)).angle     as i32 >= f.channels        {return error(f, VORBIS_invalid_setup as c_int);}
+            if (*m.chan.offset(k as isize)).magnitude == (*m.chan.offset(k as isize)).angle   {return error(f, VORBIS_invalid_setup as c_int);}
+         }
+      } else{
+         m.coupling_steps = 0;
+      }
+
+      // reserved field
+      if get_bits(f,2) != 0 {return error(f, VORBIS_invalid_setup as c_int);}
+      if m.submaps > 1 {
+         for j in 0 .. f.channels {
+            (*m.chan.offset(j as isize)).mux = get_bits(f, 4) as u8;
+            if (*m.chan.offset(j as isize)).mux >= m.submaps                {return error(f, VORBIS_invalid_setup as c_int);}
+         }
+      } else{
+         // @SPECIFICATION: this case is missing from the spec
+         for j in 0 .. f.channels {
+            (*m.chan.offset(j as isize)).mux = 0;
+         }
+      }
+
+      for j in 0 .. m.submaps {
+         get_bits(f,8); // discard
+         m.submap_floor[j as usize] = get_bits(f,8) as u8;
+         m.submap_residue[j as usize] = get_bits(f,8) as u8;
+         if m.submap_floor[j as usize] as i32 >= f.floor_count      {return error(f, VORBIS_invalid_setup as c_int);}
+         if m.submap_residue[j as usize] as i32 >= f.residue_count  {return error(f, VORBIS_invalid_setup as c_int);}
+      }
+   }
+
+   // Modes
+   f.mode_count = get_bits(f, 6) as i32 + 1;
+   for i in 0 .. f.mode_count {
+      let m: &mut Mode = {
+          // satify borrow checker
+          let p : &mut Mode = &mut f.mode_config[i as usize];
+          let p : *mut Mode = p as *mut _;
+          let p : &mut Mode = mem::transmute(p);
+          p
+      };
+      m.blockflag = get_bits(f,1) as u8;
+      m.windowtype = get_bits(f,16) as u16;
+      m.transformtype = get_bits(f,16) as u16;
+      m.mapping = get_bits(f,8) as u8;
+      if m.windowtype != 0                 {return error(f, VORBIS_invalid_setup as c_int);}
+      if m.transformtype != 0              {return error(f, VORBIS_invalid_setup as c_int);}
+      if m.mapping as i32 >= f.mapping_count     {return error(f, VORBIS_invalid_setup as c_int);}
+   }
+
+   flush_packet(f);
+
+   f.previous_length = 0;
+
+   for i in 0 .. f.channels {
+       let block_size_1 = f.blocksize_1;
+      f.channel_buffers[i as usize] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1) as *mut f32;
+      f.previous_window[i as usize] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1/2) as *mut f32;
+      f.finalY[i as usize]          = setup_malloc(f, mem::size_of::<i16>() as i32 * longest_floorlist) as *mut i16;
+      if f.channel_buffers[i as usize].is_null() || f.previous_window[i as usize].is_null() || f.finalY[i as usize].is_null() {
+          return error(f, VORBIS_outofmem as c_int);
+      }
+   }
+
+   {  
+       let blocksize_0 = f.blocksize_0;
+       let blocksize_1 = f.blocksize_1;
+        if init_blocksize(f, 0, blocksize_0) == 0 {return 0;} // false
+        if init_blocksize(f, 1, blocksize_1) == 0 {return 0;} // false
+        f.blocksize[0] = blocksize_0;
+        f.blocksize[1] = blocksize_1;
+   }
+
+   // compute how much temporary memory is needed
+
+   // 1.
+   {
+      let imdct_mem : u32 = f.blocksize_1 as u32 * mem::size_of::<f32>() as u32 >> 1;
+      let classify_mem : u32;
+      let mut max_part_read = 0;
+      for i in 0 .. f.residue_count {
+         let r : &Residue = mem::transmute(f.residue_config.offset(i as isize));
+         let n_read = r.end - r.begin;
+         let part_read = n_read / r.part_size;
+         if part_read > max_part_read{
+            max_part_read = part_read;
+         }
+      }
+      classify_mem = f.channels as u32 * (mem::size_of::<*mut c_void>() as u32 + max_part_read * mem::size_of::<*mut u8>() as u32);
+
+      f.temp_memory_required = classify_mem;
+      if imdct_mem > f.temp_memory_required{
+         f.temp_memory_required = imdct_mem;
+      }
+   }
+
+   f.first_decode = 1; // true
+
+   if f.alloc.alloc_buffer.is_null() == false {
+      assert!(f.temp_offset == f.alloc.alloc_buffer_length_in_bytes);
+      // check if there's enough temp memory so we don't error later
+      if f.setup_offset as c_uint + mem::size_of::<stb_vorbis>() as c_uint + f.temp_memory_required as c_uint > f.temp_offset as c_uint{
+         return error(f, VORBIS_outofmem as c_int);
+      }
+   }
+
+   f.first_audio_page_offset = stb_vorbis_get_file_offset(f);
+   return 1; // true
+}
+
+
+
 // Below is function that still live in C code
 extern {
     static mut crc_table: [u32; 256];
  
-    pub fn start_decoder(f: *mut vorb) -> c_int;
+    // pub fn start_decoder(f: *mut vorb) -> c_int;
     // pub fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, blocktype: c_int);
     // pub fn imdct_step3_iter0_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int , A: *mut f32);
     // pub fn imdct_step3_inner_r_loop(lim: c_int, e: *mut f32, d0: c_int , k_off: c_int , A: *mut f32, k1: c_int);
