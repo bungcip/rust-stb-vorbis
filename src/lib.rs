@@ -526,8 +526,7 @@ impl PartialOrd for Point {
 
 // Converted function is here
 
-#[no_mangle]
-pub fn error(f: &mut vorb, e: c_int) -> c_int
+fn error(f: &mut vorb, e: c_int) -> c_int
 {
     // NOTE: e is STBVorbisError
     f.error = e;
@@ -555,8 +554,7 @@ fn include_in_sort(c: &Codebook, len: u8) -> c_int
 
 
 
-#[no_mangle]
-pub unsafe extern fn setup_malloc(f: &mut vorb, sz: c_int) -> *mut c_void
+unsafe fn setup_malloc(f: &mut vorb, sz: c_int) -> *mut c_void
 {
    let sz = (sz+3) & !3;
    f.setup_memory_required += sz as u32;
@@ -576,8 +574,8 @@ pub unsafe extern fn setup_malloc(f: &mut vorb, sz: c_int) -> *mut c_void
    }
 }
 
-#[no_mangle]
-pub unsafe extern fn setup_free(f: &mut vorb, p: *mut c_void)
+
+unsafe fn setup_free(f: &mut vorb, p: *mut c_void)
 {
    if f.alloc.alloc_buffer.is_null() == false {
        return; // do nothing; setup mem is a stack
@@ -585,8 +583,8 @@ pub unsafe extern fn setup_free(f: &mut vorb, p: *mut c_void)
    libc::free(p);
 }
 
-#[no_mangle]
-pub unsafe extern fn setup_temp_malloc(f: &mut vorb, sz: c_int) -> *mut c_void
+
+unsafe fn setup_temp_malloc(f: &mut vorb, sz: c_int) -> *mut c_void
 {
    let sz = (sz+3) & !3;
    f.setup_memory_required += sz as u32;
@@ -600,8 +598,8 @@ pub unsafe extern fn setup_temp_malloc(f: &mut vorb, sz: c_int) -> *mut c_void
    return libc::malloc(sz as usize);
 }
 
-#[no_mangle]
-pub unsafe extern fn setup_temp_free(f: &mut vorb, p: *mut c_void, sz: c_int)
+
+unsafe fn setup_temp_free(f: &mut vorb, p: *mut c_void, sz: c_int)
 {
    if f.alloc.alloc_buffer.is_null() == false {
       f.temp_offset += (sz+3)&!3;
@@ -612,8 +610,8 @@ pub unsafe extern fn setup_temp_free(f: &mut vorb, p: *mut c_void, sz: c_int)
 
 const  CRC32_POLY  : u32 =  0x04c11db7;   // from spec
 
-#[no_mangle]
-pub unsafe extern fn crc32_init()
+
+unsafe fn crc32_init()
 {
    for i in 0 .. 256 {
        let mut s : u32 = i << 24;
@@ -646,8 +644,8 @@ fn square(x: f32) -> f32{
 //
 // these functions are only called at setup, and only a few times
 // per file
-#[no_mangle]
-pub extern fn float32_unpack(x: u32) -> f32
+
+fn float32_unpack(x: u32) -> f32
 {
    // from the specification
    let mantissa : u32 = x & 0x1fffff;
@@ -685,8 +683,8 @@ unsafe fn add_entry(c: &Codebook, huff_code: u32, symbol: c_int, count: c_int, l
 }
 
 
-#[no_mangle]
-pub unsafe extern fn compute_codewords(c: &mut Codebook, len: *mut u8, n: c_int, values: *mut u32) -> c_int
+
+unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: c_int, values: *mut u32) -> c_int
 {
    let mut m=0;
    let mut available: [u32; 32] = std::mem::zeroed();
@@ -763,8 +761,8 @@ pub unsafe extern fn compute_codewords(c: &mut Codebook, len: *mut u8, n: c_int,
 // this is a weird definition of log2() for which log2(1) = 1, log2(2) = 2, log2(4) = 3
 // as required by the specification. fast(?) implementation from stb.h
 // @OPTIMIZE: called multiple times per-packet with "constants"; move to setup
-#[no_mangle]
-pub extern fn ilog(n: i32) -> i32
+
+fn ilog(n: i32) -> i32
 {
     static log2_4: [i8; 16] = [0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];
 
@@ -840,8 +838,8 @@ fn uint32_compare(p: *const c_void, q: *const c_void) -> c_int
 
 
 // only run while parsing the header (3 times)
-#[no_mangle]
-pub extern fn vorbis_validate(data: *const u8) -> c_int
+
+fn vorbis_validate(data: *const u8) -> c_int
 {
     static vorbis: &'static [u8; 6] = b"vorbis";
     unsafe {
@@ -856,8 +854,8 @@ pub extern fn vorbis_validate(data: *const u8) -> c_int
 
 // called from setup only, once per code book
 // (formula implied by specification)
-#[no_mangle]
-pub extern fn lookup1_values(entries: c_int, dim: c_int) -> c_int
+
+fn lookup1_values(entries: c_int, dim: c_int) -> c_int
 {
     let mut r =  f64::floor(f64::exp(f64::ln(entries as f64) / dim as f64)) as c_int;
     if f64::floor(f64::powi( (r+1) as f64, dim)) as c_int <= entries {
@@ -915,8 +913,8 @@ fn compute_twiddle_factors(n: c_int, A: *mut f32, B: *mut f32, C: *mut f32)
 
 
 
-#[no_mangle]
-pub extern fn neighbors(x: *mut u16, n: c_int, plow: *mut c_int, phigh: *mut c_int)
+
+fn neighbors(x: *mut u16, n: c_int, plow: *mut c_int, phigh: *mut c_int)
 {
     let mut low : i32 = -1;
     let mut high : i32 = 65536;
@@ -935,8 +933,8 @@ pub extern fn neighbors(x: *mut u16, n: c_int, plow: *mut c_int, phigh: *mut c_i
     }
 }
 
-#[no_mangle]
-pub unsafe extern fn point_compare(p: *const c_void, q: *const c_void) -> c_int
+
+unsafe fn point_compare(p: *const c_void, q: *const c_void) -> c_int
 {
    let a : &Point = std::mem::transmute(p as *const Point);
    let b : &Point = std::mem::transmute(q as *const Point);
@@ -998,8 +996,8 @@ macro_rules! LINE_OP {
 
 
 
-#[no_mangle]
-pub unsafe extern fn get8(z: &mut vorb) -> u8
+
+unsafe fn get8(z: &mut vorb) -> u8
 {
    if USE_MEMORY!(z) {
       if z.stream >= z.stream_end { 
@@ -1018,8 +1016,8 @@ pub unsafe extern fn get8(z: &mut vorb) -> u8
 }
 
 
-#[no_mangle]
-pub unsafe extern fn get32(f: &mut vorb) -> u32
+
+unsafe fn get32(f: &mut vorb) -> u32
 {
    let mut x : u32 = get8(f) as u32;
    x += (get8(f) as u32) << 8;
@@ -1028,8 +1026,8 @@ pub unsafe extern fn get32(f: &mut vorb) -> u32
    return x;
 }
 
-#[no_mangle]
-pub unsafe extern fn getn(z: &mut vorb, data: *mut u8, n: c_int) -> c_int
+
+unsafe fn getn(z: &mut vorb, data: *mut u8, n: c_int) -> c_int
 {
    if USE_MEMORY!(z) {
       if z.stream.offset(n as isize) > z.stream_end { z.eof = 1; return 0; }
@@ -1047,8 +1045,8 @@ pub unsafe extern fn getn(z: &mut vorb, data: *mut u8, n: c_int) -> c_int
    }
 }
 
-#[no_mangle]
-pub unsafe extern fn skip(z: &mut vorb, n: c_int)
+
+unsafe fn skip(z: &mut vorb, n: c_int)
 {
    if USE_MEMORY!(z) {
       z.stream = z.stream.offset(n as isize);
@@ -1092,8 +1090,8 @@ unsafe fn get8_packet_raw(f: *mut vorb) -> c_int
     return get8(f) as c_int;
 }
 
-#[no_mangle]
-pub unsafe extern fn get8_packet(f: *mut vorb) -> c_int
+
+unsafe fn get8_packet(f: *mut vorb) -> c_int
 {
     let x = get8_packet_raw(f);
     
@@ -1103,8 +1101,8 @@ pub unsafe extern fn get8_packet(f: *mut vorb) -> c_int
     return x;
 }
 
-#[no_mangle]
-pub unsafe extern fn flush_packet(f: *mut vorb)
+
+unsafe fn flush_packet(f: *mut vorb)
 {
     while get8_packet_raw(f) != EOP {}
 }
@@ -1112,8 +1110,8 @@ pub unsafe extern fn flush_packet(f: *mut vorb)
 
 // @OPTIMIZE: this is the secondary bit decoder, so it's probably not as important
 // as the huffman decoder?
-#[no_mangle]
-pub unsafe extern fn get_bits(f: &mut vorb, n: c_int) -> u32
+
+unsafe fn get_bits(f: &mut vorb, n: c_int) -> u32
 {
    let mut z : u32;
 
@@ -1144,8 +1142,8 @@ pub unsafe extern fn get_bits(f: &mut vorb, n: c_int) -> u32
 }
 
 
-#[no_mangle]
-pub unsafe extern fn start_page(f: &mut vorb) -> c_int
+
+unsafe fn start_page(f: &mut vorb) -> c_int
 {
    if capture_pattern(f) == 0 {
        return error(f, STBVorbisError::VORBIS_missing_capture_pattern as i32);
@@ -1159,8 +1157,8 @@ const PAGEFLAG_first_page       : c_int =   2;
 const PAGEFLAG_last_page        : c_int =   4;
 
 
-#[no_mangle]
-pub unsafe extern fn start_packet(f: &mut vorb) -> c_int
+
+unsafe fn start_packet(f: &mut vorb) -> c_int
 {
    while f.next_seg == -1 {
       if start_page(f) == 0 { return 0; } // false
@@ -1199,8 +1197,8 @@ unsafe fn maybe_start_packet(f: &mut vorb) -> c_int
    return start_packet(f);
 }
 
-#[no_mangle]
-pub unsafe extern fn next_segment(f: &mut vorb) -> c_int
+
+unsafe fn next_segment(f: &mut vorb) -> c_int
 {
     use STBVorbisError::VORBIS_continued_packet_flag_invalid;
 //    int len;
@@ -1779,8 +1777,8 @@ pub unsafe fn stb_vorbis_seek(f: &mut stb_vorbis, sample_number: c_uint) -> c_in
 }
 
 
-#[no_mangle]
-pub unsafe extern fn init_blocksize(f: &mut vorb, b: c_int, n: c_int) -> c_int
+
+unsafe fn init_blocksize(f: &mut vorb, b: c_int, n: c_int) -> c_int
 {
     use STBVorbisError::*;
     
@@ -1812,8 +1810,8 @@ pub unsafe extern fn init_blocksize(f: &mut vorb, b: c_int, n: c_int) -> c_int
 
 // accelerated huffman table allows fast O(1) match of all symbols
 // of length <= STB_VORBIS_FAST_HUFFMAN_LENGTH
-#[no_mangle]
-pub unsafe extern fn compute_accelerated_huffman(c: &mut Codebook)
+
+unsafe fn compute_accelerated_huffman(c: &mut Codebook)
 {
 //    int i, len;
    for i in 0 .. FAST_HUFFMAN_TABLE_SIZE {
@@ -1842,8 +1840,8 @@ pub unsafe extern fn compute_accelerated_huffman(c: &mut Codebook)
 
 // returns the current seek point within the file, or offset from the beginning
 // of the memory buffer. In pushdata mode it returns 0.
-#[no_mangle]
-pub unsafe extern fn stb_vorbis_get_file_offset(f: &stb_vorbis) -> c_uint
+
+pub unsafe fn stb_vorbis_get_file_offset(f: &stb_vorbis) -> c_uint
 {
    if f.push_mode != 0 {return 0;}
    if USE_MEMORY!(f) {return (f.stream as usize - f.stream_start as usize) as c_uint;}
@@ -3267,8 +3265,8 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
     return (f.stream as usize - data as usize) as c_int;
 }
 
-#[no_mangle]
-pub unsafe extern fn is_whole_packet_present(f: &mut stb_vorbis, end_page: c_int) -> c_int
+
+unsafe fn is_whole_packet_present(f: &mut stb_vorbis, end_page: c_int) -> c_int
 {
    // make sure that we have the packet available before continuing...
    // this requires a full ogg parse, but we know we can fetch from f->stream
@@ -3752,8 +3750,8 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut vorb, data: *mut u8, mut data_
 
 // if the fast table above doesn't work, we want to binary
 // search them... need to reverse the bits
-#[no_mangle]
-pub unsafe extern fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mut u32)
+
+unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mut u32)
 {
    // build a list of all the entries
    // OPTIMIZATION: don't include the short ones, since they'll be caught by FAST_HUFFMAN.
@@ -4407,8 +4405,8 @@ unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: c_int
 // the following were split out into separate functions while optimizing;
 // they could be pushed back up but eh. __forceinline showed no change;
 // they're probably already being inlined.
-#[no_mangle]
-pub unsafe extern fn imdct_step3_iter0_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int , mut A: *mut f32)
+
+unsafe fn imdct_step3_iter0_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int , mut A: *mut f32)
 {
    let mut ee0 = e.offset(i_off as isize);
    let mut ee2 = ee0.offset(k_off as isize);
@@ -4457,8 +4455,8 @@ pub unsafe extern fn imdct_step3_iter0_loop(n: c_int, e: *mut f32, i_off: c_int,
    }
 }
 
-#[no_mangle]
-pub unsafe extern fn imdct_step3_inner_r_loop(lim: c_int, e: *mut f32, d0: c_int , k_off: c_int , mut A: *mut f32, k1: c_int)
+
+unsafe fn imdct_step3_inner_r_loop(lim: c_int, e: *mut f32, d0: c_int , k_off: c_int , mut A: *mut f32, k1: c_int)
 {
    let mut i : i32;
    let mut k00_20 : f32; 
@@ -4512,8 +4510,8 @@ pub unsafe extern fn imdct_step3_inner_r_loop(lim: c_int, e: *mut f32, d0: c_int
    }
 }
 
-#[no_mangle]
-pub unsafe extern fn imdct_step3_inner_s_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int, A: *mut f32, a_off: c_int , k0: c_int)
+
+unsafe fn imdct_step3_inner_s_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int, A: *mut f32, a_off: c_int , k0: c_int)
 {
    let mut i : i32;
    let a_off = a_off as isize;
@@ -4570,8 +4568,8 @@ pub unsafe extern fn imdct_step3_inner_s_loop(n: c_int, e: *mut f32, i_off: c_in
    }
 }
 
-#[no_mangle]
-pub unsafe extern fn imdct_step3_inner_s_loop_ld654(n: c_int, e: *mut f32, i_off: c_int, A: *mut f32, base_n: c_int)
+
+unsafe fn imdct_step3_inner_s_loop_ld654(n: c_int, e: *mut f32, i_off: c_int, A: *mut f32, base_n: c_int)
 {
    let a_off = base_n >> 3;
    let A2 = *A.offset( 0 + a_off as isize);
@@ -4650,8 +4648,8 @@ unsafe fn iter_54(z: *mut f32)
 }
 
 
-#[no_mangle]
-pub unsafe extern fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, blocktype: c_int)
+
+unsafe fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, blocktype: c_int)
 {
    let n2 : i32 = n >> 1;
    let n4 : i32 = n >> 2; 
@@ -5609,16 +5607,5 @@ pub unsafe fn start_decoder(f: &mut vorb) -> c_int
 
 // Below is function that still live in C code
 extern {
- 
-    // pub fn start_decoder(f: *mut vorb) -> c_int;
-    // pub fn inverse_mdct(buffer: *mut f32, n: c_int, f: &mut vorb, blocktype: c_int);
-    // pub fn imdct_step3_iter0_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int , A: *mut f32);
-    // pub fn imdct_step3_inner_r_loop(lim: c_int, e: *mut f32, d0: c_int , k_off: c_int , A: *mut f32, k1: c_int);
-    // pub fn imdct_step3_inner_s_loop(n: c_int, e: *mut f32, i_off: c_int, k_off: c_int, A: *mut f32, a_off: c_int , k0: c_int);
-    // pub fn imdct_step3_inner_s_loop_ld654(n: c_int, e: *mut f32, i_off: c_int, A: *mut f32, base_n: c_int);
-    // pub fn iter_54(z: *mut f32);
-    
-
     fn qsort(base: *mut c_void, nmemb: size_t, size: size_t, compar: *const c_void);
-    
 }
