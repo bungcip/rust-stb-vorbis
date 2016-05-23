@@ -335,12 +335,12 @@ pub struct ProbedPage
 pub struct stb_vorbis
 {
   // user-accessible info
-   sample_rate: u32,
-   channels: i32,
+   pub sample_rate: u32,
+   pub channels: i32,
 
-   setup_memory_required: u32,
-   temp_memory_required: u32,
-   setup_temp_memory_required: u32,
+   pub setup_memory_required: u32,
+   pub temp_memory_required: u32,
+   pub setup_temp_memory_required: u32,
 
   // input config
    f: *mut libc::FILE,
@@ -680,10 +680,6 @@ unsafe fn add_entry(c: &Codebook, huff_code: u32, symbol: i32, count: i32, len: 
 
 unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut u32) -> bool
 {
-   let mut m=0;
-   let mut available: [u32; 32] = std::mem::zeroed();
-
-//    memset(available, 0, sizeof(available));
    // find the first entry
    let mut k = 0;
    while k < n {
@@ -696,10 +692,12 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
    if k == n { assert!(c.sorted_entries == 0); return true; }
    
    // add to the list
+   let mut m=0;
    add_entry(c, 0, k, m, *len.offset(k as isize) as i32, values);
    m += 1;
    
    // add all available leaves
+   let mut available: [u32; 32] = std::mem::zeroed();
    let mut i = 1;
    while i <= *len.offset(k as isize) {
       available[i as usize] = 1u32 << (32-i);
@@ -727,7 +725,6 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
       }
       if z == 0 { return false; }
       res = available[z as usize];
-    //   assert!(z >= 0 && z < 32);
       assert!(z < 32); // NOTE(z is u8 so negative is impossible)
       available[z as usize] = 0;
       add_entry(c, bit_reverse(res), i, m, *len.offset(i as isize) as i32, values);
@@ -950,8 +947,6 @@ macro_rules! LINE_OP {
 }
 
 
-
-
 unsafe fn get8(z: &mut vorb) -> u8
 {
    if USE_MEMORY!(z) {
@@ -1027,9 +1022,8 @@ unsafe fn capture_pattern(f: &mut vorb) -> bool
 const EOP : i32 = -1;
 const INVALID_BITS : i32 = -1;
 
-unsafe fn get8_packet_raw(f: *mut vorb) -> i32
+unsafe fn get8_packet_raw(f: &mut vorb) -> i32
 {
-    let f : &mut vorb = std::mem::transmute(f as *mut vorb); 
     if f.bytes_in_seg == 0 {
         if f.last_seg == true {
             return EOP;
@@ -1047,18 +1041,15 @@ unsafe fn get8_packet_raw(f: *mut vorb) -> i32
 }
 
 
-unsafe fn get8_packet(f: *mut vorb) -> i32
+unsafe fn get8_packet(f: &mut vorb) -> i32
 {
     let x = get8_packet_raw(f);
-    
-    let f : &mut vorb = std::mem::transmute(f as *mut vorb); 
     f.valid_bits = 0;
-    
     return x;
 }
 
 
-unsafe fn flush_packet(f: *mut vorb)
+unsafe fn flush_packet(f: &mut vorb)
 {
     while get8_packet_raw(f) != EOP {}
 }
@@ -1157,7 +1148,6 @@ unsafe fn maybe_start_packet(f: &mut vorb) -> bool
 unsafe fn next_segment(f: &mut vorb) -> i32
 {
     use VorbisError::continued_packet_flag_invalid;
-//    int len;
    if f.last_seg == true {return 0;}
    if f.next_seg == -1 {
       f.last_seg_which = f.segment_count-1; // in case start_page fails
@@ -4968,7 +4958,6 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
 
    // second packet!
    if start_page(f) == false                              {return false;} 
-
    if start_packet(f) == false                            {return false;} 
    
    let mut len;
@@ -5179,7 +5168,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
             // pre-expand the lookup1-style multiplicands, to avoid a divide in the inner loop
             if sparse {
                if c.sorted_entries == 0 { 
-                //    goto skip; FIXME: buat loop
+                //    goto skip;
                 break 'skip;
                 }
                c.multiplicands = setup_malloc(f, mem::size_of::<codetype>() as i32 * c.sorted_entries * c.dimensions) as *mut codetype;
