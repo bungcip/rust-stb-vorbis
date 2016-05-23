@@ -814,20 +814,11 @@ unsafe fn compute_bitreverse(n: i32, rev: *mut u16)
 }
 
 
-
 // only run while parsing the header (3 times)
-
-fn vorbis_validate(data: *const u8) -> i32
+fn vorbis_validate(data: &[u8]) -> bool
 {
-    static vorbis: &'static [u8; 6] = b"vorbis";
-    unsafe {
-        let result = libc::memcmp(data as *const c_void, vorbis.as_ptr() as *const c_void, 6) == 0;    
-        if result {
-            return 1;
-        }else{
-            return 0;
-        }
-    }
+    static vorbis_header: &'static [u8; 6] = b"vorbis";
+    return data == vorbis_header;
 }
 
 // called from setup only, once per code book
@@ -4951,7 +4942,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
    // check packet header
    if get8(f) != VORBIS_packet_id                 {return error(f, VORBIS_invalid_first_page as i32);}
    if getn(f, header.as_mut_ptr(), 6) == 0                         {return error(f, VORBIS_unexpected_eof as i32);}
-   if vorbis_validate(header.as_ptr()) == 0                    {return error(f, VORBIS_invalid_first_page as i32);}
+   if vorbis_validate(&header) == false                    {return error(f, VORBIS_invalid_first_page as i32);}
    // vorbis_version
    if get32(f) != 0                               {return error(f, VORBIS_invalid_first_page as i32);}
    f.channels = get8(f) as i32; if f.channels == 0        { return error(f, VORBIS_invalid_first_page as i32);}
@@ -5004,7 +4995,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
 
    if get8_packet(f) != VORBIS_packet_setup as i32       {return error(f, VORBIS_invalid_setup as i32);}
    for i in 0usize .. 6 {header[i] = get8_packet(f) as u8;}
-   if vorbis_validate(header.as_ptr()) == 0                    {return error(f, VORBIS_invalid_setup as i32);}
+   if vorbis_validate(&header) == false                    {return error(f, VORBIS_invalid_setup as i32);}
 
    // codebooks
 
