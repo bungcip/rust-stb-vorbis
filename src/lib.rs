@@ -524,9 +524,9 @@ fn error(f: &mut vorb, e: i32) -> i32
         f.error = e; // breakpoint for debugging
     }
     
-    if e == STBVorbisError::VORBIS_invalid_stream as i32 {
-        panic!("Cek error nya!");
-    }
+    // if e == STBVorbisError::VORBIS_invalid_stream as i32 {
+    //     panic!("Cek error nya!");
+    // }
     
     return 0;
 }
@@ -813,22 +813,6 @@ unsafe fn compute_bitreverse(n: i32, rev: *mut u16)
    }
 }
 
-fn uint32_compare(p: *const c_void, q: *const c_void) -> i32
-{
-    unsafe {
-        let x = std::ptr::read(p as *const u32);        
-        let y = std::ptr::read(q as *const u32);
-        if x < y {
-            return -1;
-        }else{
-            if x > y {
-                return 1;
-            }else{
-                return 0
-            }
-        }
-    }
-}
 
 
 // only run while parsing the header (3 times)
@@ -927,20 +911,6 @@ fn neighbors(x: *mut u16, n: i32, plow: *mut i32, phigh: *mut i32)
     }
 }
 
-
-unsafe fn point_compare(p: *const c_void, q: *const c_void) -> i32
-{
-   let a : &Point = std::mem::transmute(p as *const Point);
-   let b : &Point = std::mem::transmute(q as *const Point);
-   
-   if a.x < b.x {
-       return -1;
-   }else if a.x > b.x {
-       return 1;
-   }else {
-       return 0;
-   }
-}
 
 macro_rules! USE_MEMORY {
     ($z: expr) => {
@@ -3764,11 +3734,11 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
       }
    }
 
-   qsort(
-       c.sorted_codewords as *mut c_void, 
-       c.sorted_entries as usize, 
-       std::mem::size_of::<i32>(), 
-       uint32_compare as *const c_void);
+   // NOTE(bungcip): using rust sort instead of libc qsort, so we need to create slice...
+   {
+       let mut sorted_codewords_slice = std::slice::from_raw_parts_mut(c.sorted_codewords, c.sorted_entries as usize);
+       sorted_codewords_slice.sort();
+   }
        
    *c.sorted_codewords.offset(c.sorted_entries as isize) = 0xffffffff;
 
@@ -5317,7 +5287,6 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
          }
          return error(f, VORBIS_feature_not_supported as i32);
       } else {
-         let mut p : [Point; 31*8+2] = mem::zeroed();
          let mut g : &mut Floor1 = &mut (*f.floor_config.offset(i as isize)).floor1;
          let mut max_class : i32 = -1; 
          g.partitions = get_bits(f, 5) as u8;
@@ -5356,11 +5325,14 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
             }
          }
          // precompute the sorting
+         let mut p : Vec<Point> = Vec::with_capacity(31*8+2);
          for j in 0 .. g.values {
-            p[j as usize].x = g.Xlist[j as usize];
-            p[j as usize].y = j as u16;
+             p.push(Point{ x: g.Xlist[j as usize], y: j as u16});
          }
-         qsort(p.as_mut_ptr() as *mut c_void, g.values as usize, mem::size_of::<Point>(), point_compare as *const c_void);
+         
+         // NOTE(bungcip): using rust sort instead of libc qsort
+         p.sort();
+         
          for j in 0 .. g.values {
             g.sorted_order[j as usize] = p[j as usize].y as u8;
          }
@@ -5591,11 +5563,4 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
 
    f.first_audio_page_offset = stb_vorbis_get_file_offset(f);
    return 1; // true
-}
-
-
-
-// Below is function that still live in C code
-extern {
-    fn qsort(base: *mut c_void, nmemb: size_t, size: size_t, compar: *const c_void);
 }
