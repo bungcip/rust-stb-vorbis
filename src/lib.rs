@@ -416,7 +416,7 @@ pub struct stb_vorbis
    bytes_in_seg: u8,
    first_decode: bool,
    next_seg: i32,
-   last_seg: i32,  // flag that we're on the last segment
+   last_seg: bool,  // flag that we're on the last segment
    last_seg_which: i32, // what was the segment number of the last seg?
    acc: u32,
    valid_bits: i32,
@@ -678,7 +678,7 @@ unsafe fn add_entry(c: &Codebook, huff_code: u32, symbol: i32, count: i32, len: 
 
 
 
-unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut u32) -> i32
+unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut u32) -> bool
 {
    let mut m=0;
    let mut available: [u32; 32] = std::mem::zeroed();
@@ -693,7 +693,7 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
        k += 1;
    }
    
-   if k == n { assert!(c.sorted_entries == 0); return 1; } // true
+   if k == n { assert!(c.sorted_entries == 0); return true; }
    
    // add to the list
    add_entry(c, 0, k, m, *len.offset(k as isize) as i32, values);
@@ -725,7 +725,7 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
       while z > 0 && available[z as usize]  == 0{
           z -= 1;
       }
-      if z == 0 { return 0; } // false
+      if z == 0 { return false; }
       res = available[z as usize];
     //   assert!(z >= 0 && z < 32);
       assert!(z < 32); // NOTE(z is u8 so negative is impossible)
@@ -748,7 +748,7 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
       }
    }
    
-   return 1; // true
+   return true;
 }
 
 
@@ -989,7 +989,6 @@ unsafe fn getn(z: &mut vorb, data: *mut u8, n: i32) -> i32
    if USE_MEMORY!(z) {
       if z.stream.offset(n as isize) > z.stream_end { z.eof = true; return 0; }
       std::ptr::copy_nonoverlapping(z.stream, data, n as usize);
-    //   libc::memcpy(data, z.stream, n);
       z.stream = z.stream.offset(n as isize);
       return 1;
    }
@@ -1015,13 +1014,13 @@ unsafe fn skip(z: &mut vorb, n: i32)
    libc::fseek(z.f, x+n, libc::SEEK_SET);
 }
 
-unsafe fn capture_pattern(f: &mut vorb) -> i32
+unsafe fn capture_pattern(f: &mut vorb) -> bool
 {
-   if 0x4f != get8(f) {return 0;}
-   if 0x67 != get8(f) {return 0;}
-   if 0x67 != get8(f) {return 0;}
-   if 0x53 != get8(f) {return 0;}
-   return 1;
+   if 0x4f != get8(f) {return false;}
+   if 0x67 != get8(f) {return false;}
+   if 0x67 != get8(f) {return false;}
+   if 0x53 != get8(f) {return false;}
+   return true;
 }
 
 
@@ -1032,7 +1031,7 @@ unsafe fn get8_packet_raw(f: *mut vorb) -> i32
 {
     let f : &mut vorb = std::mem::transmute(f as *mut vorb); 
     if f.bytes_in_seg == 0 {
-        if f.last_seg != 0 {
+        if f.last_seg == true {
             return EOP;
         }else if next_segment(f) == 0 {
             return EOP;
@@ -1102,7 +1101,7 @@ unsafe fn get_bits(f: &mut vorb, n: i32) -> u32
 
 unsafe fn start_page(f: &mut vorb) -> bool
 {
-   if capture_pattern(f) == 0 {
+   if capture_pattern(f) == false {
        return error(f, STBVorbisError::VORBIS_missing_capture_pattern as i32);
    } 
    return start_page_no_capturepattern(f);
@@ -1123,7 +1122,7 @@ unsafe fn start_packet(f: &mut vorb) -> bool
          return error(f, STBVorbisError::VORBIS_continued_packet_flag_invalid as i32);
       }
    }
-   f.last_seg = 0; // false
+   f.last_seg = false;
    f.valid_bits = 0;
    f.packet_bytes = 0;
    f.bytes_in_seg = 0;
@@ -1146,7 +1145,7 @@ unsafe fn maybe_start_packet(f: &mut vorb) -> bool
       if (f.page_flag & PAGEFLAG_continued_packet as u8) != 0 {
          // set up enough state that we can read this packet if we want,
          // e.g. during recovery
-         f.last_seg = 0;
+         f.last_seg = false;
          f.bytes_in_seg = 0;
          return error(f, VORBIS_continued_packet_flag_invalid as i32);
       }
@@ -1159,10 +1158,10 @@ unsafe fn next_segment(f: &mut vorb) -> i32
 {
     use STBVorbisError::VORBIS_continued_packet_flag_invalid;
 //    int len;
-   if f.last_seg != 0 {return 0;}
+   if f.last_seg == true {return 0;}
    if f.next_seg == -1 {
       f.last_seg_which = f.segment_count-1; // in case start_page fails
-      if start_page(f) == false { f.last_seg = 1; return 0; }
+      if start_page(f) == false { f.last_seg = true; return 0; }
       if (f.page_flag & PAGEFLAG_continued_packet as u8) == 0 {
           error(f, VORBIS_continued_packet_flag_invalid as i32); 
           return 0;
@@ -1173,7 +1172,7 @@ unsafe fn next_segment(f: &mut vorb) -> i32
    f.next_seg += 1;
    
    if len < 255 {
-      f.last_seg = 1; // true
+      f.last_seg = true;
       f.last_seg_which = f.next_seg-1;
    }
    if f.next_seg >= f.segment_count{
@@ -1964,27 +1963,27 @@ unsafe fn draw_line(output: *mut f32, x0: i32, y0: i32, mut x1: i32, y1: i32, n:
 }
 
 
-unsafe fn residue_decode(f: &mut vorb, book: &Codebook, target: *mut f32, mut offset: i32, n: i32, rtype: i32) -> i32
+unsafe fn residue_decode(f: &mut vorb, book: &Codebook, target: *mut f32, mut offset: i32, n: i32, rtype: i32) -> bool
 {
    if rtype == 0 {
       let step = n / book.dimensions;
       for k in 0 .. step {
-         if codebook_decode_step(f, book, target.offset((offset+k) as isize), n-offset-k, step) == 0{
-            return 0; // false
+         if codebook_decode_step(f, book, target.offset((offset+k) as isize), n-offset-k, step) == false {
+            return false;
          }
       }
    } else {
        let mut k = 0;
        while k < n {
-         if codebook_decode(f, book, target.offset(offset as isize), n-k) == 0{
-            return 0; // FALSE
+         if codebook_decode(f, book, target.offset(offset as isize), n-k) == false {
+            return false;
          }
          k += book.dimensions;
          offset += book.dimensions;
        }
        
    }
-   return 1; // true
+   return true;
 }
 
 // CODEBOOK_ELEMENT_FAST is an optimization for the CODEBOOK_FLOATS case
@@ -2008,10 +2007,10 @@ macro_rules! CODEBOOK_ELEMENT_BASE {
 }
 
 
-unsafe fn codebook_decode(f: &mut vorb, c: &Codebook, output: *mut f32, mut len: i32 ) -> i32
+unsafe fn codebook_decode(f: &mut vorb, c: &Codebook, output: *mut f32, mut len: i32 ) -> bool
 {
    let mut z = codebook_decode_start(f,c);
-   if z < 0 {return 0;} // false
+   if z < 0 {return false;}
    if len > c.dimensions {len = c.dimensions;}
 
    z *= c.dimensions;
@@ -2029,7 +2028,7 @@ unsafe fn codebook_decode(f: &mut vorb, c: &Codebook, output: *mut f32, mut len:
       }
    }
 
-   return 1; // true
+   return true;
 }
 
 macro_rules! DECODE {
@@ -2067,7 +2066,7 @@ unsafe fn codebook_decode_start(f: &mut vorb, c: &Codebook) -> i32
       if c.sparse == true {assert!(z < c.sorted_entries);}
       if z < 0 {  // check for EOP
          if f.bytes_in_seg == 0 {
-            if f.last_seg != 0 {
+            if f.last_seg == true {
                return z;
             }
          }
@@ -2107,7 +2106,7 @@ unsafe fn prep_huffman(f: &mut vorb)
       if f.valid_bits == 0 {f.acc = 0;}
       
       while {
-         if f.last_seg != 0 && f.bytes_in_seg == 0 {return;}
+         if f.last_seg == true && f.bytes_in_seg == 0 {return;}
          let z : i32 = get8_packet_raw(f);
          if z == EOP {return;}
          f.acc += (z as u32) << f.valid_bits;
@@ -2188,13 +2187,11 @@ unsafe fn codebook_decode_scalar_raw(f: &mut vorb, c: &Codebook) -> i32
    return -1;
 }
 
-unsafe fn codebook_decode_step(f: &mut vorb, c: &Codebook, output: *mut f32, mut len: i32 , step: i32 ) -> i32
+unsafe fn codebook_decode_step(f: &mut vorb, c: &Codebook, output: *mut f32, mut len: i32 , step: i32 ) -> bool
 {
-    // NOTE(bungcip): convert return type to bool?
-    
    let mut z = codebook_decode_start(f,c);
    let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
-   if z < 0 {return 0;} // false
+   if z < 0 {return false;}
    if len > c.dimensions { len = c.dimensions; }
 
    z *= c.dimensions;
@@ -2204,7 +2201,7 @@ unsafe fn codebook_decode_step(f: &mut vorb, c: &Codebook, output: *mut f32, mut
       if c.sequence_p != 0 {last = val;}
    }
 
-   return 1; // true
+   return true;
 }
 
 unsafe fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, outputs: *mut *mut f32, ch: i32, i32er_p: &mut i32, p_inter_p: &mut i32, len: i32, mut total_decode: i32) -> bool
@@ -2224,7 +2221,7 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, output
       assert!(c.sparse == false || z < c.sorted_entries);
       if z < 0 {
          if f.bytes_in_seg == 0{
-            if f.last_seg != 0{
+            if f.last_seg == true {
               return false;
             } 
          }
@@ -2576,7 +2573,7 @@ pub fn stb_vorbis_flush_pushdata(f: &mut stb_vorbis)
    f.previous_length = 0;
    f.page_crc_tests  = 0;
    f.discard_samples_deferred = 0;
-   f.current_loc_valid = false; // false
+   f.current_loc_valid = false;
    f.first_decode = false; 
    f.samples_output = 0;
    f.channel_buffer_start = 0;
@@ -3235,7 +3232,7 @@ unsafe fn is_whole_packet_present(f: &mut stb_vorbis, end_page: i32) -> bool
    // of state to restore (primarily the page segment table)
 
    let mut s = f.next_seg;
-   let mut first = 1; // true
+   let mut first = true;
    let mut p = f.stream;
 
    if s != -1 { // if we're not starting the packet with a 'continue on next page' flag
@@ -3261,7 +3258,7 @@ unsafe fn is_whole_packet_present(f: &mut stb_vorbis, end_page: i32) -> bool
       if p > f.stream_end {
         return error(f, STBVorbisError::VORBIS_need_more_data as i32);
       }
-      first = 0; // false
+      first =  false;
    }
    
    while s == -1 {
@@ -3273,7 +3270,7 @@ unsafe fn is_whole_packet_present(f: &mut stb_vorbis, end_page: i32) -> bool
       // validate the page
       if libc::memcmp(p as *const c_void, ogg_page_header.as_ptr() as *const c_void, 4) != 0         {return error(f, STBVorbisError::VORBIS_invalid_stream as i32);}
       if *p.offset(4) != 0                             {return error(f, STBVorbisError::VORBIS_invalid_stream as i32);}
-      if first != 0 { // the first segment must NOT have 'continued_packet', later ones MUST
+      if first  { // the first segment must NOT have 'continued_packet', later ones MUST
          if f.previous_length != 0 {
             if (*p.offset(5) & PAGEFLAG_continued_packet as u8) != 0 { return error(f, STBVorbisError::VORBIS_invalid_stream as i32);}
          }
@@ -3300,7 +3297,7 @@ unsafe fn is_whole_packet_present(f: &mut stb_vorbis, end_page: i32) -> bool
          s = -1; // set 'crosses page' flag
       }
       if p > f.stream_end                     {return error(f,STBVorbisError::VORBIS_need_more_data as i32);}
-      first = 0; // false
+      first = false;
    }
    return true;
 }
@@ -3572,7 +3569,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
 
    // prepare to start decoding
    f.current_loc_valid = false;
-   f.last_seg = 0; // false
+   f.last_seg = false;
    f.valid_bits = 0;
    f.packet_bytes = 0;
    f.bytes_in_seg = 0;
@@ -3798,7 +3795,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
 
    for i in 0 .. f.channels {
       let s: i32 = (*map.chan.offset(i as isize)).mux as i32;
-      zero_channel[ i as usize ] = false; // false
+      zero_channel[ i as usize ] = false;
       let floor : i32 = map.submap_floor[s as usize] as i32;
       if f.floor_types[floor as usize] == 0 {
          return error(f, VORBIS_invalid_stream as i32);
@@ -3933,22 +3930,21 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
    for i in 0 .. map.submaps {
       let mut residue_buffers: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize] = mem::zeroed();
     //   int r;
-      let mut do_not_decode: [u8; 256] = mem::zeroed();
+      let mut do_not_decode: [bool; 256] = mem::zeroed();
       let mut ch : usize = 0;
       for j in 0 .. f.channels {
          if (*map.chan.offset(j as isize)).mux == i {
             if zero_channel[j as usize] {
-               do_not_decode[ch] = 1; // true
+               do_not_decode[ch] = true;
                residue_buffers[ch] = std::ptr::null_mut();
             } else {
-               do_not_decode[ch] = 0; // false
+               do_not_decode[ch] = false;
                residue_buffers[ch] = f.channel_buffers[j as usize];
             }
             ch += 1;
          }
       }
       let r = map.submap_residue[i as usize];
-      // FIXME(bungcip): change do_not_decode to bool
       decode_residue(f, mem::transmute(&mut residue_buffers), ch as i32, n2, r as i32, do_not_decode.as_mut_ptr());
    }
 
@@ -4147,7 +4143,7 @@ macro_rules! temp_block_array {
 
 
 
-unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, n: i32, rn: i32, do_not_decode: *mut u8)
+unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, n: i32, rn: i32, do_not_decode: *mut bool)
 {
 //    int i,j,pass;
    let r: &Residue = mem::transmute(f.residue_config.offset(rn as isize));
@@ -4168,7 +4164,7 @@ unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, 
    CHECK!(f);
 
    for i in 0 .. ch {
-      if *do_not_decode.offset(i as isize) == 0 {
+      if *do_not_decode.offset(i as isize) == false {
           std::ptr::write_bytes(*residue_buffers.offset(i as isize), 0, n as usize);
       }
    }
@@ -4179,7 +4175,7 @@ unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, 
    if rtype == 2 && ch != 1 {
        let mut j = 0;
        while j < ch {
-         if *do_not_decode.offset(j as isize) == 0 {
+         if *do_not_decode.offset(j as isize) == false {
             break;
          }
          j += 1;
@@ -4313,7 +4309,7 @@ unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, 
       while pcount < part_read {
          if pass == 0 {
             for j in 0 .. ch {
-               if *do_not_decode.offset(j as isize) == 0 {
+               if *do_not_decode.offset(j as isize) == false {
                   let c : &Codebook = mem::transmute(f.codebooks.offset(r.classbook as isize));
                   let mut temp;
                   DECODE!(temp,f,c);
@@ -4328,7 +4324,7 @@ unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, 
             let mut i = 0;
             while i < classwords && pcount < part_read {
             for j in 0 .. ch {
-               if *do_not_decode.offset(j as isize) == 0 {
+               if *do_not_decode.offset(j as isize) == false {
                   let c : i32 = *(*(*part_classdata.offset(j as isize)).offset(class_set as isize)).offset(i as isize) as i32;
                   let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
                   if b >= 0 {
@@ -4336,7 +4332,7 @@ unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, 
                       let offset : i32 =  r.begin as i32 + pcount*r.part_size as i32;
                       let n : i32 = r.part_size as i32;
                       let book : &Codebook = mem::transmute(f.codebooks.offset(b as isize));
-                     if residue_decode(f, book, target, offset, n, rtype) == 0{
+                     if residue_decode(f, book, target, offset, n, rtype) == false {
                         // goto done;
                         break 'done;
                      }
@@ -5124,7 +5120,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
 
       {
           let temp_entries = c.entries; // note(bungcip): just to satisfy borrow checker
-      if compute_codewords(c, lengths, temp_entries, values) == 0 {
+      if compute_codewords(c, lengths, temp_entries, values) == false {
          if c.sparse == true {setup_temp_free(f, values as *mut c_void, 0);}
          return error(f, VORBIS_invalid_setup as i32);
       }
@@ -5180,11 +5176,10 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
          
          'skip: loop {
          if c.lookup_type == 1 {
-//             int len, sparse = c.sparse;
-            let sparse : i32 = c.sparse as i32;
+            let sparse = c.sparse;
             let mut last : f32 = 0.0;
             // pre-expand the lookup1-style multiplicands, to avoid a divide in the inner loop
-            if sparse != 0 {
+            if sparse {
                if c.sorted_entries == 0 { 
                 //    goto skip; FIXME: buat loop
                 break 'skip;
@@ -5197,9 +5192,9 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
                 setup_temp_free(f, mults as *mut c_void, mem::size_of::<u16>() as i32 * c.lookup_values as i32); 
                 return error(f, VORBIS_outofmem as i32);
             }
-            len = if sparse != 0 { c.sorted_entries } else {c.entries};
+            len = if sparse  { c.sorted_entries } else {c.entries};
             for j in 0 .. len {
-               let z : u32 = if sparse != 0 { *c.sorted_values.offset(j as isize) } else {j} as u32;
+               let z : u32 = if sparse  { *c.sorted_values.offset(j as isize) } else {j} as u32;
                let mut div: u32 = 1;
                for k in 0 .. c.dimensions {
                   let off: i32 = (z / div) as i32 % c.lookup_values as i32;
