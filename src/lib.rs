@@ -211,15 +211,11 @@ pub struct Codebook
    value_bits: u8,
    lookup_type: u8,
    sequence_p: u8,
-   sparse: u8,
+   sparse: bool,
    lookup_values: u32,
    multiplicands: *mut codetype,
    codewords: *mut u32,
-//    #ifdef STB_VORBIS_FAST_HUFFMAN_SHORT
-    fast_huffman: [i16; FAST_HUFFMAN_TABLE_SIZE as usize],
-//    #else
-    // i32  fast_huffman[FAST_HUFFMAN_TABLE_SIZE],
-//    #endif
+   fast_huffman: [i16; FAST_HUFFMAN_TABLE_SIZE as usize],
    sorted_codewords: *mut u32,
    sorted_values: *mut c_int,
    sorted_entries: c_int,
@@ -347,11 +343,9 @@ pub struct stb_vorbis
    setup_temp_memory_required: c_uint,
 
   // input config
-// #ifndef STB_VORBIS_NO_STDIO
    f: *mut libc::FILE,
    f_start: u32,
    close_on_free: c_int,
-// #endif
 
    stream: *mut u8,
    stream_start: *mut u8,
@@ -359,7 +353,7 @@ pub struct stb_vorbis
 
    stream_len: u32,
 
-   push_mode: u8,
+   push_mode: bool,
 
    first_audio_page_offset: u32,
 
@@ -371,8 +365,8 @@ pub struct stb_vorbis
    temp_offset: c_int,
 
   // run-time results
-   eof: c_int,
-   error: c_int, //STBVorbisError,
+   pub eof: c_int,
+   pub error: c_int, //STBVorbisError,
 
   // user-useful data
 
@@ -401,11 +395,7 @@ pub struct stb_vorbis
    previous_window: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize],
    previous_length: c_int,
 
-//    #ifndef STB_VORBIS_NO_DEFER_FLOOR
    finalY: [*mut i16; STB_VORBIS_MAX_CHANNELS as usize],
-//    #else
-//    float *floor_buffers[STB_VORBIS_MAX_CHANNELS],
-//    #endif
 
    current_loc: u32, // sample location of next frame to decode
    current_loc_valid: c_int,
@@ -451,14 +441,14 @@ pub type vorb = stb_vorbis;
 #[derive(Copy, Clone)]
 pub struct stb_vorbis_info
 {
-   sample_rate: c_uint,
-   channels: c_int,
+   pub sample_rate: c_uint,
+   pub channels: c_int,
 
-   setup_memory_required: c_uint,
-   setup_temp_memory_required: c_uint,
-   temp_memory_required: c_uint,
+   pub setup_memory_required: c_uint,
+   pub setup_temp_memory_required: c_uint,
+   pub temp_memory_required: c_uint,
 
-   max_frame_size: c_int,
+   pub max_frame_size: c_int,
 }
 
 ////////   ERROR CODES
@@ -534,12 +524,16 @@ fn error(f: &mut vorb, e: c_int) -> c_int
         f.error = e; // breakpoint for debugging
     }
     
+    if e == STBVorbisError::VORBIS_invalid_stream as c_int {
+        panic!("Cek error nya!");
+    }
+    
     return 0;
 }
 
 fn include_in_sort(c: &Codebook, len: u8) -> c_int
 {
-   if c.sparse != 0 { 
+   if c.sparse == true { 
        assert!(len as c_int != NO_CODE); 
        return 1; // true
     }
@@ -672,7 +666,7 @@ unsafe fn add_entry(c: &Codebook, huff_code: u32, symbol: c_int, count: c_int, l
     // TODO(bungcip): maybe change len as u8?
     // TODO(bungcip): maybe symbol len as u32?
     
-   if c.sparse == 0 {
+   if c.sparse == false {
       *c.codewords.offset(symbol as isize) = huff_code;
    } else {
       let count = count as isize;
@@ -956,7 +950,7 @@ macro_rules! USE_MEMORY {
 
 macro_rules! IS_PUSH_MODE {
     ($f: expr) => {
-        $f.push_mode != 0
+        $f.push_mode == true
     }
 }
 
@@ -1004,8 +998,10 @@ unsafe fn get8(z: &mut vorb) -> u8
           z.eof = 1;
           return 0;
       }
+      
+      let c = *z.stream;
       z.stream = z.stream.offset(1);
-      return *z.stream;
+      return c;
    }
 
    let c = libc::fgetc(z.f);
@@ -1818,13 +1814,13 @@ unsafe fn compute_accelerated_huffman(c: &mut Codebook)
        c.fast_huffman[i as usize] = -1;
    }
 
-   let mut len = if c.sparse != 0 { c.sorted_entries } else  {c.entries};
+   let mut len = if c.sparse == true { c.sorted_entries } else  {c.entries};
    
    if len > 32767 {len = 32767;} // largest possible value we can encode!
    
    for i in 0 .. len {
       if *c.codeword_lengths.offset(i as isize) <= STB_VORBIS_FAST_HUFFMAN_LENGTH as u8 {
-         let mut z : u32 = if c.sparse != 0 { 
+         let mut z : u32 = if c.sparse == true { 
              bit_reverse(*c.sorted_codewords.offset(i as isize)) 
          } else { 
              *c.codewords.offset(i as isize) 
@@ -1843,7 +1839,7 @@ unsafe fn compute_accelerated_huffman(c: &mut Codebook)
 
 pub unsafe fn stb_vorbis_get_file_offset(f: &stb_vorbis) -> c_uint
 {
-   if f.push_mode != 0 {return 0;}
+   if f.push_mode == true {return 0;}
    if USE_MEMORY!(f) {return (f.stream as usize - f.stream_start as usize) as c_uint;}
    return (libc::ftell(f.f) - f.f_start as i32) as c_uint;
 }
@@ -2076,7 +2072,7 @@ unsafe fn codebook_decode(f: &mut vorb, c: &Codebook, output: *mut f32, mut len:
 macro_rules! DECODE {
     ($var: expr, $f: expr, $c: expr) => {
         DECODE_RAW!($var, $f, $c);
-        if $c.sparse != 0 {
+        if $c.sparse == true {
             $var = *$c.sorted_values.offset($var as isize);
         }
     }
@@ -2105,7 +2101,7 @@ unsafe fn codebook_decode_start(f: &mut vorb, c: &Codebook) -> c_int
       error(f, STBVorbisError::VORBIS_invalid_stream as c_int);
    } else {
       DECODE_VQ!(z,f,c);
-      if c.sparse != 0 {assert!(z < c.sorted_entries);}
+      if c.sparse == true {assert!(z < c.sorted_entries);}
       if z < 0 {  // check for EOP
          if f.bytes_in_seg == 0 {
             if f.last_seg != 0 {
@@ -2194,7 +2190,7 @@ unsafe fn codebook_decode_scalar_raw(f: &mut vorb, c: &Codebook) -> c_int
          }
       }
       // x is now the sorted index
-      if c.sparse == 0 {
+      if c.sparse == false {
           x = *c.sorted_values.offset(x as isize);
       }
       // x is now sorted index if sparse, or symbol otherwise
@@ -2210,7 +2206,7 @@ unsafe fn codebook_decode_scalar_raw(f: &mut vorb, c: &Codebook) -> c_int
    }
 
    // if small, linear search
-   assert!(c.sparse == 0);
+   assert!(c.sparse == false);
    for i in 0 .. c.entries  {
       if *c.codeword_lengths.offset(i as isize) as i32 == NO_CODE {continue;}
       if *c.codewords.offset(i as isize) == (f.acc & ((1 << *c.codeword_lengths.offset(i as isize))-1)) {
@@ -2262,7 +2258,7 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, output
    while total_decode > 0 {
       let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
       DECODE_VQ!(z,f,c);
-      assert!(c.sparse == 0 || z < c.sorted_entries);
+      assert!(c.sparse == false || z < c.sorted_entries);
       if z < 0 {
          if f.bytes_in_seg == 0{
             if f.last_seg != 0{
@@ -2589,9 +2585,8 @@ pub fn stb_vorbis_get_sample_offset(f: &mut stb_vorbis) -> c_int
 }
 
 // get general information about the file
-pub fn stb_vorbis_get_info(f: &mut stb_vorbis) -> stb_vorbis_info
+pub fn stb_vorbis_get_info(f: &stb_vorbis) -> stb_vorbis_info
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    stb_vorbis_info {
        channels: f.channels,
        sample_rate: f.sample_rate,
@@ -2643,7 +2638,7 @@ pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: c_int, error: *mut c_
    p.stream_end = data.offset(len as isize) as *mut u8;
    p.stream_start = p.stream;
    p.stream_len = len as u32;
-   p.push_mode = 0; // false
+   p.push_mode = false;
    
    if start_decoder(&mut p) != 0 {
       let f = vorbis_alloc(&mut p);
@@ -2898,7 +2893,7 @@ unsafe fn set_file_offset(f: &mut stb_vorbis, loc: c_uint) -> c_int
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-   if f.push_mode != 0 {return 0;}
+   if f.push_mode == true {return 0;}
    f.eof = 0;
    if USE_MEMORY!(f) {
       if f.stream_start.offset(loc as isize)  >= f.stream_end || f.stream_start.offset(loc as isize) < f.stream_start {
@@ -3136,13 +3131,12 @@ pub unsafe fn stb_vorbis_open_pushdata(
          error: *mut c_int, alloc: *const stb_vorbis_alloc)
          -> *mut stb_vorbis
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut p : stb_vorbis = std::mem::zeroed();
    vorbis_init(&mut p, alloc);
    p.stream     = data as *mut u8;
    p.stream_end = data.offset(data_len as isize) as *mut u8;
-   p.push_mode  = 1; // true
+   p.push_mode  = true;
    if start_decoder(&mut p) == 0 {
       if p.eof != 0 {
          *error = STBVorbisError::VORBIS_need_more_data as c_int;
@@ -3195,8 +3189,6 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
          samples: *mut c_int                     // place to write number of output samples
      ) -> c_int
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
 
    if IS_PUSH_MODE!(f) == false{ return error(f, STBVorbisError::VORBIS_invalid_api_mixing as c_int) };
 
@@ -3275,8 +3267,6 @@ unsafe fn is_whole_packet_present(f: &mut stb_vorbis, end_page: c_int) -> c_int
    // read the next packet with get8() until end-of-packet, check f->eof, then
    // reset the state? but that would be slower, esp. since we'd have over 256 bytes
    // of state to restore (primarily the page segment table)
-
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut s = f.next_seg;
    let mut first = 1; // true
@@ -3757,7 +3747,7 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
    // OPTIMIZATION: don't include the short ones, since they'll be caught by FAST_HUFFMAN.
    // this is kind of a frivolous optimization--I don't see any performance improvement,
    // but it's like 4 extra lines of code, so.
-   if c.sparse == 0 {
+   if c.sparse == false {
       let mut k = 0;
       for i in 0 .. c.entries {
          if include_in_sort(c, *lengths.offset(i as isize)) != 0 {
@@ -3782,14 +3772,14 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
        
    *c.sorted_codewords.offset(c.sorted_entries as isize) = 0xffffffff;
 
-   let len = if c.sparse != 0  { c.sorted_entries } else { c.entries };
+   let len = if c.sparse == true  { c.sorted_entries } else { c.entries };
    // now we need to indicate how they correspond; we could either
    //   #1: sort a different data structure that says who they correspond to
    //   #2: for each sorted entry, search the original list to find who corresponds
    //   #3: for each original entry, find the sorted entry
    // #1 requires extra storage, #2 is slow, #3 can use binary search!
    for i in 0 .. len {
-      let huff_len = if c.sparse != 0 {
+      let huff_len = if c.sparse == true {
           *lengths.offset(*values.offset(i as isize) as isize)
       } else {
           *lengths.offset(i as isize)
@@ -3810,7 +3800,7 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
             }
          }
          assert!(*c.sorted_codewords.offset(x as isize) == code);
-         if c.sparse != 0 {
+         if c.sparse == true {
             *c.sorted_values.offset(x as isize) = *values.offset(i as isize) as i32;
             *c.codeword_lengths.offset(x as isize) = huff_len;
          } else {
@@ -5075,11 +5065,11 @@ pub unsafe fn start_decoder(f: &mut vorb) -> c_int
       y = get_bits(f, 8) as u8;
       c.entries = ((get_bits(f, 8)<<16) + ( (y as u32) <<8) + x as u32) as i32;
       ordered = get_bits(f,1) as i32;
-      c.sparse = if ordered != 0 {0} else {get_bits(f,1) as u8};
+      c.sparse = if ordered != 0 { false } else { get_bits(f,1) != 0 };
 
       if c.dimensions == 0 && c.entries != 0    {return error(f, VORBIS_invalid_setup as c_int);}
 
-      if c.sparse != 0 {
+      if c.sparse == true {
          lengths = setup_temp_malloc(f, c.entries) as *mut u8;
       }else{
          c.codeword_lengths = setup_malloc(f, c.entries) as *mut u8 ;
@@ -5102,7 +5092,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> c_int
          }
       } else {
          for j in 0 .. c.entries {
-            let present : i32 = if c.sparse != 0 { get_bits(f,1) } else { 1 } as i32;
+            let present : i32 = if c.sparse == true { get_bits(f,1) } else { 1 } as i32;
             if present != 0 {
                *lengths.offset(j as isize) = ( get_bits(f, 5) + 1) as u8;
                total += 1;
@@ -5115,7 +5105,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> c_int
          }
       }
 
-      if c.sparse != 0 && total >= c.entries >> 2 {
+      if c.sparse == true && total >= c.entries >> 2 {
          // convert sparse items to non-sparse!
          if c.entries > f.setup_temp_memory_required as i32 {
             f.setup_temp_memory_required = c.entries as u32;
@@ -5127,11 +5117,11 @@ pub unsafe fn start_decoder(f: &mut vorb) -> c_int
 //          memcpy(c.codeword_lengths, lengths, c.entries);
          setup_temp_free(f, lengths as *mut c_void, c.entries); // note this is only safe if there have been no intervening temp mallocs!
          lengths = c.codeword_lengths;
-         c.sparse = 0;
+         c.sparse = false;
       }
 
       // compute the size of the sorted tables
-      if c.sparse != 0 {
+      if c.sparse == true {
          sorted_count = total;
       } else {
          sorted_count = 0;
@@ -5147,7 +5137,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> c_int
       values = std::ptr::null_mut();
 
       CHECK!(f);
-      if c.sparse == 0 {
+      if c.sparse == false {
          c.codewords = setup_malloc(f, mem::size_of_val(&*c.codewords.offset(0)) as i32 * c.entries) as *mut u32;
          if c.codewords.is_null()                  {return error(f, VORBIS_outofmem as c_int);}
       } else {
@@ -5169,7 +5159,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> c_int
       {
           let temp_entries = c.entries; // note(bungcip): just to satisfy borrow checker
       if compute_codewords(c, lengths, temp_entries, values) == 0 {
-         if c.sparse != 0 {setup_temp_free(f, values as *mut c_void, 0);}
+         if c.sparse == true {setup_temp_free(f, values as *mut c_void, 0);}
          return error(f, VORBIS_invalid_setup as c_int);
       }
       }
@@ -5187,7 +5177,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> c_int
          compute_sorted_huffman(c, lengths, values);
       }
 
-      if c.sparse != 0 {
+      if c.sparse == true {
          setup_temp_free(f, values as *mut c_void, mem::size_of::<u32>() as i32 * c.sorted_entries);
          setup_temp_free(f, c.codewords as *mut c_void, mem::size_of::<u32>() as i32 *c.sorted_entries);
          setup_temp_free(f, lengths as *mut c_void, c.entries);
