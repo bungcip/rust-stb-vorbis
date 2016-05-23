@@ -398,7 +398,7 @@ pub struct stb_vorbis
    finalY: [*mut i16; STB_VORBIS_MAX_CHANNELS as usize],
 
    current_loc: u32, // sample location of next frame to decode
-   current_loc_valid: i32,
+   current_loc_valid: bool,
 
   // per-blocksize precomputed data
    
@@ -414,7 +414,7 @@ pub struct stb_vorbis
    segments: [u8; 255],
    page_flag: u8,
    bytes_in_seg: u8,
-   first_decode: u8,
+   first_decode: bool,
    next_seg: i32,
    last_seg: i32,  // flag that we're on the last segment
    last_seg_which: i32, // what was the segment number of the last seg?
@@ -531,19 +531,19 @@ fn error(f: &mut vorb, e: i32) -> i32
     return 0;
 }
 
-fn include_in_sort(c: &Codebook, len: u8) -> i32
+fn include_in_sort(c: &Codebook, len: u8) -> bool
 {
    if c.sparse == true { 
        assert!(len as i32 != NO_CODE); 
-       return 1; // true
+       return true;
     }
    if len as i32 == NO_CODE {
-       return 0; // false
+       return false;
    }
    if len as i32 > STB_VORBIS_FAST_HUFFMAN_LENGTH {
-       return 1; // true
+       return true;
    }
-   return 0;
+   return false;
 }
 
 
@@ -1640,8 +1640,6 @@ const PLAYBACK_RIGHT : i32 =   4;
 unsafe fn convert_samples_short(buf_c: i32, buffer: *mut *mut i16, b_offset: i32, data_c: i32, data: *mut *mut f32, d_offset: i32, samples: i32)
 {
    if buf_c != data_c && buf_c <= 2 && data_c <= 6 {
-    //   static int channel_selector[3][2] = { {0}, {PLAYBACK_MONO}, {PLAYBACK_LEFT, PLAYBACK_RIGHT} };
-      
       static channel_selector: [[i32; 2]; 3] = [
           [0, 0],
           [PLAYBACK_MONO, PLAYBACK_MONO],
@@ -1859,7 +1857,7 @@ unsafe fn start_page_no_capturepattern(f: &mut vorb) -> i32
          f.known_loc_for_packet   = loc0;
       }
    }
-   if f.first_decode != 0{
+   if f.first_decode == true{
       let mut p : ProbedPage = std::mem::zeroed();
       let mut len : i32 = 0;
       for i in 0 .. f.segment_count {
@@ -2472,7 +2470,7 @@ pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: u32) -> i
       return 0;
    }
 
-   assert!(f.current_loc_valid != 0);
+   assert!(f.current_loc_valid == true);
    assert!(f.current_loc <= sample_number);
 
    // linear search for the relevant packet
@@ -2527,7 +2525,7 @@ pub unsafe fn stb_vorbis_seek_start(f: &mut stb_vorbis)
    let offset = f.first_audio_page_offset;
    set_file_offset(f, offset);
    f.previous_length = 0;
-   f.first_decode = 1; // true
+   f.first_decode = true;
    f.next_seg = -1;
    vorbis_pump_first_frame(f);
 }
@@ -2547,7 +2545,7 @@ pub unsafe fn stb_vorbis_stream_length_in_seconds(f: &mut stb_vorbis) -> f32
 pub fn stb_vorbis_get_sample_offset(f: &mut stb_vorbis) -> i32
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-   if f.current_loc_valid != 0 {
+   if f.current_loc_valid == true {
       return f.current_loc as i32;
    } else{
       return -1;
@@ -2583,8 +2581,8 @@ pub fn stb_vorbis_flush_pushdata(f: &mut stb_vorbis)
    f.previous_length = 0;
    f.page_crc_tests  = 0;
    f.discard_samples_deferred = 0;
-   f.current_loc_valid = 0; // false
-   f.first_decode = 0; // false
+   f.current_loc_valid = false; // false
+   f.first_decode = false; 
    f.samples_output = 0;
    f.channel_buffer_start = 0;
    f.channel_buffer_end = 0;
@@ -3575,7 +3573,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> i32
    }
 
    // prepare to start decoding
-   f.current_loc_valid = 0; // false
+   f.current_loc_valid = false;
    f.last_seg = 0; // false
    f.valid_bits = 0;
    f.packet_bytes = 0;
@@ -3693,7 +3691,7 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut vorb, data: *mut u8, mut data_
             f.next_seg = -1;       // start a new page
             f.current_loc = f.scan[i as usize].sample_loc; // set the current sample location
                                     // to the amount we'd have decoded had we decoded this page
-            f.current_loc_valid =!0; 
+            f.current_loc_valid = true; 
             f.current_loc != !0;
             return data_len;
          }
@@ -3720,7 +3718,7 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
    if c.sparse == false {
       let mut k = 0;
       for i in 0 .. c.entries {
-         if include_in_sort(c, *lengths.offset(i as isize)) != 0 {
+         if include_in_sort(c, *lengths.offset(i as isize)) == true {
             *c.sorted_codewords.offset(k as isize) = bit_reverse(
                 *c.codewords.offset(i as isize));
             k += 1;
@@ -3755,7 +3753,7 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
           *lengths.offset(i as isize)
       };
 
-      if include_in_sort(c,huff_len) != 0 {
+      if include_in_sort(c,huff_len) == true {
          let code: u32 = bit_reverse(*c.codewords.offset(i as isize));
          let mut x : i32 = 0;
          let mut n : i32 = c.sorted_entries;
@@ -4021,7 +4019,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
    // and want to flush to get to the next packet
    flush_packet(f);
 
-   if f.first_decode != 0 {
+   if f.first_decode == true {
       // assume we start so first non-discarded sample is sample 0
       // this isn't to spec, but spec would require us to read ahead
       // and decode the size of all current frames--could be done,
@@ -4031,8 +4029,8 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
       // we might have to discard samples "from" the next frame too,
       // if we're lapping a large block then a small at the start?
       f.discard_samples_deferred = n - right_end;
-      f.current_loc_valid = 1; // true
-      f.first_decode = 0; // false
+      f.current_loc_valid = true;
+      f.first_decode = false; 
    } else if f.discard_samples_deferred != 0 {
       if f.discard_samples_deferred >= right_start - left_start {
          f.discard_samples_deferred -= right_start - left_start;
@@ -4043,7 +4041,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
          *p_left = left_start;
          f.discard_samples_deferred = 0;
       }
-   } else if f.previous_length == 0 && f.current_loc_valid != 0 {
+   } else if f.previous_length == 0 && f.current_loc_valid == true {
       // we're recovering from a seek... that means we're going to discard
       // the samples from this packet even though we know our position from
       // the last page header, so we need to update the position based on
@@ -4055,7 +4053,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
    // check if we have ogg information about the sample # for this packet
    if f.last_seg_which == f.end_seg_with_known_loc {
       // if we have a valid current loc, and this is final:
-      if f.current_loc_valid != 0 && (f.page_flag & PAGEFLAG_last_page as u8) != 0 {
+      if f.current_loc_valid == true && (f.page_flag & PAGEFLAG_last_page as u8) != 0 {
          let current_end : u32 = f.known_loc_for_packet - (n-right_end) as u32;
          // then let's infer the size of the (probably) short final frame
          if current_end < f.current_loc + (right_end-left_start) as u32 {
@@ -4078,10 +4076,10 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
       // last frame?
       // set f.current_loc to the position of left_start
       f.current_loc = f.known_loc_for_packet - (n2-left_start) as u32;
-      f.current_loc_valid = 1; // true
+      f.current_loc_valid = true;
    }
 
-   if f.current_loc_valid != 0 {
+   if f.current_loc_valid == true {
        let temp_1 = (right_start - left_start) as u32;
       // NOTE(bungcip): maybe this is bug?
       f.current_loc = f.current_loc.wrapping_add(temp_1);
@@ -5551,7 +5549,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
       }
    }
 
-   f.first_decode = 1; // true
+   f.first_decode = true;
 
    if f.alloc.alloc_buffer.is_null() == false {
       assert!(f.temp_offset == f.alloc.alloc_buffer_length_in_bytes);
