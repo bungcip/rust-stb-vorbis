@@ -516,7 +516,7 @@ impl PartialOrd for Point {
 
 // Converted function is here
 
-fn error(f: &mut vorb, e: i32) -> i32
+fn error(f: &mut vorb, e: i32) -> bool
 {
     // NOTE: e is STBVorbisError
     f.error = e;
@@ -528,7 +528,7 @@ fn error(f: &mut vorb, e: i32) -> i32
     //     panic!("Cek error nya!");
     // }
     
-    return 0;
+    return false;
 }
 
 fn include_in_sort(c: &Codebook, len: u8) -> bool
@@ -1100,7 +1100,7 @@ unsafe fn get_bits(f: &mut vorb, n: i32) -> u32
 
 
 
-unsafe fn start_page(f: &mut vorb) -> i32
+unsafe fn start_page(f: &mut vorb) -> bool
 {
    if capture_pattern(f) == 0 {
        return error(f, STBVorbisError::VORBIS_missing_capture_pattern as i32);
@@ -1115,10 +1115,10 @@ const PAGEFLAG_last_page        : i32 =   4;
 
 
 
-unsafe fn start_packet(f: &mut vorb) -> i32
+unsafe fn start_packet(f: &mut vorb) -> bool
 {
    while f.next_seg == -1 {
-      if start_page(f) == 0 { return 0; } // false
+      if start_page(f) == false { return false; }
       if (f.page_flag & PAGEFLAG_continued_packet as u8) != 0 {
          return error(f, STBVorbisError::VORBIS_continued_packet_flag_invalid as i32);
       }
@@ -1128,21 +1128,21 @@ unsafe fn start_packet(f: &mut vorb) -> i32
    f.packet_bytes = 0;
    f.bytes_in_seg = 0;
    // f.next_seg is now valid
-   return 1; // true
+   return true;
 }
 
-unsafe fn maybe_start_packet(f: &mut vorb) -> i32
+unsafe fn maybe_start_packet(f: &mut vorb) -> bool
 {
     use STBVorbisError::{VORBIS_missing_capture_pattern, VORBIS_continued_packet_flag_invalid};
     
    if f.next_seg == -1 {
       let x = get8(f) as i32;
-      if f.eof == true { return 0; } // EOF at page boundary is not an error!
+      if f.eof == true { return false; } // EOF at page boundary is not an error!
       if 0x4f != x       { return error(f, VORBIS_missing_capture_pattern as i32); }
       if 0x67 != get8(f) { return error(f, VORBIS_missing_capture_pattern as i32); }
       if 0x67 != get8(f) { return error(f, VORBIS_missing_capture_pattern as i32); }
       if 0x53 != get8(f) { return error(f, VORBIS_missing_capture_pattern as i32); }
-      if start_page_no_capturepattern(f) == 0 { return 0; }
+      if start_page_no_capturepattern(f) == false { return false; }
       if (f.page_flag & PAGEFLAG_continued_packet as u8) != 0 {
          // set up enough state that we can read this packet if we want,
          // e.g. during recovery
@@ -1162,8 +1162,11 @@ unsafe fn next_segment(f: &mut vorb) -> i32
    if f.last_seg != 0 {return 0;}
    if f.next_seg == -1 {
       f.last_seg_which = f.segment_count-1; // in case start_page fails
-      if start_page(f) == 0 { f.last_seg = 1; return 0; }
-      if (f.page_flag & PAGEFLAG_continued_packet as u8) == 0 {return error(f, VORBIS_continued_packet_flag_invalid as i32); }
+      if start_page(f) == false { f.last_seg = 1; return 0; }
+      if (f.page_flag & PAGEFLAG_continued_packet as u8) == 0 {
+          error(f, VORBIS_continued_packet_flag_invalid as i32); 
+          return 0;
+      }
    }
    
    let len = f.segments[f.next_seg as usize];
@@ -1183,14 +1186,14 @@ unsafe fn next_segment(f: &mut vorb) -> i32
 
 
 
-unsafe fn vorbis_decode_packet(f: &mut vorb, len: &mut i32, p_left: &mut i32, p_right: &mut i32) -> i32
+unsafe fn vorbis_decode_packet(f: &mut vorb, len: &mut i32, p_left: &mut i32, p_right: &mut i32) -> bool
 {
     let mut mode_index : i32 = 0;
     let mut left_end: i32 = 0;
     let mut right_end: i32 = 0;
     
-    if vorbis_decode_initial(f, p_left, &mut left_end, p_right, &mut right_end, &mut mode_index) == 0{
-        return 0;
+    if vorbis_decode_initial(f, p_left, &mut left_end, p_right, &mut right_end, &mut mode_index) ==  false {
+        return false;
     }
     
     // hack to fight borrow checker
@@ -1214,7 +1217,7 @@ unsafe fn vorbis_pump_first_frame(f: &mut stb_vorbis)
     let mut right: i32 = 0;
     let mut left: i32 = 0;
     
-    if vorbis_decode_packet(f, &mut len, &mut left, &mut right) != 0 {
+    if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == true {
         vorbis_finish_frame(f, len, left, right);
     }
 }
@@ -1264,7 +1267,7 @@ pub unsafe fn stb_vorbis_open_file_section(file: *mut libc::FILE, close_on_free:
    p.stream_len   = length;
    p.close_on_free = close_on_free;
     
-   if start_decoder(&mut p) != 0 {
+   if start_decoder(&mut p) == true {
       let mut f = vorbis_alloc(&mut p);
       if f.is_null() == false {
          *f = p;
@@ -1332,15 +1335,15 @@ pub unsafe fn stb_vorbis_open_filename(filename: *const i8, error: *mut i32, all
 //        has to be the same as frame N+1's left_end-left_start (which they are by
 //        construction)
 
-unsafe fn vorbis_decode_initial(f: &mut vorb, p_left_start: *mut i32, p_left_end: *mut i32, p_right_start: *mut i32, p_right_end: *mut i32, mode: *mut i32) -> i32
+unsafe fn vorbis_decode_initial(f: &mut vorb, p_left_start: *mut i32, p_left_end: *mut i32, p_right_start: *mut i32, p_right_end: *mut i32, mode: *mut i32) -> bool
 {
    f.channel_buffer_start = 0;
    f.channel_buffer_end = 0;
 
    loop {
-        if f.eof == true {return 0;} // false
-        if maybe_start_packet(f) == 0 {
-            return 0; // false
+        if f.eof == true {return false;} 
+        if maybe_start_packet(f) == false {
+            return false; 
         }
         // check packet type
         if get_bits(f,1) != 0 {
@@ -1360,8 +1363,8 @@ unsafe fn vorbis_decode_initial(f: &mut vorb, p_left_start: *mut i32, p_left_end
 
    let x = ilog(f.mode_count-1);
    let i : i32 = get_bits(f, x) as i32;
-   if i == EOP {return 0;} // false
-   if i >= f.mode_count {return 0;} // false
+   if i == EOP {return false;}
+   if i >= f.mode_count {return false;}
    
    *mode = i;
 
@@ -1404,7 +1407,7 @@ unsafe fn vorbis_decode_initial(f: &mut vorb, p_left_start: *mut i32, p_left_end
       *p_right_end   = n;
    }
 
-   return 1; // true
+   return true;
 }
 
 unsafe fn vorbis_finish_frame(f: &mut stb_vorbis, len: i32, left: i32, right: i32) -> i32
@@ -1579,13 +1582,14 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut stb_vorbis, channels: *mut i32,
 {
 //    int len, right,left,i;
    if IS_PUSH_MODE!(f){
-       return error(f, STBVorbisError::VORBIS_invalid_api_mixing as i32);
+       error(f, STBVorbisError::VORBIS_invalid_api_mixing as i32);
+       return 0;
    } 
 
     let mut len = 0;
     let mut left = 0;
     let mut right = 0;
-   if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == 0 {
+   if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == false {
       f.channel_buffer_start = 0;
       f.channel_buffer_end = 0;
       return 0;
@@ -1715,7 +1719,7 @@ unsafe fn copy_samples(dest: *mut i16, src: *mut f32, len: i32)
 // you can also use seek_frame().
 pub unsafe fn stb_vorbis_seek(f: &mut stb_vorbis, sample_number: u32) -> i32
 {
-   if stb_vorbis_seek_frame(f, sample_number) == 0 {
+   if stb_vorbis_seek_frame(f, sample_number) == false {
       return 0;
    }
 
@@ -1733,7 +1737,7 @@ pub unsafe fn stb_vorbis_seek(f: &mut stb_vorbis, sample_number: u32) -> i32
 
 
 
-unsafe fn init_blocksize(f: &mut vorb, b: i32, n: i32) -> i32
+unsafe fn init_blocksize(f: &mut vorb, b: i32, n: i32) -> bool
 {
     use STBVorbisError::*;
     
@@ -1760,7 +1764,7 @@ unsafe fn init_blocksize(f: &mut vorb, b: i32, n: i32) -> i32
    if f.bit_reverse[b].is_null() { return error(f, VORBIS_outofmem as i32); }
    
    compute_bitreverse(n, f.bit_reverse[b]);
-   return 1; // true
+   return true;
 }
 
 // accelerated huffman table allows fast O(1) match of all symbols
@@ -1803,7 +1807,7 @@ pub unsafe fn stb_vorbis_get_file_offset(f: &stb_vorbis) -> u32
    return (libc::ftell(f.f) - f.f_start as i32) as u32;
 }
 
-unsafe fn start_page_no_capturepattern(f: &mut vorb) -> i32
+unsafe fn start_page_no_capturepattern(f: &mut vorb) -> bool
 {
     use STBVorbisError::*;
     
@@ -1861,7 +1865,7 @@ unsafe fn start_page_no_capturepattern(f: &mut vorb) -> i32
       f.p_first = p;
    }
    f.next_seg = 0;
-   return 1; // true
+   return true;
 }
 
 unsafe fn predict_point(x: i32, x0: i32 , x1: i32 , y0: i32 , y1: i32 ) -> i32
@@ -1876,7 +1880,7 @@ unsafe fn predict_point(x: i32, x0: i32 , x1: i32 , y0: i32 , y1: i32 ) -> i32
 
 pub type YTYPE = i16;
 
-unsafe fn do_floor(f: &mut vorb, map: &Mapping, i: i32, n: i32 , target: *mut f32, finalY: *mut YTYPE, _: *mut u8) -> i32
+unsafe fn do_floor(f: &mut vorb, map: &Mapping, i: i32, n: i32 , target: *mut f32, finalY: *mut YTYPE, _: *mut u8) -> bool
 {
    let n2 = n >> 1;
 
@@ -1913,7 +1917,7 @@ unsafe fn do_floor(f: &mut vorb, map: &Mapping, i: i32, n: i32 , target: *mut f3
          CHECK!(f);
       }
    }
-   return 1; // true
+   return true;
 }
 
 #[inline(always)]
@@ -2203,7 +2207,7 @@ unsafe fn codebook_decode_step(f: &mut vorb, c: &Codebook, output: *mut f32, mut
    return 1; // true
 }
 
-unsafe fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, outputs: *mut *mut f32, ch: i32, i32er_p: &mut i32, p_inter_p: &mut i32, len: i32, mut total_decode: i32) -> i32
+unsafe fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, outputs: *mut *mut f32, ch: i32, i32er_p: &mut i32, p_inter_p: &mut i32, len: i32, mut total_decode: i32) -> bool
 {
    let mut i32er = *i32er_p;
    let mut p_inter = *p_inter_p;
@@ -2221,7 +2225,7 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, output
       if z < 0 {
          if f.bytes_in_seg == 0{
             if f.last_seg != 0{
-              return 0; // false
+              return false;
             } 
          }
          return error(f, STBVorbisError::VORBIS_invalid_stream as i32);
@@ -2264,7 +2268,7 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut vorb, c: &Codebook, output
    *i32er_p = i32er;
    *p_inter_p = p_inter;
 
-   return 1; // true
+   return true;
 }
 
 unsafe fn compute_window(n: i32, window: *mut f32)
@@ -2448,7 +2452,7 @@ unsafe fn compute_stereo_samples(output: *mut i16, num_c: i32, data: *mut *mut f
 // stb_vorbis_get_samples_* will start with the specified sample. If you
 // do not need to seek to EXACTLY the target sample when using get_samples_*,
 // you can also use seek_frame().
-pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: u32) -> i32
+pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: u32) -> bool
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    
@@ -2457,8 +2461,8 @@ pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: u32) -> i
    if IS_PUSH_MODE!(f) { return error(f, STBVorbisError::VORBIS_invalid_api_mixing as i32);}
 
    // fast page-level search
-   if seek_to_sample_coarse(f, sample_number) == 0{
-      return 0;
+   if seek_to_sample_coarse(f, sample_number) == false {
+      return false;
    }
 
    assert!(f.current_loc_valid == true);
@@ -2479,7 +2483,7 @@ pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: u32) -> i
       // calculate the number of samples returned by the next frame
       frame_samples = right_start - left_start;
       if f.current_loc as i32 + frame_samples > sample_number as i32 {
-         return 1; // the next frame will contain the sample
+         return true; // the next frame will contain the sample
       } else if f.current_loc as i32 + frame_samples + max_frame_samples as i32 > sample_number as i32 {
          // there's a chance the frame after this could contain the sample
          vorbis_pump_first_frame(f);
@@ -2493,7 +2497,7 @@ pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: u32) -> i
    }
    // the next frame will start with the sample
    assert!(f.current_loc == sample_number);
-   return 1;
+   return true;
 }
 
 // get the last error detected (clears it, too)
@@ -2599,7 +2603,7 @@ pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: i32, error: *mut i32,
    p.stream_len = len as u32;
    p.push_mode = false;
    
-   if start_decoder(&mut p) != 0 {
+   if start_decoder(&mut p) == true {
       let f = vorbis_alloc(&mut p);
       if f.is_null() == false {
          *f = p;
@@ -2823,7 +2827,7 @@ unsafe fn peek_decode_initial(f: &mut vorb, p_left_start: &mut i32, p_left_end: 
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 //    int bits_read, bytes_read;
 
-   if vorbis_decode_initial(f, p_left_start, p_left_end, p_right_start, p_right_end, mode) == 0 {
+   if vorbis_decode_initial(f, p_left_start, p_left_end, p_right_start, p_right_end, mode) == false {
       return 0;
    }
 
@@ -3096,7 +3100,7 @@ pub unsafe fn stb_vorbis_open_pushdata(
    p.stream     = data as *mut u8;
    p.stream_end = data.offset(data_len as isize) as *mut u8;
    p.push_mode  = true;
-   if start_decoder(&mut p) == 0 {
+   if start_decoder(&mut p) == false {
       if p.eof == true {
          *error = STBVorbisError::VORBIS_need_more_data as i32;
       } else {
@@ -3149,7 +3153,10 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
      ) -> i32
 {
 
-   if IS_PUSH_MODE!(f) == false{ return error(f, STBVorbisError::VORBIS_invalid_api_mixing as i32) };
+   if IS_PUSH_MODE!(f) == false { 
+       error(f, STBVorbisError::VORBIS_invalid_api_mixing as i32);
+       return 0;
+    };
 
    if f.page_crc_tests >= 0 {
       *samples = 0;
@@ -3161,7 +3168,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
    f.error      = STBVorbisError::VORBIS__no_error as i32;
 
    // check that we have the entire packet in memory
-   if is_whole_packet_present(f, 0) == 0 { // false
+   if is_whole_packet_present(f, 0) == false {
       *samples = 0;
       return 0;
    }
@@ -3169,7 +3176,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
    let mut len : i32 = 0;
    let mut left: i32 = 0;
    let mut right: i32 = 0;
-   if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == 0 {
+   if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == false {
       // save the actual error we encountered
       let error = f.error;
       if error == STBVorbisError::VORBIS_bad_packet_type as i32 {
@@ -3217,7 +3224,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
 }
 
 
-unsafe fn is_whole_packet_present(f: &mut stb_vorbis, end_page: i32) -> i32
+unsafe fn is_whole_packet_present(f: &mut stb_vorbis, end_page: i32) -> bool
 {
    // make sure that we have the packet available before continuing...
    // this requires a full ogg parse, but we know we can fetch from f->stream
@@ -3295,7 +3302,7 @@ unsafe fn is_whole_packet_present(f: &mut stb_vorbis, end_page: i32) -> i32
       if p > f.stream_end                     {return error(f,STBVorbisError::VORBIS_need_more_data as i32);}
       first = 0; // false
    }
-   return 1; // true
+   return true;
 }
 
 const SAMPLE_unknown : u32 = 0xffffffff;
@@ -3403,7 +3410,7 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> u32
 // the function succeeds, current_loc_valid will be true and current_loc will
 // be less than or equal to the provided sample number (the closer the
 // better).
-unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> i32
+unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    
@@ -3454,7 +3461,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> i32
    // starting from the start is handled differently
    if sample_number <= left.last_decoded_sample {
       stb_vorbis_seek_start(f);
-      return 1;
+      return true;
    }
 
    while left.page_end != right.page_start {
@@ -3529,7 +3536,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> i32
    // seek back to start of the last packet
    page_start = left.page_start as i32;
    set_file_offset(f, page_start as u32);
-   if start_page(f) == 0 { return error(f, VORBIS_seek_failed as i32);}
+   if start_page(f) == false { return error(f, VORBIS_seek_failed as i32);}
    end_pos = f.end_seg_with_known_loc;
    assert!(end_pos >= 0);
 
@@ -3555,7 +3562,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> i32
       }
 
       page_start = stb_vorbis_get_file_offset(f) as i32;
-      if start_page(f) == 0 {
+      if start_page(f) == false {
         //   goto error;
         break 'error;
         }
@@ -3579,7 +3586,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> i32
 
    // start decoding (optimizable - this frame is generally discarded)
    vorbis_pump_first_frame(f);
-   return 1;
+   return true;
    } // loop -- 'error
 // error:
    // try to restore the file to a valid state
@@ -3770,7 +3777,7 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
    }
 }
 
-unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut left_start: i32, left_end: i32, right_start: i32, right_end: i32, p_left: *mut i32) -> i32
+unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut left_start: i32, left_end: i32, right_start: i32, right_end: i32, p_left: *mut i32) -> bool
 {
 //    Mapping *map;
 //    int i,j,k,n,n2;
@@ -4059,7 +4066,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
                 *len = right_end; // this should never happen
             }
             f.current_loc += *len as u32;
-            return 1; // true
+            return true;
          }
       }
       // otherwise, just set our sample loc
@@ -4082,7 +4089,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
    *len = right_end;  // ignore samples after the window goes to 0
    CHECK!(f);
 
-   return 1; // true
+   return true;
 }
 
 macro_rules! array_size_required {
@@ -4210,7 +4217,7 @@ unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, 
                   if b >= 0 {
                       let book : &Codebook = mem::transmute(f.codebooks.offset(b as isize));
 //                      // saves 1%
-                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == 0{
+                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == false {
                         // goto done;
                         break 'done;
                      }
@@ -4245,7 +4252,7 @@ unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, 
                   let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
                   if b >= 0 {
                       let book : &Codebook = mem::transmute(f.codebooks.offset(b as isize));
-                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == 0{
+                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == false {
                         // goto done;
                         break 'done;
                      }
@@ -4280,7 +4287,7 @@ unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, 
                   let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
                   if b >= 0 {
                       let book : &Codebook = mem::transmute(f.codebooks.offset(b as isize));
-                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == 0{
+                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == false {
                         // goto done;
                         break 'done;
                      }
@@ -4918,7 +4925,7 @@ const VORBIS_packet_comment : u8 = 3;
 const VORBIS_packet_setup : u8 = 5;
 
 
-pub unsafe fn start_decoder(f: &mut vorb) -> i32
+pub unsafe fn start_decoder(f: &mut vorb) -> bool
 {
     let mut header : [u8; 6] = mem::zeroed();
     let mut x : u8;
@@ -4930,7 +4937,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
 
    // first page, first packet
 
-   if start_page(f) == 0                              {return 0;} // false
+   if start_page(f) == false                              {return false;} 
    // validate page flag
    if (f.page_flag & PAGEFLAG_first_page as u8) == 0       {return error(f, VORBIS_invalid_first_page as i32)}
    if (f.page_flag & PAGEFLAG_last_page as u8) != 0           {return error(f, VORBIS_invalid_first_page as i32);}
@@ -4966,9 +4973,9 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
    if (x & 1) == 0                                    {return error(f, VORBIS_invalid_first_page as i32);}
 
    // second packet!
-   if start_page(f) == 0                              {return 0;} // false
+   if start_page(f) == false                              {return false;} 
 
-   if start_packet(f) == 0                            {return 0;} // false
+   if start_packet(f) == false                            {return false;} 
    
    let mut len;
    while {
@@ -4979,15 +4986,15 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
    } {/* do nothing */}
 
    // third packet!
-   if start_packet(f) == 0                            {return 0;} // false
+   if start_packet(f) == false                            {return false;} 
 
    if IS_PUSH_MODE!(f) {
-      if is_whole_packet_present(f, 1) == 0 {
+      if is_whole_packet_present(f, 1) == false {
          // convert error in ogg header to write type
          if f.error == VORBIS_invalid_stream as i32 {
             f.error = VORBIS_invalid_setup as i32;
          }
-         return 0; // false
+         return false;
       }
    }
 
@@ -5511,8 +5518,8 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
    {  
        let blocksize_0 = f.blocksize_0;
        let blocksize_1 = f.blocksize_1;
-        if init_blocksize(f, 0, blocksize_0) == 0 {return 0;} // false
-        if init_blocksize(f, 1, blocksize_1) == 0 {return 0;} // false
+        if init_blocksize(f, 0, blocksize_0) == false {return false;} 
+        if init_blocksize(f, 1, blocksize_1) == false {return false;} 
         f.blocksize[0] = blocksize_0;
         f.blocksize[1] = blocksize_1;
    }
@@ -5551,5 +5558,5 @@ pub unsafe fn start_decoder(f: &mut vorb) -> i32
    }
 
    f.first_audio_page_offset = stb_vorbis_get_file_offset(f);
-   return 1; // true
+   return true;
 }
