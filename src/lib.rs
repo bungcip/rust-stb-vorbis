@@ -979,20 +979,23 @@ unsafe fn get32(f: &mut vorb) -> u32
 }
 
 
-unsafe fn getn(z: &mut vorb, data: *mut u8, n: i32) -> i32
+unsafe fn getn(z: &mut vorb, data: *mut u8, n: i32) -> bool
 {
    if USE_MEMORY!(z) {
-      if z.stream.offset(n as isize) > z.stream_end { z.eof = true; return 0; }
+      if z.stream.offset(n as isize) > z.stream_end { 
+          z.eof = true; 
+          return false;
+      }
       std::ptr::copy_nonoverlapping(z.stream, data, n as usize);
       z.stream = z.stream.offset(n as isize);
-      return 1;
+      return true;
    }
 
    if libc::fread(data as *mut c_void, n as usize, 1, z.f) == 1 {
-      return 1;
+      return true;
    } else {
       z.eof = true;
-      return 0;
+      return false;
    }
 }
 
@@ -1704,10 +1707,10 @@ unsafe fn copy_samples(dest: *mut i16, src: *mut f32, len: i32)
 // stb_vorbis_get_samples_* will start with the specified sample. If you
 // do not need to seek to EXACTLY the target sample when using get_samples_*,
 // you can also use seek_frame().
-pub unsafe fn stb_vorbis_seek(f: &mut stb_vorbis, sample_number: u32) -> i32
+pub unsafe fn stb_vorbis_seek(f: &mut stb_vorbis, sample_number: u32) -> bool
 {
    if stb_vorbis_seek_frame(f, sample_number) == false {
-      return 0;
+      return false;
    }
 
    if sample_number != f.current_loc {
@@ -1719,7 +1722,7 @@ pub unsafe fn stb_vorbis_seek(f: &mut stb_vorbis, sample_number: u32) -> i32
       f.channel_buffer_start += (sample_number - frame_start) as i32;
    }
 
-   return 1;
+   return true;
 }
 
 
@@ -1817,7 +1820,7 @@ unsafe fn start_page_no_capturepattern(f: &mut vorb) -> bool
    f.segment_count = get8(f) as i32;
    let sc = f.segment_count;
    let segments_ptr = (&mut f.segments).as_mut_ptr();
-   if getn(f, segments_ptr, sc) == 0 {
+   if getn(f, segments_ptr, sc) == false {
       return error(f, unexpected_eof);
    }
    // assume we _don't_ know any the sample position of any segments
@@ -2462,7 +2465,7 @@ pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: u32) -> b
       let mut right_end: i32 = 0;
       let mut mode: i32 = 0;
       let frame_samples: i32;
-      if peek_decode_initial(f, &mut left_start, &mut left_end, &mut right_start, &mut right_end, &mut mode) == 0{
+      if peek_decode_initial(f, &mut left_start, &mut left_end, &mut right_start, &mut right_end, &mut mode) == false{
          return error(f, VorbisError::seek_failed);
       }
       // calculate the number of samples returned by the next frame
@@ -2807,13 +2810,13 @@ pub unsafe fn stb_vorbis_get_samples_short_interleaved(f: &mut stb_vorbis, chann
 }
 
 // the same as vorbis_decode_initial, but without advancing
-unsafe fn peek_decode_initial(f: &mut vorb, p_left_start: &mut i32, p_left_end: &mut i32, p_right_start: &mut i32, p_right_end: &mut i32, mode: &mut i32) -> i32
+unsafe fn peek_decode_initial(f: &mut vorb, p_left_start: &mut i32, p_left_end: &mut i32, p_right_start: &mut i32, p_right_end: &mut i32, mode: &mut i32) -> bool
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 //    int bits_read, bytes_read;
 
    if vorbis_decode_initial(f, p_left_start, p_left_end, p_right_start, p_right_end, mode) == false {
-      return 0;
+      return false;
    }
 
    // either 1 or 2 bytes were read, figure out which so we can rewind
@@ -2834,23 +2837,23 @@ unsafe fn peek_decode_initial(f: &mut vorb, p_left_start: &mut i32, p_left_end: 
    }
    f.valid_bits = 0;
 
-   return 1;
+   return true;
 }
 
-unsafe fn set_file_offset(f: &mut stb_vorbis, loc: u32) -> i32
+unsafe fn set_file_offset(f: &mut stb_vorbis, loc: u32) -> bool
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-   if f.push_mode == true {return 0;}
+   if f.push_mode == true {return false;}
    f.eof = false;
    if USE_MEMORY!(f) {
       if f.stream_start.offset(loc as isize)  >= f.stream_end || f.stream_start.offset(loc as isize) < f.stream_start {
          f.stream = f.stream_end;
          f.eof = true;
-         return 0;
+         return false;
       } else {
          f.stream = f.stream_start.offset(loc as isize);
-         return 1;
+         return true;
       }
    }
    if loc + f.f_start < loc || loc >= 0x80000000 {
@@ -2860,16 +2863,16 @@ unsafe fn set_file_offset(f: &mut stb_vorbis, loc: u32) -> i32
       loc += f.f_start;
    }
    if libc::fseek(f.f, loc as i32, SEEK_SET) == 0{
-      return 1;
+      return true;
    }
    f.eof = true;
    libc::fseek(f.f, f.f_start as i32, SEEK_END);
-   return 0;
+   return false;
 }
 
 // rarely used function to seek back to the preceeding page while finding the
 // start of a packet
-unsafe fn go_to_page_before(f: &mut stb_vorbis, limit_offset: u32) -> i32
+unsafe fn go_to_page_before(f: &mut stb_vorbis, limit_offset: u32) -> bool
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -2888,12 +2891,12 @@ unsafe fn go_to_page_before(f: &mut stb_vorbis, limit_offset: u32) -> i32
 
    while vorbis_find_page(f, &mut end, std::ptr::null_mut()) != 0 {
       if end >= limit_offset && stb_vorbis_get_file_offset(f) < limit_offset{
-         return 1;          
+         return true;          
       }
       set_file_offset(f, end);
    }
 
-   return 0;
+   return false;
 }
 
 unsafe fn vorbis_find_page(f: &mut stb_vorbis, end: *mut u32, last: *mut u32) -> u32
@@ -3027,7 +3030,7 @@ unsafe fn make_block_array(mem: *mut c_void, count: i32, size: usize) -> *mut c_
 // to try to bound either side of the binary search sensibly, while still
 // working in O(log n) time if they fail.
 
-unsafe fn get_seek_page_info(f: &mut stb_vorbis, z: &mut ProbedPage) -> i32
+unsafe fn get_seek_page_info(f: &mut stb_vorbis, z: &mut ProbedPage) -> bool
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -3041,7 +3044,7 @@ unsafe fn get_seek_page_info(f: &mut stb_vorbis, z: &mut ProbedPage) -> i32
    // parse the header
    getn(f, header.as_mut_ptr(), 27);
    if header[0] != b'O' || header[1] != b'g' || header[2] != b'g' || header[3] != b'S'{
-      return 0;
+      return false;
    }
    getn(f, lacing.as_mut_ptr(), header[26] as i32);
 
@@ -3062,7 +3065,7 @@ unsafe fn get_seek_page_info(f: &mut stb_vorbis, z: &mut ProbedPage) -> i32
 
    // restore file state to where we were
    set_file_offset(f, z.page_start);
-   return 1;
+   return true;
 }
 
 // create a vorbis decoder by passing in the initial data block containing
@@ -3434,7 +3437,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
    while left.last_decoded_sample == !0 {
       // (untested) the first page does not have a 'last_decoded_sample'
       set_file_offset(f, left.page_end);
-      if get_seek_page_info(f, &mut left) == 0 {
+      if get_seek_page_info(f, &mut left) == false {
         //   goto error;
         break 'error;
         }
@@ -3493,7 +3496,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
       }
 
       loop {
-         if get_seek_page_info(f, &mut mid) == 0 {
+         if get_seek_page_info(f, &mut mid) == false {
             //  goto error;
             break 'error;
          }
@@ -3541,7 +3544,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
       }
 
       // (untested) the final packet begins on an earlier page
-      if go_to_page_before(f, page_start as u32) == 0{
+      if go_to_page_before(f, page_start as u32) == false {
         //  goto error;
         break 'error;
       }
@@ -4932,7 +4935,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
    // read packet
    // check packet header
    if get8(f) != packet_id                 {return error(f, invalid_first_page);}
-   if getn(f, header.as_mut_ptr(), 6) == 0                         {return error(f, unexpected_eof);}
+   if getn(f, header.as_mut_ptr(), 6) == false                         {return error(f, unexpected_eof);}
    if vorbis_validate(&header) == false                    {return error(f, invalid_first_page);}
    // vorbis_version
    if get32(f) != 0                               {return error(f, invalid_first_page);}
