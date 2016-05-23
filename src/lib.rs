@@ -1,9 +1,7 @@
 // temporary disable lint for now...
 #![allow(non_snake_case)]
-#![allow(dead_code)]
+// #![allow(dead_code)]
 #![allow(non_camel_case_types)]
-#![allow(unreachable_code)]
-#![allow(unused_variables)]
 #![allow(non_upper_case_globals)]
 
 #![feature(question_mark, custom_derive, box_syntax, float_extras)]
@@ -1762,7 +1760,6 @@ unsafe fn init_blocksize(f: &mut vorb, b: i32, n: i32) -> bool
 
 unsafe fn compute_accelerated_huffman(c: &mut Codebook)
 {
-//    int i, len;
    for i in 0 .. FAST_HUFFMAN_TABLE_SIZE {
        c.fast_huffman[i as usize] = -1;
    }
@@ -2347,17 +2344,14 @@ unsafe fn vorbis_deinit(p: &mut stb_vorbis)
 
 unsafe fn compute_samples(mask: i32, output: *mut i16, num_c: i32, data: *mut *mut f32, d_offset: i32, len: i32)
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    
    const BUFFER_SIZE : usize = 32;
    let mut buffer: [f32; BUFFER_SIZE];
-//    int i,j,o,
    let mut n = BUFFER_SIZE as i32;
-//    check_endianness();
 
    let mut o : i32 = 0;
    while o < len {
-    //   memset(buffer, 0, sizeof(buffer));
       buffer = std::mem::zeroed();
       
       if o + n > len {
@@ -2384,15 +2378,13 @@ unsafe fn compute_samples(mask: i32, output: *mut i16, num_c: i32, data: *mut *m
 
 unsafe fn compute_stereo_samples(output: *mut i16, num_c: i32, data: *mut *mut f32, d_offset: i32, len: i32)
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    
    const BUFFER_SIZE : usize = 32;
    let mut buffer: [f32; BUFFER_SIZE];
    
-//    int i,j,o,
    let mut n : i32 = BUFFER_SIZE as i32 >> 1;
    // o is the offset in the source data
-//    check_endianness();
    let mut o : i32 = 0;
    while o < len {
       // o2 is the offset in the output data
@@ -2442,7 +2434,7 @@ unsafe fn compute_stereo_samples(output: *mut i16, num_c: i32, data: *mut *mut f
 // you can also use seek_frame().
 pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: u32) -> bool
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    
    let max_frame_samples: u32;
 
@@ -2491,7 +2483,7 @@ pub unsafe fn stb_vorbis_seek_frame(f: &mut stb_vorbis, sample_number: u32) -> b
 // get the last error detected (clears it, too)
 pub fn stb_vorbis_get_error(f: &mut stb_vorbis) -> VorbisError
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let e = f.error;
    f.error = VorbisError::_no_error;
@@ -2501,7 +2493,7 @@ pub fn stb_vorbis_get_error(f: &mut stb_vorbis) -> VorbisError
 // this function is equivalent to stb_vorbis_seek(f,0)
 pub unsafe fn stb_vorbis_seek_start(f: &mut stb_vorbis)
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    if IS_PUSH_MODE!(f) { error(f, VorbisError::invalid_api_mixing); return; }
    
@@ -2516,7 +2508,7 @@ pub unsafe fn stb_vorbis_seek_start(f: &mut stb_vorbis)
 // these functions return the total length of the vorbis stream
 pub unsafe fn stb_vorbis_stream_length_in_seconds(f: &mut stb_vorbis) -> f32
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    return stb_vorbis_stream_length_in_samples(f) as f32 / f.sample_rate as f32;
 }
 
@@ -2527,7 +2519,7 @@ pub unsafe fn stb_vorbis_stream_length_in_seconds(f: &mut stb_vorbis) -> f32
 // NOT WORKING YET after a seek with PULLDATA API
 pub fn stb_vorbis_get_sample_offset(f: &mut stb_vorbis) -> i32
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    if f.current_loc_valid == true {
       return f.current_loc as i32;
    } else{
@@ -2560,7 +2552,7 @@ pub fn stb_vorbis_get_info(f: &stb_vorbis) -> stb_vorbis_info
 // if you don't like the result, seek your file again and repeat.
 pub fn stb_vorbis_flush_pushdata(f: &mut stb_vorbis)
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    f.previous_length = 0;
    f.page_crc_tests  = 0;
    f.discard_samples_deferred = 0;
@@ -2575,7 +2567,7 @@ pub fn stb_vorbis_flush_pushdata(f: &mut stb_vorbis)
 // this must be the entire stream!). on failure, returns NULL and sets *error
 pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: i32, error: *mut VorbisError, alloc: *const stb_vorbis_alloc) -> *mut stb_vorbis
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
 //    stb_vorbis *f, p;
    if data.is_null() {
@@ -2612,7 +2604,7 @@ pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: i32, error: *mut Vorb
 // When you're done with it, just free() the pointer returned in *output.
 pub unsafe fn stb_vorbis_decode_memory(mem: *const u8, len: i32 , channels: *mut i32, sample_rate: *mut i32, output: *mut *mut i16) -> i32
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut error = VorbisError::_no_error;
    let v : *mut stb_vorbis = stb_vorbis_open_memory(mem, len, &mut error, std::ptr::null_mut());
@@ -2663,7 +2655,7 @@ pub unsafe fn stb_vorbis_decode_memory(mem: *const u8, len: i32 , channels: *mut
 // at the end of the file. If there are no more samples in the file, returns 0.
 pub unsafe fn stb_vorbis_get_samples_float(f: &mut stb_vorbis, channels: i32 , buffer: *mut *mut f32, num_samples: i32 ) -> i32
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut outputs: *mut *mut f32 = std::mem::zeroed();
    let mut n = 0;
@@ -2712,7 +2704,7 @@ pub unsafe fn stb_vorbis_get_samples_float(f: &mut stb_vorbis, channels: i32 , b
 // at the end of the file. If there are no more samples in the file, returns 0.
 pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut stb_vorbis, channels: i32 , mut buffer: *mut f32, num_floats: i32 ) -> i32 
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut outputs: *mut *mut f32 = std::mem::zeroed();
    let len : i32 = num_floats / channels;
@@ -2756,11 +2748,11 @@ pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut stb_vorbis, chann
 // samples in the file, returns 0.
 pub unsafe fn stb_vorbis_get_samples_short(f: &mut stb_vorbis, channels: i32, buffer: *mut *mut i16, len: i32) -> i32
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut outputs: *mut *mut f32 = std::mem::zeroed();
    let mut n = 0;
-   let z = f.channels;
+//    let z = f.channels;
    
    // NOTE(bungcip): useless code?
 //    if z > channels {z = channels;}
@@ -2786,12 +2778,12 @@ pub unsafe fn stb_vorbis_get_samples_short(f: &mut stb_vorbis, channels: i32, bu
 // samples in the file, returns 0.
 pub unsafe fn stb_vorbis_get_samples_short_interleaved(f: &mut stb_vorbis, channels: i32, mut buffer: *mut i16, num_shorts: i32 ) -> i32
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut outputs: *mut *mut f32 = std::mem::zeroed();
    let len = num_shorts / channels;
    let mut n = 0;
-   let z = f.channels;
+//    let z = f.channels;
    // NOTE(bungcip): useless code?
 //    if z > channels {z = channels;}
    while n < len {
@@ -2812,7 +2804,7 @@ pub unsafe fn stb_vorbis_get_samples_short_interleaved(f: &mut stb_vorbis, chann
 // the same as vorbis_decode_initial, but without advancing
 unsafe fn peek_decode_initial(f: &mut vorb, p_left_start: &mut i32, p_left_end: &mut i32, p_right_start: &mut i32, p_right_end: &mut i32, mode: &mut i32) -> bool
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 //    int bits_read, bytes_read;
 
    if vorbis_decode_initial(f, p_left_start, p_left_end, p_right_start, p_right_end, mode) == false {
@@ -2840,9 +2832,9 @@ unsafe fn peek_decode_initial(f: &mut vorb, p_left_start: &mut i32, p_left_end: 
    return true;
 }
 
-unsafe fn set_file_offset(f: &mut stb_vorbis, loc: u32) -> bool
+unsafe fn set_file_offset(f: &mut stb_vorbis, mut loc: u32) -> bool
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    if f.push_mode == true {return false;}
    f.eof = false;
@@ -2874,7 +2866,7 @@ unsafe fn set_file_offset(f: &mut stb_vorbis, loc: u32) -> bool
 // start of a packet
 unsafe fn go_to_page_before(f: &mut stb_vorbis, limit_offset: u32) -> bool
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let previous_safe : u32;
    let mut end: u32 = 0;
@@ -2901,7 +2893,7 @@ unsafe fn go_to_page_before(f: &mut stb_vorbis, limit_offset: u32) -> bool
 
 unsafe fn vorbis_find_page(f: &mut stb_vorbis, end: *mut u32, last: *mut u32) -> u32
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    loop {
       if f.eof == true {return 0;}
@@ -2959,13 +2951,13 @@ unsafe fn vorbis_find_page(f: &mut stb_vorbis, end: *mut u32, last: *mut u32) ->
                crc = crc32_update(crc, header[i]);
             }
             let mut len = 0;
-            for i in 0 .. header[26] {
+            for _ in 0 .. header[26] {
                let s = get8(f) as i32;
                crc = crc32_update(crc, s as u8);
                len += s;
             }
             if len != 0 && f.eof == true {return 0;}
-            for i in 0 .. len {
+            for _ in 0 .. len {
                crc = crc32_update(crc, get8(f));
             }
             // finished parsing probable page
@@ -3005,7 +2997,7 @@ unsafe fn vorbis_find_page(f: &mut stb_vorbis, end: *mut u32, last: *mut u32) ->
 #[inline(always)]
 unsafe fn crc32_update(crc: u32, byte: u8) -> u32
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    return (crc << 8) ^ crc_table[ (byte as u32 ^ (crc >> 24)) as usize];
 }
 
@@ -3032,20 +3024,19 @@ unsafe fn make_block_array(mem: *mut c_void, count: i32, size: usize) -> *mut c_
 
 unsafe fn get_seek_page_info(f: &mut stb_vorbis, z: &mut ProbedPage) -> bool
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
-   let mut header: [u8; 27] = std::mem::zeroed();
-   let mut lacing: [u8; 255] = std::mem::zeroed();
-//    int i,len;
+//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    // record where the page starts
    z.page_start = stb_vorbis_get_file_offset(f);
 
    // parse the header
+   let mut header: [u8; 27] = std::mem::zeroed();
    getn(f, header.as_mut_ptr(), 27);
    if header[0] != b'O' || header[1] != b'g' || header[2] != b'g' || header[3] != b'S'{
       return false;
    }
+
+   let mut lacing: [u8; 255] = std::mem::zeroed();
    getn(f, lacing.as_mut_ptr(), header[26] as i32);
 
    // determine the length of the payload
@@ -3299,11 +3290,8 @@ const SAMPLE_unknown : u32 = 0xffffffff;
 // these functions return the total length of the vorbis stream
 pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> u32
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
     
-//    unsigned int restore_offset, previous_safe;
-//    unsigned int end, last_page_loc;
-
     use VorbisError::*;
     
     let restore_offset : u32;
@@ -3317,8 +3305,6 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> u32
       let mut lo : u32;
       let hi : u32;
       let mut header: [i8; 6] = std::mem::zeroed();
-    //   uint32 lo,hi;
-    //   char header[6];
     
       'done: loop {
       // first, store the current decode position so we can restore it
@@ -3398,19 +3384,14 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut stb_vorbis) -> u32
 // the function succeeds, current_loc_valid will be true and current_loc will
 // be less than or equal to the provided sample number (the closer the
 // better).
-unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
+unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, mut sample_number: u32) -> bool
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    
-   let mut left : ProbedPage;
-   let mut right: ProbedPage;
-   let mut mid: ProbedPage = std::mem::zeroed();
    let mut start_seg_with_known_loc : i32;
    let mut end_pos : i32;
    let mut page_start : i32;
    let mut delta: u32;
-   let stream_length : u32;
-   let padding : u32;
    let mut offset: f64 = 0.0;
    let mut bytes_per_sample : f64 = 0.0;
    let mut probe = 0; 
@@ -3418,7 +3399,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
    use VorbisError::*;
 
    // find the last page and validate the target sample
-   stream_length = stb_vorbis_stream_length_in_samples(f);
+   let stream_length = stb_vorbis_stream_length_in_samples(f);
    if stream_length == 0            {return error(f, seek_without_length);}
    if sample_number > stream_length { return error(f, seek_invalid);}
 
@@ -3426,14 +3407,14 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
    // this is the maximum difference between the window-center (which is the
    // actual granule position value), and the right-start (which the spec
    // indicates should be the granule position (give or take one)).
-   padding = ((f.blocksize_1 - f.blocksize_0) >> 2) as u32;
+   let padding = ((f.blocksize_1 - f.blocksize_0) >> 2) as u32;
    if sample_number < padding{
       sample_number = 0;
    }else{
       sample_number -= padding;
    }
    
-   left = f.p_first;
+   let mut left = f.p_first;
    while left.last_decoded_sample == !0 {
       // (untested) the first page does not have a 'last_decoded_sample'
       set_file_offset(f, left.page_end);
@@ -3443,7 +3424,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
         }
    }
 
-   right = f.p_last;
+   let mut right = f.p_last;
    assert!(right.last_decoded_sample != !0 );
 
    // starting from the start is handled differently
@@ -3452,6 +3433,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
       return true;
    }
 
+   let mut mid: ProbedPage = std::mem::zeroed();
    while left.page_end != right.page_start {
       assert!(left.page_end < right.page_start);
       // search range in bytes
@@ -3490,7 +3472,6 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
          }
 
          if vorbis_find_page(f, std::ptr::null_mut(), std::ptr::null_mut()) == 0 {
-            //  goto error;
             break 'error;
         }
       }
@@ -3545,13 +3526,11 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
 
       // (untested) the final packet begins on an earlier page
       if go_to_page_before(f, page_start as u32) == false {
-        //  goto error;
         break 'error;
       }
 
       page_start = stb_vorbis_get_file_offset(f) as i32;
       if start_page(f) == false {
-        //   goto error;
         break 'error;
         }
         
@@ -3584,7 +3563,7 @@ unsafe fn seek_to_sample_coarse(f: &mut stb_vorbis, sample_number: u32) -> bool
 
 unsafe fn vorbis_search_for_page_pushdata(f: &mut vorb, data: *mut u8, mut data_len: i32) -> i32
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut n;
     for i in 0 .. f.page_crc_tests {
@@ -3620,7 +3599,7 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut vorb, data: *mut u8, mut data_
                   crc = crc32_update(crc, *data.offset(i as isize + j as isize));
                }
                // now process 4 0-bytes
-               for j in 0 .. 4 {
+               for _ in 0 .. 4 {
                   crc = crc32_update(crc, 0);
                }
                let j = 26;
@@ -3656,7 +3635,7 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut vorb, data: *mut u8, mut data_
    let mut i = 0;
    while i < f.page_crc_tests {
       let mut crc : u32;
-      let j : i32;
+    //   let j : i32;
       let n = f.scan[i as usize].bytes_done;
       let mut m = f.scan[i as usize].bytes_left;
       if m > data_len - n {m = data_len - n;}
@@ -3765,13 +3744,8 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
    }
 }
 
-unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut left_start: i32, left_end: i32, right_start: i32, right_end: i32, p_left: *mut i32) -> bool
+unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut left_start: i32, _: i32, right_start: i32, right_end: i32, p_left: *mut i32) -> bool
 {
-//    Mapping *map;
-//    int i,j,k,n,n2;
-    let mut zero_channel: [bool; 256] = std::mem::zeroed();
-    let mut really_zero_channel : [bool; 256] = std::mem::zeroed();
-
 // WINDOWING
 
     let n : i32 = f.blocksize[m.blockflag as usize];
@@ -3784,6 +3758,9 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
 
    use VorbisError::*;
 
+    let mut zero_channel: [bool; 256] = std::mem::zeroed();
+    let mut really_zero_channel : [bool; 256] = std::mem::zeroed();
+
    for i in 0 .. f.channels {
       let s: i32 = (*map.chan.offset(i as isize)).mux as i32;
       zero_channel[ i as usize ] = false;
@@ -3793,8 +3770,6 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
       } else {
           let g : &Floor1 = &(*f.floor_config.offset(floor as isize)).floor1;
          if get_bits(f, 1) != 0 {
-//             short *finalY;
-//             uint8 step2_flag[256];
             static range_list: [i32; 4] = [ 256, 128, 86, 64 ];
             let range = range_list[ (g.floor1_multiplier-1) as usize];
             let mut offset = 2;
@@ -3811,7 +3786,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
                   let c: &mut Codebook = std::mem::transmute(f.codebooks.offset( g.class_masterbooks[pclass] as isize));
                   DECODE!(cval,f,c);
                }
-               for k in 0 .. cdim {
+               for _ in 0 .. cdim {
                   let book = g.subclass_books[pclass][ (cval & csub) as usize];
                   cval = cval >> cbits;
                   if book >= 0 {
@@ -3836,11 +3811,9 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
             step2_flag[0] = 1; 
             step2_flag[1] = 1;
             for j in 2 .. g.values {
-//                int low, high, pred, highroom, lowroom, room, val;
                let j = j as usize;
                let low = g.neighbors[j][0];
                let high = g.neighbors[j][1];
-               //neighbors(g.Xlist, j, &low, &high);
                let pred = predict_point(
                    g.Xlist[j] as i32, 
                    g.Xlist[low as usize] as i32,
@@ -3920,7 +3893,6 @@ unsafe fn vorbis_decode_packet_rest(f: &mut vorb, len: &mut i32, m: &Mode, mut l
 // RESIDUE DECODE
    for i in 0 .. map.submaps {
       let mut residue_buffers: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize] = mem::zeroed();
-    //   int r;
       let mut do_not_decode: [bool; 256] = mem::zeroed();
       let mut ch : usize = 0;
       for j in 0 .. f.channels {
@@ -4136,7 +4108,6 @@ macro_rules! temp_block_array {
 
 unsafe fn decode_residue(f: &mut vorb, residue_buffers: *mut *mut f32, ch: i32, n: i32, rn: i32, do_not_decode: *mut bool)
 {
-//    int i,j,pass;
    let r: &Residue = mem::transmute(f.residue_config.offset(rn as isize));
    let rtype : i32 = f.residue_types[rn as usize] as i32;
    let c : i32 = r.classbook as i32;
@@ -4560,9 +4531,6 @@ unsafe fn imdct_step3_inner_s_loop_ld654(n: i32, e: *mut f32, i_off: i32, A: *mu
 #[inline(always)]
 unsafe fn iter_54(z: *mut f32)
 {
-//    float k00,k11,k22,k33;
-//    float y0,y1,y2,y3;
-
    let k00  = *z.offset(0) - *z.offset(-4);
    let y0   = *z.offset(0) + *z.offset(-4);
    let y2   = *z.offset(-2) + *z.offset(-6);
@@ -4908,7 +4876,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut vorb, blocktype: i32)
 }
 
 const packet_id : u8 = 1;
-const packet_comment : u8 = 3;
+// const packet_comment : u8 = 3;
 const packet_setup : u8 = 5;
 
 
@@ -5002,7 +4970,6 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
     
    for i in 0 .. f.codebook_count {
       let mut values: *mut u32;
-      let ordered: i32;
       let mut sorted_count: i32;
       let mut total : i32 = 0;
       let mut lengths: *mut u8;
@@ -5016,8 +4983,8 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
       x = get_bits(f, 8) as u8;
       y = get_bits(f, 8) as u8;
       c.entries = ((get_bits(f, 8)<<16) + ( (y as u32) <<8) + x as u32) as i32;
-      ordered = get_bits(f,1) as i32;
-      c.sparse = if ordered != 0 { false } else { get_bits(f,1) != 0 };
+      let is_ordered = get_bits(f,1) != 0;
+      c.sparse = if is_ordered { false } else { get_bits(f,1) != 0 };
 
       if c.dimensions == 0 && c.entries != 0    {return error(f, invalid_setup);}
 
@@ -5030,7 +4997,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
 
       if lengths.is_null() {return error(f, outofmem);}
 
-      if ordered != 0 {
+      if is_ordered  {
          let mut current_entry : i32 = 0;
          let mut current_length : i32 = (get_bits(f,5) + 1) as i32;
          while current_entry < c.entries {
@@ -5038,7 +5005,6 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
             let n : i32 = get_bits(f, ilog(limit)) as i32;
             if current_entry + n > c.entries as i32 { return error(f, invalid_setup); }
             std::ptr::write_bytes(lengths.offset(current_entry as isize), current_length as u8, n as usize);
-//             memset(lengths + current_entry, current_length, n);
             current_entry += n;
             current_length += 1;
          }
@@ -5066,7 +5032,6 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
          c.codeword_lengths = setup_malloc(f, c.entries) as *mut u8;
          if c.codeword_lengths.is_null() {return error(f, outofmem);}
          std::ptr::copy_nonoverlapping(lengths, c.codeword_lengths, c.entries as usize);
-//          memcpy(c.codeword_lengths, lengths, c.entries);
          setup_temp_free(f, lengths as *mut c_void, c.entries); // note this is only safe if there have been no intervening temp mallocs!
          lengths = c.codeword_lengths;
          c.sparse = false;
@@ -5093,7 +5058,6 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
          c.codewords = setup_malloc(f, mem::size_of_val(&*c.codewords.offset(0)) as i32 * c.entries) as *mut u32;
          if c.codewords.is_null()                  {return error(f, outofmem);}
       } else {
-//          unsigned int size;
          if c.sorted_entries != 0 {
             c.codeword_lengths = setup_malloc(f, c.sorted_entries) as *mut u8;
             if c.codeword_lengths.is_null()           {return error(f, outofmem);}
@@ -5142,7 +5106,6 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
       c.lookup_type = get_bits(f, 4) as u8;
       if c.lookup_type > 2 {return error(f, invalid_setup);}
       if c.lookup_type > 0 {
-//          uint16 *mults;
          c.minimum_value = float32_unpack(get_bits(f, 32));
          c.delta_value = float32_unpack(get_bits(f, 32));
          c.value_bits = ( get_bits(f, 4)+1 ) as u8;
@@ -5237,7 +5200,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
    // time domain transfers (notused)
 
    x = ( get_bits(f, 6) + 1) as u8;
-   for i in 0 .. x {
+   for _ in 0 .. x {
       let z : u32 = get_bits(f, 16);
       if z != 0 { return error(f, invalid_setup); }
    }
@@ -5300,7 +5263,7 @@ pub unsafe fn start_decoder(f: &mut vorb) -> bool
          g.values = 2;
          for j in 0 .. g.partitions {
             let c : i32 = g.partition_class_list[j as usize] as i32;
-            for k in 0 .. g.class_dimensions[c as usize] {
+            for _ in 0 .. g.class_dimensions[c as usize] {
                g.Xlist[g.values as usize] = get_bits(f, g.rangebits as i32) as u16;
                g.values += 1;
             }
