@@ -1,6 +1,3 @@
-// temporary disable lint for now...
-#![allow(non_snake_case)]
-// #![allow(non_upper_case_globals)]
 
 #![feature(question_mark, custom_derive, box_syntax, float_extras)]
 #![feature(alloc_system)]
@@ -254,7 +251,7 @@ pub struct Floor1
    class_subclasses: [u8; 16], // varies
    class_masterbooks: [u8; 16], // varies
    subclass_books: [[i16; 8]; 16], // varies
-   Xlist: [u16; 31*8+2], // varies
+   xlist: [u16; 31*8+2], // varies
    sorted_order: [u8; 31*8+2],
    neighbors: [[u8; 2]; 31*8+2],
    floor1_multiplier: u8,
@@ -401,7 +398,7 @@ pub struct Vorbis
    previous_window: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize],
    previous_length: i32,
 
-   finalY: [*mut i16; STB_VORBIS_MAX_CHANNELS as usize],
+   final_y: [*mut i16; STB_VORBIS_MAX_CHANNELS as usize],
 
    current_loc: u32, // sample location of next frame to decode
    current_loc_valid: bool,
@@ -409,7 +406,7 @@ pub struct Vorbis
   // per-blocksize precomputed data
    
    // twiddle factors
-   A: [*mut f32; 2], B: [*mut f32; 2], C: [*mut f32; 2],
+   a: [*mut f32; 2], b: [*mut f32; 2], c: [*mut f32; 2],
    window: [*mut f32; 2],
    bit_reverse: [*mut u16; 2],
 
@@ -839,7 +836,7 @@ fn lookup1_values(entries: i32, dim: i32) -> i32
 const M_PI : f32 = 3.14159265358979323846264;
 
 // called twice per file
-fn compute_twiddle_factors(n: i32, A: *mut f32, B: *mut f32, C: *mut f32)
+fn compute_twiddle_factors(n: i32, a: *mut f32, b: *mut f32, c: *mut f32)
 {
     use std::f32;
     
@@ -852,12 +849,12 @@ fn compute_twiddle_factors(n: i32, A: *mut f32, B: *mut f32, C: *mut f32)
     while k < n4 {
         unsafe {
             let x1 = (4*k) as f32 * M_PI / n as f32;
-            *A.offset(k2 as isize)     = f32::cos(x1) as f32;
-            *A.offset((k2+1) as isize) =  -f32::sin(x1) as f32;
+            *a.offset(k2 as isize)     = f32::cos(x1) as f32;
+            *a.offset((k2+1) as isize) =  -f32::sin(x1) as f32;
             
             let x2 = (k2+1) as f32 * M_PI / n as f32 / 2.0;
-            *B.offset(k2 as isize)     = (f32::cos(x2) * 0.5) as f32;
-            *B.offset((k2+1) as isize) = (f32::sin(x2) * 0.5) as f32;
+            *b.offset(k2 as isize)     = (f32::cos(x2) * 0.5) as f32;
+            *b.offset((k2+1) as isize) = (f32::sin(x2) * 0.5) as f32;
         }
         
         k += 1; k2 += 2;
@@ -869,10 +866,10 @@ fn compute_twiddle_factors(n: i32, A: *mut f32, B: *mut f32, C: *mut f32)
     while k < n8 {
         unsafe {
             let x1 = (2*(k2+1)) as f32 * M_PI / n as f32;
-            *C.offset(k2) = f32::cos(x1) as f32;
+            *c.offset(k2) = f32::cos(x1) as f32;
             
             let x2 = (2*(k2+1)) as f32 * M_PI / n as f32;
-            *C.offset(k2+1) = -f32::sin(x2) as f32;
+            *c.offset(k2+1) = -f32::sin(x2) as f32;
         }
         
         k += 1; k2 += 2;
@@ -1567,7 +1564,6 @@ pub unsafe fn stb_vorbis_decode_filename(filename: *const i8, channels: *mut i32
 // and stb_vorbis_get_samples_*(), since the latter calls the former.
 pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis, channels: *mut i32, output: *mut *mut *mut f32) -> i32
 {
-//    int len, right,left,i;
    if IS_PUSH_MODE!(f){
        error(f, VorbisError::invalid_api_mixing);
        return 0;
@@ -1733,15 +1729,15 @@ unsafe fn init_blocksize(f: &mut Vorbis, b: i32, n: i32) -> bool
    let n8 = n >> 3;
    
    let b = b as usize;
-   f.A[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n2) as *mut f32;
-   f.B[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n2) as *mut f32;
-   f.C[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n4) as *mut f32;
+   f.a[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n2) as *mut f32;
+   f.b[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n2) as *mut f32;
+   f.c[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n4) as *mut f32;
    
-   if f.A[b].is_null() || f.B[b].is_null() || f.C[b].is_null() {
+   if f.a[b].is_null() || f.b[b].is_null() || f.c[b].is_null() {
      return error(f, outofmem);  
    } 
    
-   compute_twiddle_factors(n, f.A[b], f.B[b], f.C[b]);
+   compute_twiddle_factors(n, f.a[b], f.b[b], f.c[b]);
    f.window[b] = setup_malloc(f, std::mem::size_of::<f32>() as i32 * n2) as *mut f32;
    
    if f.window[b].is_null() {return error(f, outofmem);}
@@ -1866,7 +1862,7 @@ unsafe fn predict_point(x: i32, x0: i32 , x1: i32 , y0: i32 , y1: i32 ) -> i32
 
 pub type YTYPE = i16;
 
-unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut f32, finalY: *mut YTYPE, _: *mut u8) -> bool
+unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut f32, final_y: *mut YTYPE, _: *mut u8) -> bool
 {
    let n2 = n >> 1;
 
@@ -1880,13 +1876,13 @@ unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut 
       let g : &Floor1 = &(*f.floor_config.offset(floor as isize)).floor1;
       let mut j : i32;
       let mut lx : i32 = 0;
-      let mut ly : i32 = *finalY.offset(0) as i32 * g.floor1_multiplier as i32;
+      let mut ly : i32 = *final_y.offset(0) as i32 * g.floor1_multiplier as i32;
       for q in 1 .. g.values {
          j = g.sorted_order[q as usize] as i32;
-         if *finalY.offset(j as isize) >= 0
+         if *final_y.offset(j as isize) >= 0
          {
-            let hy : i32 = *finalY.offset(j as isize) as i32 * g.floor1_multiplier as i32;
-            let hx : i32 = g.Xlist[j as usize] as i32;
+            let hy : i32 = *final_y.offset(j as isize) as i32 * g.floor1_multiplier as i32;
+            let hx : i32 = g.xlist[j as usize] as i32;
             if lx != hx as i32{
                draw_line(target, lx,ly, hx, hy, n2);
             }
@@ -2323,15 +2319,15 @@ unsafe fn vorbis_deinit(p: &mut Vorbis)
     while i < p.channels && i < STB_VORBIS_MAX_CHANNELS {
       { let x6 = p.channel_buffers[i as usize] as *mut c_void; setup_free(p, x6); }
       { let x7 = p.previous_window[i as usize] as *mut c_void; setup_free(p, x7); }
-      { let x8 = p.finalY[i as usize] as *mut c_void; setup_free(p, x8); }
+      { let x8 = p.final_y[i as usize] as *mut c_void; setup_free(p, x8); }
       
       i += 1;
    }
    
    for i in 0 .. 2 {
-      { let x9 = p.A[i as usize] as *mut c_void; setup_free(p, x9); }
-      { let x10 = p.B[i as usize] as *mut c_void; setup_free(p, x10); }
-      { let x11 = p.C[i as usize] as *mut c_void; setup_free(p, x11); }
+      { let x9 = p.a[i as usize] as *mut c_void; setup_free(p, x9); }
+      { let x10 = p.b[i as usize] as *mut c_void; setup_free(p, x10); }
+      { let x11 = p.c[i as usize] as *mut c_void; setup_free(p, x11); }
       { let x12 = p.window[i as usize] as *mut c_void; setup_free(p, x12); }
       { let x13 = p.bit_reverse[i as usize] as *mut c_void; setup_free(p, x13); }
    }
@@ -3775,9 +3771,9 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
             static RANGE_LIST: [i32; 4] = [ 256, 128, 86, 64 ];
             let range = RANGE_LIST[ (g.floor1_multiplier-1) as usize];
             let mut offset = 2;
-            let finalY : *mut i16 = f.finalY[i as usize];
-            *finalY.offset(0) = get_bits(f, ilog(range)-1) as i16;
-            *finalY.offset(1) = get_bits(f, ilog(range)-1) as i16;
+            let final_y : *mut i16 = f.final_y[i as usize];
+            *final_y.offset(0) = get_bits(f, ilog(range)-1) as i16;
+            *final_y.offset(1) = get_bits(f, ilog(range)-1) as i16;
             for j in 0 .. g.partitions {
                let pclass = g.partition_class_list[j as usize] as usize;
                let cdim = g.class_dimensions[pclass];
@@ -3795,9 +3791,9 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
                      let mut temp : i32;
                      let c: &mut Codebook = std::mem::transmute(f.codebooks.offset(book as isize));
                      DECODE!(temp,f,c);
-                     *finalY.offset(offset) = temp as i16;
+                     *final_y.offset(offset) = temp as i16;
                   } else {
-                     *finalY.offset(offset) = 0;
+                     *final_y.offset(offset) = 0;
                   }
                     offset += 1;
                }
@@ -3817,13 +3813,13 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
                let low = g.neighbors[j][0];
                let high = g.neighbors[j][1];
                let pred = predict_point(
-                   g.Xlist[j] as i32, 
-                   g.Xlist[low as usize] as i32,
-                   g.Xlist[high as usize] as i32, 
-                   *finalY.offset(low as isize) as i32, 
-                   *finalY.offset(high as isize) as i32
+                   g.xlist[j] as i32, 
+                   g.xlist[low as usize] as i32,
+                   g.xlist[high as usize] as i32, 
+                   *final_y.offset(low as isize) as i32, 
+                   *final_y.offset(high as isize) as i32
                );
-               let val = *finalY.offset(j as isize);
+               let val = *final_y.offset(j as isize);
                let highroom = range - pred;
                let lowroom = pred;
                let room;
@@ -3839,27 +3835,27 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
                   
                   if val >= room as i16 {
                      if highroom > lowroom {
-                        *finalY.offset(j as isize) = (val - lowroom as i16 + pred as i16) as i16;
+                        *final_y.offset(j as isize) = (val - lowroom as i16 + pred as i16) as i16;
                      } else {
-                        *finalY.offset(j as isize) = (pred as i16 - val + highroom as i16 - 1) as i16;
+                        *final_y.offset(j as isize) = (pred as i16 - val + highroom as i16 - 1) as i16;
                      }
                   } else {
                      if (val & 1) != 0 {
-                        *finalY.offset(j as isize) = pred as i16 - ((val+1)>>1);
+                        *final_y.offset(j as isize) = pred as i16 - ((val+1)>>1);
                      } else {
-                        *finalY.offset(j as isize) = pred as i16+ (val>>1);
+                        *final_y.offset(j as isize) = pred as i16+ (val>>1);
                      }
                   }
                } else {
                   step2_flag[j] = 0;
-                  *finalY.offset(j as isize) = pred as i16;
+                  *final_y.offset(j as isize) = pred as i16;
                }
             }
 
             // defer final floor computation until _after_ residue
             for j in 0 .. g.values {
                if step2_flag[j as usize] == 0 {
-                  *finalY.offset(j as isize) = -1;
+                  *final_y.offset(j as isize) = -1;
                }
             }
          } else {
@@ -3961,7 +3957,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
         std::ptr::write_bytes(f.channel_buffers[i as usize], b'0', n2 as usize);
       } else {
           let cb = f.channel_buffers[i as usize];
-          let fy = f.finalY[i as usize]; 
+          let fy = f.final_y[i as usize]; 
          do_floor(f, map, i, n, cb,
             fy, std::ptr::null_mut());
       }
@@ -4322,7 +4318,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
 // they could be pushed back up but eh. __forceinline showed no change;
 // they're probably already being inlined.
 
-unsafe fn imdct_step3_iter0_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32 , mut A: *mut f32)
+unsafe fn imdct_step3_iter0_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32 , mut a: *mut f32)
 {
    let mut ee0 = e.offset(i_off as isize);
    let mut ee2 = ee0.offset(k_off as isize);
@@ -4337,33 +4333,33 @@ unsafe fn imdct_step3_iter0_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32 , m
       k01_21  = *ee0.offset(-1) - *ee2.offset(-1);
       *ee0.offset(-0) += *ee2.offset(0);
       *ee0.offset(-1) += *ee2.offset(-1);
-      *ee2.offset(-0) = k00_20 * *A.offset(0) - k01_21 * *A.offset(1);
-      *ee2.offset(-1) = k01_21 * *A.offset(0) + k00_20 * *A.offset(1);
-      A = A.offset(8);
+      *ee2.offset(-0) = k00_20 * *a.offset(0) - k01_21 * *a.offset(1);
+      *ee2.offset(-1) = k01_21 * *a.offset(0) + k00_20 * *a.offset(1);
+      a = a.offset(8);
 
       k00_20  = *ee0.offset(-2) - *ee2.offset(-2);
       k01_21  = *ee0.offset(-3) - *ee2.offset(-3);
       *ee0.offset(-2) += *ee2.offset(-2);
       *ee0.offset(-3) += *ee2.offset(-3);
-      *ee2.offset(-2) = k00_20 * *A.offset(0) - k01_21 * *A.offset(1);
-      *ee2.offset(-3) = k01_21 * *A.offset(0) + k00_20 * *A.offset(1);
-      A = A.offset(8);
+      *ee2.offset(-2) = k00_20 * *a.offset(0) - k01_21 * *a.offset(1);
+      *ee2.offset(-3) = k01_21 * *a.offset(0) + k00_20 * *a.offset(1);
+      a = a.offset(8);
 
       k00_20  = *ee0.offset(-4) - *ee2.offset(-4);
       k01_21  = *ee0.offset(-5) - *ee2.offset(-5);
       *ee0.offset(-4) += *ee2.offset(-4);
       *ee0.offset(-5) += *ee2.offset(-5);
-      *ee2.offset(-4) = k00_20 * *A.offset(0) - k01_21 * *A.offset(1);
-      *ee2.offset(-5) = k01_21 * *A.offset(0) + k00_20 * *A.offset(1);
-      A = A.offset(8);
+      *ee2.offset(-4) = k00_20 * *a.offset(0) - k01_21 * *a.offset(1);
+      *ee2.offset(-5) = k01_21 * *a.offset(0) + k00_20 * *a.offset(1);
+      a = a.offset(8);
 
       k00_20  = *ee0.offset(-6) - *ee2.offset(-6);
       k01_21  = *ee0.offset(-7) - *ee2.offset(-7);
       *ee0.offset(-6) += *ee2.offset(-6);
       *ee0.offset(-7) += *ee2.offset(-7);
-      *ee2.offset(-6) = k00_20 * *A.offset(0) - k01_21 * *A.offset(1);
-      *ee2.offset(-7) = k01_21 * *A.offset(0) + k00_20 * *A.offset(1);
-      A = A.offset(8);
+      *ee2.offset(-6) = k00_20 * *a.offset(0) - k01_21 * *a.offset(1);
+      *ee2.offset(-7) = k01_21 * *a.offset(0) + k00_20 * *a.offset(1);
+      a = a.offset(8);
       ee0 = ee0.offset(-8);
       ee2 = ee2.offset(-8);
 
@@ -4372,7 +4368,7 @@ unsafe fn imdct_step3_iter0_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32 , m
 }
 
 
-unsafe fn imdct_step3_inner_r_loop(lim: i32, e: *mut f32, d0: i32 , k_off: i32 , mut A: *mut f32, k1: i32)
+unsafe fn imdct_step3_inner_r_loop(lim: i32, e: *mut f32, d0: i32 , k_off: i32 , mut a: *mut f32, k1: i32)
 {
    let mut i : i32;
    let mut k00_20 : f32; 
@@ -4387,59 +4383,59 @@ unsafe fn imdct_step3_inner_r_loop(lim: i32, e: *mut f32, d0: i32 , k_off: i32 ,
       k01_21 = *e0.offset(-1) - *e2.offset(-1);
       *e0.offset(-0) += *e2.offset(-0);
       *e0.offset(-1) += *e2.offset(-1);
-      *e2.offset(-0) = (k00_20)**A.offset(0) - (k01_21) * *A.offset(1);
-      *e2.offset(-1) = (k01_21)**A.offset(0) + (k00_20) * *A.offset(1);
+      *e2.offset(-0) = (k00_20)**a.offset(0) - (k01_21) * *a.offset(1);
+      *e2.offset(-1) = (k01_21)**a.offset(0) + (k00_20) * *a.offset(1);
 
-      A = A.offset(k1 as isize);
+      a = a.offset(k1 as isize);
 
       k00_20 = *e0.offset(-2) - *e2.offset(-2);
       k01_21 = *e0.offset(-3) - *e2.offset(-3);
       *e0.offset(-2) += *e2.offset(-2);
       *e0.offset(-3) += *e2.offset(-3);
-      *e2.offset(-2) = (k00_20)**A.offset(0) - (k01_21) * *A.offset(1);
-      *e2.offset(-3) = (k01_21)**A.offset(0) + (k00_20) * *A.offset(1);
+      *e2.offset(-2) = (k00_20)**a.offset(0) - (k01_21) * *a.offset(1);
+      *e2.offset(-3) = (k01_21)**a.offset(0) + (k00_20) * *a.offset(1);
 
-      A = A.offset(k1 as isize);
+      a = a.offset(k1 as isize);
 
       k00_20 = *e0.offset(-4) - *e2.offset(-4);
       k01_21 = *e0.offset(-5) - *e2.offset(-5);
       *e0.offset(-4) += *e2.offset(-4);
       *e0.offset(-5) += *e2.offset(-5);
-      *e2.offset(-4) = (k00_20)**A.offset(0) - (k01_21) * *A.offset(1);
-      *e2.offset(-5) = (k01_21)**A.offset(0) + (k00_20) * *A.offset(1);
+      *e2.offset(-4) = (k00_20)**a.offset(0) - (k01_21) * *a.offset(1);
+      *e2.offset(-5) = (k01_21)**a.offset(0) + (k00_20) * *a.offset(1);
 
-      A = A.offset(k1 as isize);
+      a = a.offset(k1 as isize);
 
       k00_20 = *e0.offset(-6) - *e2.offset(-6);
       k01_21 = *e0.offset(-7) - *e2.offset(-7);
       *e0.offset(-6) += *e2.offset(-6);
       *e0.offset(-7) += *e2.offset(-7);
-      *e2.offset(-6) = (k00_20)**A.offset(0) - (k01_21) * *A.offset(1);
-      *e2.offset(-7) = (k01_21)**A.offset(0) + (k00_20) * *A.offset(1);
+      *e2.offset(-6) = (k00_20)**a.offset(0) - (k01_21) * *a.offset(1);
+      *e2.offset(-7) = (k01_21)**a.offset(0) + (k00_20) * *a.offset(1);
 
       e0 = e0.offset(-8);
       e2 = e2.offset(-8);
 
-      A = A.offset(k1 as isize);
+      a = a.offset(k1 as isize);
     
         i -= 1;
    }
 }
 
 
-unsafe fn imdct_step3_inner_s_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32, A: *mut f32, a_off: i32 , k0: i32)
+unsafe fn imdct_step3_inner_s_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32, a: *mut f32, a_off: i32 , k0: i32)
 {
    let mut i : i32;
    let a_off = a_off as isize;
    
-   let A0 = *A.offset(0);
-   let A1 = *A.offset(0+1);
-   let A2 = *A.offset(0+a_off);
-   let A3 = *A.offset(0+a_off+1);
-   let A4 = *A.offset(0+a_off*2+0);
-   let A5 = *A.offset(0+a_off*2+1);
-   let A6 = *A.offset(0+a_off*3+0);
-   let A7 = *A.offset(0+a_off*3+1);
+   let a0 = *a.offset(0);
+   let a1 = *a.offset(0+1);
+   let a2 = *a.offset(0+a_off);
+   let a3 = *a.offset(0+a_off+1);
+   let a4 = *a.offset(0+a_off*2+0);
+   let a5 = *a.offset(0+a_off*2+1);
+   let a6 = *a.offset(0+a_off*3+0);
+   let a7 = *a.offset(0+a_off*3+1);
 
     let mut k00: f32;
     let mut k11: f32;
@@ -4453,29 +4449,29 @@ unsafe fn imdct_step3_inner_s_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32, 
       k11     = *ee0.offset(-1) - *ee2.offset(-1);
       *ee0.offset(0) =  *ee0.offset(0) + *ee2.offset(0);
       *ee0.offset(-1) =  *ee0.offset(-1) + *ee2.offset(-1);
-      *ee2.offset(0) = (k00) * A0 - (k11) * A1;
-      *ee2.offset(-1) = (k11) * A0 + (k00) * A1;
+      *ee2.offset(0) = (k00) * a0 - (k11) * a1;
+      *ee2.offset(-1) = (k11) * a0 + (k00) * a1;
 
       k00     = *ee0.offset(-2) - *ee2.offset(-2);
       k11     = *ee0.offset(-3) - *ee2.offset(-3);
       *ee0.offset(-2) =  *ee0.offset(-2) + *ee2.offset(-2);
       *ee0.offset(-3) =  *ee0.offset(-3) + *ee2.offset(-3);
-      *ee2.offset(-2) = (k00) * A2 - (k11) * A3;
-      *ee2.offset(-3) = (k11) * A2 + (k00) * A3;
+      *ee2.offset(-2) = (k00) * a2 - (k11) * a3;
+      *ee2.offset(-3) = (k11) * a2 + (k00) * a3;
 
       k00     = *ee0.offset(-4) - *ee2.offset(-4);
       k11     = *ee0.offset(-5) - *ee2.offset(-5);
       *ee0.offset(-4) =  *ee0.offset(-4) + *ee2.offset(-4);
       *ee0.offset(-5) =  *ee0.offset(-5) + *ee2.offset(-5);
-      *ee2.offset(-4) = (k00) * A4 - (k11) * A5;
-      *ee2.offset(-5) = (k11) * A4 + (k00) * A5;
+      *ee2.offset(-4) = (k00) * a4 - (k11) * a5;
+      *ee2.offset(-5) = (k11) * a4 + (k00) * a5;
 
       k00     = *ee0.offset(-6) - *ee2.offset(-6);
       k11     = *ee0.offset(-7) - *ee2.offset(-7);
       *ee0.offset(-6) =  *ee0.offset(-6) + *ee2.offset(-6);
       *ee0.offset(-7) =  *ee0.offset(-7) + *ee2.offset(-7);
-      *ee2.offset(-6) = (k00) * A6 - (k11) * A7;
-      *ee2.offset(-7) = (k11) * A6 + (k00) * A7;
+      *ee2.offset(-6) = (k00) * a6 - (k11) * a7;
+      *ee2.offset(-7) = (k11) * a6 + (k00) * a7;
 
       ee0 = ee0.offset(-k0 as isize);
       ee2 = ee2.offset(-k0 as isize);
@@ -4485,10 +4481,10 @@ unsafe fn imdct_step3_inner_s_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32, 
 }
 
 
-unsafe fn imdct_step3_inner_s_loop_ld654(n: i32, e: *mut f32, i_off: i32, A: *mut f32, base_n: i32)
+unsafe fn imdct_step3_inner_s_loop_ld654(n: i32, e: *mut f32, i_off: i32, a: *mut f32, base_n: i32)
 {
    let a_off = base_n >> 3;
-   let A2 = *A.offset( 0 + a_off as isize);
+   let a2 = *a.offset( 0 + a_off as isize);
    let mut z = e.offset(i_off as isize);
    let base = z.offset(- (16 * n) as isize);
 
@@ -4507,8 +4503,8 @@ unsafe fn imdct_step3_inner_s_loop_ld654(n: i32, e: *mut f32, i_off: i32, A: *mu
       k11    = *z.offset(-3) - *z.offset(-11);
       *z.offset(-2) = *z.offset(-2) + *z.offset(-10);
       *z.offset(-3) = *z.offset(-3) + *z.offset(-11);
-      *z.offset(-10) = (k00+k11) * A2;
-      *z.offset(-11) = (k11-k00) * A2;
+      *z.offset(-10) = (k00+k11) * a2;
+      *z.offset(-11) = (k11-k00) * a2;
 
       k00    = *z.offset(-12) - *z.offset(-4);  // reverse to avoid a unary negation
       k11    = *z.offset(-5) - *z.offset(-13);
@@ -4521,8 +4517,8 @@ unsafe fn imdct_step3_inner_s_loop_ld654(n: i32, e: *mut f32, i_off: i32, A: *mu
       k11    = *z.offset(-7) - *z.offset(-15);
       *z.offset(-6) = *z.offset(-6) + *z.offset(-14);
       *z.offset(-7) = *z.offset(-7) + *z.offset(-15);
-      *z.offset(-14) = (k00+k11) * A2;
-      *z.offset(-15) = (k00-k11) * A2;
+      *z.offset(-14) = (k00+k11) * a2;
+      *z.offset(-15) = (k00-k11) * a2;
 
       iter_54(z);
       iter_54(z.offset(-8));
@@ -4575,7 +4571,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    let u: *mut f32;
    let v: *mut f32;
 //    twiddle factors
-   let A: *mut f32 = f.A[blocktype as usize];
+   let a: *mut f32 = f.a[blocktype as usize];
 
    // IMDCT algorithm from "The use of multirate filter banks for coding of high quality digital audio"
    // See notes about bugs in that paper in less-optimal implementation 'inverse_mdct_old' after this function.
@@ -4597,25 +4593,25 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    // are 1/2 too small, and need to be compensated for.
 
    {
-       let mut d: *mut f32; let mut e: *mut f32; let mut AA: *mut f32; let e_stop: *mut f32;
+       let mut d: *mut f32; let mut e: *mut f32; let mut aa: *mut f32; let e_stop: *mut f32;
       d = buf2.offset( (n2-2) as isize);
-      AA = A;
+      aa = a;
       e = buffer.offset(0);
       e_stop = buffer.offset(n2 as isize);
       while e != e_stop {
-         *d.offset(1) = *e.offset(0) * *AA.offset(0) - *e.offset(2) * *AA.offset(1);
-         *d.offset(0) = *e.offset(0) * *AA.offset(1) + *e.offset(2) * *AA.offset(0);
+         *d.offset(1) = *e.offset(0) * *aa.offset(0) - *e.offset(2) * *aa.offset(1);
+         *d.offset(0) = *e.offset(0) * *aa.offset(1) + *e.offset(2) * *aa.offset(0);
          d = d.offset(-2);
-         AA = AA.offset(2);
+         aa = aa.offset(2);
          e = e.offset(4);
       }
 
       e = buffer.offset( (n2-3) as isize);
       while d >= buf2 {
-         *d.offset(1) = -*e.offset(2) * *AA.offset(0) - -*e.offset(0) * *AA.offset(1);
-         *d.offset(0) = -*e.offset(2) * *AA.offset(1) + -*e.offset(0) * *AA.offset(0);
+         *d.offset(1) = -*e.offset(2) * *aa.offset(0) - -*e.offset(0) * *aa.offset(1);
+         *d.offset(0) = -*e.offset(2) * *aa.offset(1) + -*e.offset(0) * *aa.offset(0);
          d = d.offset(-2);
-         AA = AA.offset(2);
+         aa = aa.offset(2);
          e = e.offset(-4);
       }
    }
@@ -4631,7 +4627,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    // this could be in place, but the data ends up in the wrong
    // place... _somebody_'s got to swap it, so this is nominated
    {
-      let mut AA : *mut f32 = A.offset( (n2-8) as isize);
+      let mut aa : *mut f32 = a.offset( (n2-8) as isize);
       let mut d0 : *mut f32; let mut d1: *mut f32; let mut e0: *mut f32; let mut e1: *mut f32;
 
       e0 = v.offset(n4 as isize);
@@ -4640,24 +4636,24 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
       d0 = u.offset(n4 as isize);
       d1 = u.offset(0);
 
-      while AA >= A {
+      while aa >= a {
          let mut v40_20 : f32; let mut v41_21: f32;
 
          v41_21 = *e0.offset(1) - *e1.offset(1);
          v40_20 = *e0.offset(0) - *e1.offset(0);
          *d0.offset(1)  = *e0.offset(1) + *e1.offset(1);
          *d0.offset(0)  = *e0.offset(0) + *e1.offset(0);
-         *d1.offset(1)  = v41_21 * *AA.offset(4) - v40_20 * *AA.offset(5);
-         *d1.offset(0)  = v40_20 * *AA.offset(4) + v41_21 * *AA.offset(5);
+         *d1.offset(1)  = v41_21 * *aa.offset(4) - v40_20 * *aa.offset(5);
+         *d1.offset(0)  = v40_20 * *aa.offset(4) + v41_21 * *aa.offset(5);
 
          v41_21 = *e0.offset(3) - *e1.offset(3);
          v40_20 = *e0.offset(2) - *e1.offset(2);
          *d0.offset(3)  = *e0.offset(3) + *e1.offset(3);
          *d0.offset(2)  = *e0.offset(2) + *e1.offset(2);
-         *d1.offset(3)  = v41_21 * *AA.offset(0) - v40_20 * *AA.offset(1);
-         *d1.offset(2)  = v40_20 * *AA.offset(0) + v41_21 * *AA.offset(1);
+         *d1.offset(3)  = v41_21 * *aa.offset(0) - v40_20 * *aa.offset(1);
+         *d1.offset(2)  = v40_20 * *aa.offset(0) + v41_21 * *aa.offset(1);
 
-         AA = AA.offset(-8);
+         aa = aa.offset(-8);
 
          d0 = d0.offset(4);
          d1 = d1.offset(4);
@@ -4677,14 +4673,14 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    // switch between them halfway.
 
    // this is iteration 0 of step 3
-   imdct_step3_iter0_loop(n >> 4, u, n2-1-n4*0, -(n >> 3), A);
-   imdct_step3_iter0_loop(n >> 4, u, n2-1-n4*1, -(n >> 3), A);
+   imdct_step3_iter0_loop(n >> 4, u, n2-1-n4*0, -(n >> 3), a);
+   imdct_step3_iter0_loop(n >> 4, u, n2-1-n4*1, -(n >> 3), a);
 
    // this is iteration 1 of step 3
-   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*0, -(n >> 4), A, 16);
-   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*1, -(n >> 4), A, 16);
-   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*2, -(n >> 4), A, 16);
-   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*3, -(n >> 4), A, 16);
+   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*0, -(n >> 4), a, 16);
+   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*1, -(n >> 4), a, 16);
+   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*2, -(n >> 4), a, 16);
+   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*3, -(n >> 4), a, 16);
 
    l=2;
    while l < (ld-3)>>1 {
@@ -4692,7 +4688,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
       let k0_2 : i32 = k0>>1;
       let lim : i32 = 1 << (l+1);
       for i in 0 .. lim {
-         imdct_step3_inner_r_loop(n >> (l+4), u, n2-1 - k0*i, -k0_2, A, 1 << (l+3));
+         imdct_step3_inner_r_loop(n >> (l+4), u, n2-1 - k0*i, -k0_2, a, 1 << (l+3));
       }
     l += 1;
    }
@@ -4705,12 +4701,12 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
       let mut r : i32;
       let lim : i32 = 1 << (l+1);
       let mut i_off : i32;
-      let mut A0 : *mut f32 = A;
+      let mut a0 : *mut f32 = a;
       i_off = n2-1;
       r = rlim;
       while r > 0 {
-         imdct_step3_inner_s_loop(lim, u, i_off, -k0_2, A0, k1, k0);
-         A0 = A0.offset( (k1*4) as isize);
+         imdct_step3_inner_s_loop(lim, u, i_off, -k0_2, a0, k1, k0);
+         a0 = a0.offset( (k1*4) as isize);
          i_off -= 8;
          
         r -= 1;
@@ -4723,7 +4719,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    //       the big win comes from getting rid of needless flops
    //         due to the constants on pass 5 & 4 being all 1 and 0;
    //       combining them to be simultaneous to improve cache made little difference
-   imdct_step3_inner_s_loop_ld654(n >> 5, u, n2-1, A, n);
+   imdct_step3_inner_s_loop_ld654(n >> 5, u, n2-1, a, n);
 
    // output is u
 
@@ -4767,7 +4763,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    // step 7   (paper output is v, now v)
    // this is now in place
    {
-      let mut C = f.C[blocktype as usize];
+      let mut c = f.c[blocktype as usize];
       let mut d : *mut f32; let mut e : *mut f32;
 
       d = v;
@@ -4779,8 +4775,8 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
          a02 = *d.offset(0) - *e.offset(2);
          a11 = *d.offset(1) + *e.offset(3);
 
-         b0 = *C.offset(1) * a02 + *C.offset(0)*a11;
-         b1 = *C.offset(1) * a11 - *C.offset(0)*a02;
+         b0 = *c.offset(1) * a02 + *c.offset(0)*a11;
+         b1 = *c.offset(1) * a11 - *c.offset(0)*a02;
 
          b2 = *d.offset(0) + *e.offset( 2);
          b3 = *d.offset(1) - *e.offset( 3);
@@ -4793,8 +4789,8 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
          a02 = *d.offset(2) - *e.offset(0);
          a11 = *d.offset(3) + *e.offset(1);
 
-         b0 = *C.offset(3)*a02 + *C.offset(2)*a11;
-         b1 = *C.offset(3)*a11 - *C.offset(2)*a02;
+         b0 = *c.offset(3)*a02 + *c.offset(2)*a11;
+         b1 = *c.offset(3)*a11 - *c.offset(2)*a02;
 
          b2 = *d.offset(2) + *e.offset( 0);
          b3 = *d.offset(3) - *e.offset( 1);
@@ -4804,7 +4800,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
          *e.offset(0) = b2 - b0;
          *e.offset(1) = b1 - b3;
 
-         C = C.offset(4);
+         c = c.offset(4);
          d = d.offset(4);
          e = e.offset(-4);
       }
@@ -4821,46 +4817,46 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    // this cannot POSSIBLY be in place, so we refer to the buffers directly
 
    {
-      let mut B = f.B[blocktype as usize].offset( (n2 - 8) as isize);
+      let mut b = f.b[blocktype as usize].offset( (n2 - 8) as isize);
       let mut e = buf2.offset( (n2 - 8) as isize );
       let mut d0 = buffer.offset(0);
       let mut d1 = buffer.offset( (n2-4) as isize);
       let mut d2 = buffer.offset( n2 as isize);
       let mut d3 = buffer.offset( (n-4) as isize);
       while e >= v {
-         let mut p3 =  *e.offset(6)* *B.offset(7) - *e.offset(7) * *B.offset(6);
-         let mut p2 = -*e.offset(6)* *B.offset(6) - *e.offset(7) * *B.offset(7); 
+         let mut p3 =  *e.offset(6)* *b.offset(7) - *e.offset(7) * *b.offset(6);
+         let mut p2 = -*e.offset(6)* *b.offset(6) - *e.offset(7) * *b.offset(7); 
 
          *d0.offset(0) =   p3;
          *d1.offset(3) = - p3;
          *d2.offset(0) =   p2;
          *d3.offset(3) =   p2;
 
-         let mut p1 =  *e.offset(4)**B.offset(5) - *e.offset(5)**B.offset(4);
-         let mut p0 = -*e.offset(4)**B.offset(4) - *e.offset(5)**B.offset(5); 
+         let mut p1 =  *e.offset(4)**b.offset(5) - *e.offset(5)**b.offset(4);
+         let mut p0 = -*e.offset(4)**b.offset(4) - *e.offset(5)**b.offset(5); 
 
          *d0.offset(1) =   p1;
          *d1.offset(2) = - p1;
          *d2.offset(1) =   p0;
          *d3.offset(2) =   p0;
 
-         p3 =  *e.offset(2)**B.offset(3) - *e.offset(3)**B.offset(2);
-         p2 = -*e.offset(2)**B.offset(2) - *e.offset(3)**B.offset(3); 
+         p3 =  *e.offset(2)**b.offset(3) - *e.offset(3)**b.offset(2);
+         p2 = -*e.offset(2)**b.offset(2) - *e.offset(3)**b.offset(3); 
 
          *d0.offset(2) =   p3;
          *d1.offset(1) = - p3;
          *d2.offset(2) =   p2;
          *d3.offset(1) =   p2;
 
-         p1 =  *e.offset(0)**B.offset(1) - *e.offset(1)**B.offset(0);
-         p0 = -*e.offset(0)**B.offset(0) - *e.offset(1)**B.offset(1); 
+         p1 =  *e.offset(0)**b.offset(1) - *e.offset(1)**b.offset(0);
+         p0 = -*e.offset(0)**b.offset(0) - *e.offset(1)**b.offset(1); 
 
          *d0.offset(3) =   p1;
          *d1.offset(0) = - p1;
          *d2.offset(3) =   p0;
          *d3.offset(0) =   p0;
 
-         B = B.offset(-8);
+         b = b.offset(-8);
          e = e.offset(-8);
          d0 = d0.offset(4);
          d2 = d2.offset(4);
@@ -5251,20 +5247,20 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          }
          g.floor1_multiplier = (get_bits(f,2) +1) as u8;
          g.rangebits = get_bits(f,4) as u8;
-         g.Xlist[0] = 0;
-         g.Xlist[1] = 1 << g.rangebits;
+         g.xlist[0] = 0;
+         g.xlist[1] = 1 << g.rangebits;
          g.values = 2;
          for j in 0 .. g.partitions {
             let c : i32 = g.partition_class_list[j as usize] as i32;
             for _ in 0 .. g.class_dimensions[c as usize] {
-               g.Xlist[g.values as usize] = get_bits(f, g.rangebits as i32) as u16;
+               g.xlist[g.values as usize] = get_bits(f, g.rangebits as i32) as u16;
                g.values += 1;
             }
          }
          // precompute the sorting
          let mut p : Vec<Point> = Vec::with_capacity(31*8+2);
          for j in 0 .. g.values {
-             p.push(Point{ x: g.Xlist[j as usize], y: j as u16});
+             p.push(Point{ x: g.xlist[j as usize], y: j as u16});
          }
          
          // NOTE(bungcip): using rust sort instead of libc qsort
@@ -5277,7 +5273,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          for j in 2 .. g.values {
             let mut low : i32 = 0;
             let mut hi: i32 = 0;
-            neighbors(g.Xlist.as_mut_ptr(), j, &mut low, &mut hi);
+            neighbors(g.xlist.as_mut_ptr(), j, &mut low, &mut hi);
             g.neighbors[j as usize][0] = low as u8;
             g.neighbors[j as usize][1] = hi as u8;
          }
@@ -5450,8 +5446,8 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
        let block_size_1 = f.blocksize_1;
       f.channel_buffers[i as usize] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1) as *mut f32;
       f.previous_window[i as usize] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1/2) as *mut f32;
-      f.finalY[i as usize]          = setup_malloc(f, mem::size_of::<i16>() as i32 * longest_floorlist) as *mut i16;
-      if f.channel_buffers[i as usize].is_null() || f.previous_window[i as usize].is_null() || f.finalY[i as usize].is_null() {
+      f.final_y[i as usize]          = setup_malloc(f, mem::size_of::<i16>() as i32 * longest_floorlist) as *mut i16;
+      if f.channel_buffers[i as usize].is_null() || f.previous_window[i as usize].is_null() || f.final_y[i as usize].is_null() {
           return error(f, outofmem);
       }
    }
