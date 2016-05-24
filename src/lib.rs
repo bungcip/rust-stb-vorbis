@@ -1130,7 +1130,7 @@ fn get8(z: &mut Vorbis) -> u8
 
 
 
-unsafe fn get32(f: &mut Vorbis) -> u32
+fn get32(f: &mut Vorbis) -> u32
 {
    let mut x : u32 = get8(f) as u32;
    x += (get8(f) as u32) << 8;
@@ -1177,7 +1177,7 @@ unsafe fn skip(z: &mut Vorbis, n: i32)
    f.seek(SeekFrom::Current(n as i64)).unwrap();
 }
 
-unsafe fn capture_pattern(f: &mut Vorbis) -> bool
+fn capture_pattern(f: &mut Vorbis) -> bool
 {
    if 0x4f != get8(f) {return false;}
    if 0x67 != get8(f) {return false;}
@@ -1258,12 +1258,12 @@ unsafe fn get_bits(f: &mut Vorbis, n: i32) -> u32
 
 
 
-unsafe fn start_page(f: &mut Vorbis) -> bool
+fn start_page(f: &mut Vorbis) -> bool
 {
    if capture_pattern(f) == false {
        return error(f, VorbisError::missing_capture_pattern);
    } 
-   return start_page_no_capturepattern(f);
+   return unsafe { start_page_no_capturepattern(f) };
 }
 
 
@@ -1307,7 +1307,7 @@ unsafe fn maybe_start_packet(f: &mut Vorbis) -> bool
 }
 
 
-unsafe fn next_segment(f: &mut Vorbis) -> i32
+fn next_segment(f: &mut Vorbis) -> i32
 {
     use VorbisError::continued_packet_flag_invalid;
    if f.last_seg == true {return 0;}
@@ -1965,23 +1965,27 @@ unsafe fn start_page_no_capturepattern(f: &mut Vorbis) -> bool
          f.known_loc_for_packet   = loc0;
       }
    }
-   if f.first_decode == true{
-      let mut p : ProbedPage = std::mem::zeroed();
+
+   if f.first_decode == true {
       let mut len : i32 = 0;
       for i in 0 .. f.segment_count {
          len += f.segments[i as usize] as i32;
       }
       len += 27 + f.segment_count as i32;
-      p.page_start = f.first_audio_page_offset;
-      p.page_end = p.page_start + len as u32;
-      p.last_decoded_sample = loc0;
+      
+      let p = ProbedPage {
+          page_start: f.first_audio_page_offset,
+          page_end: f.first_audio_page_offset + len as u32,
+          last_decoded_sample: loc0
+      };
+      
       f.p_first = p;
    }
    f.next_seg = 0;
    return true;
 }
 
-unsafe fn predict_point(x: i32, x0: i32 , x1: i32 , y0: i32 , y1: i32 ) -> i32
+fn predict_point(x: i32, x0: i32 , x1: i32 , y0: i32 , y1: i32 ) -> i32
 {
    let dy = y1 - y0;
    let adx = x1 - x0;
@@ -2237,7 +2241,6 @@ unsafe fn prep_huffman(f: &mut Vorbis)
 
 unsafe fn codebook_decode_scalar_raw(f: &mut Vorbis, c: &Codebook) -> i32
 {
-//    int i;
    prep_huffman(f);
 
    if c.codewords.is_null()  && c.sorted_codewords.is_null() {
@@ -2399,12 +2402,6 @@ unsafe fn compute_window(n: i32, window: *mut f32)
             ) as f32;
    }
 }
-
-// unsafe fn vorbis_alloc(f: &mut Vorbis) -> *mut Vorbis
-// {
-//    let p : *mut Vorbis = setup_malloc(f, std::mem::size_of::<Vorbis>() as i32)  as *mut Vorbis;
-//    return p;
-// }
 
 
 unsafe fn compute_samples(mask: i32, output: *mut i16, num_c: i32, data: *mut *mut f32, d_offset: i32, len: i32)
