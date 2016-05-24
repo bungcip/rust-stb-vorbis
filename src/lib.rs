@@ -20,6 +20,12 @@ extern crate libc;
 
 use libc::*;
 use std::mem;
+use std::io::BufReader;
+use std::fs::File;
+use std::io::prelude::*;
+use std::path::Path;
+use std::io::SeekFrom;
+
 
 
 // STB_VORBIS_MAX_CHANNELS [number]
@@ -346,9 +352,8 @@ pub struct Vorbis
    pub setup_temp_memory_required: u32,
 
   // input config
-   f: *mut libc::FILE,
+   f: Option<BufReader<File>>,
    f_start: u32,
-   close_on_free: bool,
 
    stream: *mut u8,
    stream_start: *mut u8,
@@ -947,7 +952,7 @@ macro_rules! LINE_OP {
 }
 
 
-unsafe fn get8(z: &mut Vorbis) -> u8
+fn get8(z: &mut Vorbis) -> u8
 {
    if USE_MEMORY!(z) {
       if z.stream >= z.stream_end { 
@@ -955,16 +960,22 @@ unsafe fn get8(z: &mut Vorbis) -> u8
           return 0;
       }
       
-      let c = *z.stream;
-      z.stream = z.stream.offset(1);
-      return c;
+      unsafe {
+        let c = *z.stream;
+        z.stream = z.stream.offset(1);
+        return c;
+      }
    }
 
-   let c = libc::fgetc(z.f);
-   if c == libc::EOF { 
-       z.eof = true; return 0; 
-    }
-   return c as u8;
+   let mut buf = [0; 1];
+   let mut f = z.f.as_mut().unwrap();
+   match f.read(&mut buf){
+       Ok(n) if n == 1 => return buf[0],
+       _ => {
+           z.eof = true;
+           return 0;
+       }
+   }
 }
 
 
@@ -991,11 +1002,14 @@ unsafe fn getn(z: &mut Vorbis, data: *mut u8, n: i32) -> bool
       return true;
    }
 
-   if libc::fread(data as *mut c_void, n as usize, 1, z.f) == 1 {
-      return true;
-   } else {
-      z.eof = true;
-      return false;
+   let mut data = std::slice::from_raw_parts_mut(data, n as usize);
+   let mut f = z.f.as_mut().unwrap();
+   match f.read_exact(&mut data) {
+       Ok(_) => return true,
+       Err(_) => {
+           z.eof = true;
+           return false;
+       }
    }
 }
 
@@ -1008,8 +1022,9 @@ unsafe fn skip(z: &mut Vorbis, n: i32)
       return;
    }
 
-   let x = libc::ftell(z.f);
-   libc::fseek(z.f, x+n, libc::SEEK_SET);
+   // file must not None
+   let mut f = z.f.as_mut().unwrap();
+   f.seek(SeekFrom::Current(n as i64)).unwrap();
 }
 
 unsafe fn capture_pattern(f: &mut Vorbis) -> bool
@@ -1223,8 +1238,7 @@ unsafe fn vorbis_init(p: &mut Vorbis, z: *const VorbisAlloc)
    p.codebooks = std::ptr::null_mut();
    p.page_crc_tests = -1;
 
-   p.close_on_free = false;
-   p.f = std::ptr::null_mut();
+   p.f = None;
 }
 
 // close an ogg vorbis file and free all memory in use
@@ -1243,67 +1257,59 @@ pub unsafe fn stb_vorbis_close(p: *mut Vorbis)
 // on failure, returns NULL and sets *error. note that stb_vorbis must "own"
 // this stream; if you seek it in between calls to stb_vorbis, it will become
 // confused.
-pub unsafe fn stb_vorbis_open_file_section(file: *mut libc::FILE, close_on_free: bool, error: *mut VorbisError, alloc: *const VorbisAlloc, length: u32) -> *mut Vorbis
+pub unsafe fn stb_vorbis_open_file_section(mut file: File,
+     alloc: *const VorbisAlloc, length: u64) -> Result<*mut Vorbis, VorbisError>
 {
     let mut p : Vorbis = std::mem::zeroed();
     
     vorbis_init(&mut p, alloc);
-   p.f = file;
-   p.f_start = ftell(file) as u32;
-   p.stream_len   = length;
-   p.close_on_free = close_on_free;
+   p.f_start = file.seek(SeekFrom::Current(0)).unwrap() as u32; // NOTE(bungcip): change it to i64/u64?
+   p.f = Some(BufReader::new(file));
+   p.stream_len   = length as u32;
     
    if start_decoder(&mut p) == true {
       let mut f = vorbis_alloc(&mut p);
       if f.is_null() == false {
          *f = p;
          vorbis_pump_first_frame(std::mem::transmute(f));
-         return f;
+         return Ok(f);
       }
    }
-   
-   if error.is_null() == false {
-       *error = p.error;
-   } 
-   vorbis_deinit(&mut p);
-   
-   return std::ptr::null_mut();
+
+   return Err(p.error);
 }
 
-
-// create an ogg vorbis decoder from an open FILE *, looking for a stream at
-// the _current_ seek point (ftell). on failure, returns NULL and sets *error.
+// create an ogg vorbis decoder from an open file handle, looking for a stream at
+// the _current_ seek point. on failure, returns NULL and sets *error.
 // note that stb_vorbis must "own" this stream; if you seek it in between
 // calls to stb_vorbis, it will become confused. Morever, if you attempt to
 // perform stb_vorbis_seek_*() operations on this file, it will assume it
 // owns the _entire_ rest of the file after the start point. Use the next
 // function, stb_vorbis_open_file_section(), to limit it.
-pub unsafe fn stb_vorbis_open_file(file: *mut FILE,  close_on_free: bool, error: *mut VorbisError, alloc: *const VorbisAlloc) -> *mut Vorbis
+pub unsafe fn stb_vorbis_open_file(mut file: File, 
+    alloc: *const VorbisAlloc) -> Result<*mut Vorbis, VorbisError>
 {
-    let start = libc::ftell(file);
-    libc::fseek(file, 0, libc::SEEK_END);
+    let start = file.seek(SeekFrom::Current(0)).unwrap();
+    let end = file.seek(SeekFrom::End(0)).unwrap();
+    let len = end - start;
     
-    let len = libc::ftell(file) - start;
-    libc::fseek(file, start, libc::SEEK_SET);
+    // seek to start position
+    file.seek(SeekFrom::Start(start)).unwrap();
     
-    return stb_vorbis_open_file_section(file, close_on_free, error, alloc, len as u32);
+    return stb_vorbis_open_file_section(file, alloc, len);
 }
 
 
-// create an ogg vorbis decoder from a filename via fopen(). on failure,
-// returns NULL and sets *error (possibly to file_open_failure).
-pub unsafe fn stb_vorbis_open_filename(filename: *const i8, error: *mut VorbisError, alloc: *const VorbisAlloc) -> *mut Vorbis
-{
-   let  mode: &'static [u8; 3] = b"rb\0";
-   let f = libc::fopen(filename, mode.as_ptr() as *const i8);
-   if f.is_null() == false {
-      return stb_vorbis_open_file(f, true, error, alloc);
-   } 
-   
-   if error.is_null() == false {
-     *error = VorbisError::file_open_failure;  
-   } 
-   return std::ptr::null_mut();
+// create an ogg vorbis decoder from a filename. on failure,
+// returns Result
+pub unsafe fn stb_vorbis_open_filename(filename: &Path, alloc: *const VorbisAlloc) -> Result<*mut Vorbis, VorbisError>
+{    
+    let file = match File::open(filename){
+        Err(_)   => return Err(VorbisError::file_open_failure),
+        Ok(file) => file
+    };
+    
+    return stb_vorbis_open_file(file, alloc);
 }
 
 
@@ -1504,13 +1510,12 @@ pub unsafe fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis, num_c: i32,
 // decoded, or -1 if the file could not be opened or was not an ogg vorbis file.
 // When you're done with it, just free() the pointer returned in *output.
 
-pub unsafe fn stb_vorbis_decode_filename(filename: *const i8, channels: *mut i32, sample_rate: *mut i32, output: *mut *mut i16) -> i32
+pub unsafe fn stb_vorbis_decode_filename(filename: &Path, channels: *mut i32, sample_rate: *mut i32, output: *mut *mut i16) -> i32
 {
-   let mut error = VorbisError::_no_error;
-   let v: *mut Vorbis = stb_vorbis_open_filename(filename, &mut error, std::ptr::null_mut());
-   if v == std::ptr::null_mut(){
-       return -1;
-   }
+   let v = match stb_vorbis_open_filename(filename, std::ptr::null_mut()){
+        Err(_) => return -1,
+        Ok(v)  => v       
+   };
    
    let v: &mut Vorbis = std::mem::transmute(v);
     
@@ -1782,11 +1787,16 @@ unsafe fn compute_accelerated_huffman(c: &mut Codebook)
 // returns the current seek point within the file, or offset from the beginning
 // of the memory buffer. In pushdata mode it returns 0.
 
-pub unsafe fn stb_vorbis_get_file_offset(f: &Vorbis) -> u32
+pub unsafe fn stb_vorbis_get_file_offset(f: &mut Vorbis) -> u32
 {
    if f.push_mode == true {return 0;}
    if USE_MEMORY!(f) {return (f.stream as usize - f.stream_start as usize) as u32;}
-   return (libc::ftell(f.f) - f.f_start as i32) as u32;
+
+   let mut file = f.f.as_mut().unwrap();
+   let current = file.seek(SeekFrom::Current(0)).unwrap();
+   
+   // NOTE(bungcip): change to u64/i64?
+   return (current as u32 - f.f_start) as u32;
 }
 
 unsafe fn start_page_no_capturepattern(f: &mut Vorbis) -> bool
@@ -2332,9 +2342,6 @@ unsafe fn vorbis_deinit(p: &mut Vorbis)
       { let x13 = p.bit_reverse[i as usize] as *mut c_void; setup_free(p, x13); }
    }
    
-   if p.close_on_free == true {
-       libc::fclose(p.f);
-   }
 }
 
 unsafe fn compute_samples(mask: i32, output: *mut i16, num_c: i32, data: *mut *mut f32, d_offset: i32, len: i32)
@@ -2849,12 +2856,16 @@ unsafe fn set_file_offset(f: &mut Vorbis, mut loc: u32) -> bool
    } else {
       loc += f.f_start;
    }
-   if libc::fseek(f.f, loc as i32, SEEK_SET) == 0{
-      return true;
+
+   let mut file = f.f.as_mut().unwrap();
+   match file.seek(SeekFrom::Start(loc as u64)) {
+       Ok(_)  => return true,
+       Err(_) => {
+           f.eof = true;
+           file.seek(SeekFrom::End(f.f_start as i64)).unwrap();
+           return false;
+       }
    }
-   f.eof = true;
-   libc::fseek(f.f, f.f_start as i32, SEEK_END);
-   return false;
 }
 
 // rarely used function to seek back to the preceeding page while finding the
