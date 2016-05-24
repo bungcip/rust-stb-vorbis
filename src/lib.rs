@@ -1865,7 +1865,8 @@ unsafe fn predict_point(x: i32, x0: i32 , x1: i32 , y0: i32 , y1: i32 ) -> i32
    let dy = y1 - y0;
    let adx = x1 - x0;
    // @OPTIMIZE: force int division to round in the right direction... is this necessary on x86?
-   let err = libc::abs(dy) * (x - x0);
+   use std::i32;
+   let err = i32::abs(dy) * (x - x0);
    let off = err / adx;
    return if dy < 0  {y0 - off} else {y0 + off};
 }
@@ -1915,9 +1916,11 @@ unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut 
 #[inline(always)]
 unsafe fn draw_line(output: *mut f32, x0: i32, y0: i32, mut x1: i32, y1: i32, n: i32)
 {
+    use std::i32;
+    
    let dy = y1 - y0;
    let adx = x1 - x0;
-   let mut ady = libc::abs(dy);
+   let mut ady = i32::abs(dy);
    let base : i32;
    let mut x: i32 = x0;
    let mut y: i32 = y0;
@@ -3588,8 +3591,13 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut Vorbis, data: *mut u8, mut dat
                      // one that straddles a boundary
       for i in 0 .. data_len {
          if *data.offset(i as isize) == 0x4f {
-            if 0 == libc::memcmp(data.offset(i as isize) as *mut c_void, OGG_PAGE_HEADER.as_ptr() as *const c_void, 4) {
-            //    int j,len;
+             let is_ogg_page_header = {
+               // NOTE(bungcip): using rust slice instead of libc::memcmp
+               let data_slice = std::slice::from_raw_parts(data.offset(i as isize), 4);
+               data_slice == OGG_PAGE_HEADER
+             };
+             
+            if is_ogg_page_header {
                let mut crc : u32;
                // make sure we have the whole page header
                if i+26 >= data_len || i + 27 + *data.offset(i as isize+26) as i32 >= data_len {
