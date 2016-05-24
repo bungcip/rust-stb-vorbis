@@ -1,6 +1,5 @@
 
 #![feature(question_mark, custom_derive, box_syntax, float_extras)]
-#![feature(alloc_system)]
 
 /**
  * Rust Stb Vorbis
@@ -14,8 +13,6 @@
  * 2016
  */
 
-
-extern crate alloc_system;
 extern crate libc;
 
 use libc::*;
@@ -292,7 +289,7 @@ pub struct Residue
 } 
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct MappingChannel
 {
    magnitude: u8,
@@ -314,7 +311,7 @@ pub struct Mapping
 
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct Mode
 {
    blockflag: u8,
@@ -326,7 +323,7 @@ pub struct Mode
 
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct CRCscan
 {
    goal_crc: u32,    // expected crc if match
@@ -337,7 +334,7 @@ pub struct CRCscan
 } 
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct ProbedPage
 {
    page_start: u32, page_end: u32,
@@ -345,8 +342,6 @@ pub struct ProbedPage
 }
  
 
-
-#[repr(C)]
 pub struct Vorbis
 {
   // user-accessible info
@@ -422,7 +417,7 @@ pub struct Vorbis
    bit_reverse: [*mut u16; 2],
 
   // current page/packet/segment streaming info
-   serial: u32, // stream serial number for verification
+//    serial: u32, // stream serial number for verification. NOTE(bungcip): not used?
    last_page: i32,
    segment_count: i32,
    segments: [u8; 255],
@@ -448,6 +443,155 @@ pub struct Vorbis
    channel_buffer_start: i32,
    channel_buffer_end: i32,
 }
+
+impl Vorbis {
+    pub fn new(z: Option<VorbisAlloc>) -> Self {
+        let alloc = match z {
+            None    => VorbisAlloc::default(),
+            Some(mut z) => {
+                z.alloc_buffer_length_in_bytes = (z.alloc_buffer_length_in_bytes+3) & !3;
+                z
+            }
+        };
+        
+        Vorbis {
+            alloc: alloc,
+            temp_offset: alloc.alloc_buffer_length_in_bytes,
+            eof: false,
+            error: VorbisError::_no_error,
+            stream: std::ptr::null_mut(),
+            codebooks: std::ptr::null_mut(),
+            page_crc_tests: -1,
+            f: None,
+            
+            // zero
+            sample_rate: 0,
+            channels: 0,
+            setup_memory_required: 0,
+            temp_memory_required: 0,
+            setup_temp_memory_required: 0,
+            f_start: 0,
+            stream_start: std::ptr::null_mut(),
+            stream_end: std::ptr::null_mut(),
+            stream_len: 0,
+            push_mode: false,
+            first_audio_page_offset: 0,
+            p_first: ProbedPage::default(), p_last: ProbedPage::default(),
+            setup_offset: 0,
+            blocksize: [0; 2],
+            blocksize_0: 0, blocksize_1: 0,
+            codebook_count: 0,
+            floor_count: 0,
+            floor_types: [0; 64], // varies
+            floor_config: std::ptr::null_mut(),
+            residue_count: 0,
+            residue_types: [0; 64], // varies
+            residue_config: std::ptr::null_mut(),
+            mapping_count: 0,
+            mapping: std::ptr::null_mut(),
+            mode_count: 0,
+            mode_config: [Mode::default(); 64],  // varies
+            total_samples: 0,
+            channel_buffers: [std::ptr::null_mut(); STB_VORBIS_MAX_CHANNELS as usize],
+            outputs        : [std::ptr::null_mut(); STB_VORBIS_MAX_CHANNELS as usize],
+            previous_window: [std::ptr::null_mut(); STB_VORBIS_MAX_CHANNELS as usize],
+            previous_length: 0,
+            final_y: [std::ptr::null_mut(); STB_VORBIS_MAX_CHANNELS as usize],
+            current_loc: 0, // sample location of next frame to decode
+            current_loc_valid: false,
+            a: [std::ptr::null_mut(); 2], b: [std::ptr::null_mut(); 2], c: [std::ptr::null_mut(); 2],
+            window: [std::ptr::null_mut(); 2],
+            bit_reverse: [std::ptr::null_mut(); 2],
+            last_page: 0,
+            segment_count: 0,
+            segments: [0; 255],
+            page_flag: 0,
+            bytes_in_seg: 0,
+            first_decode: false,
+            next_seg: 0,
+            last_seg: false,  // flag that we're on the last segment
+            last_seg_which: 0, // what was the segment number of the last seg?
+            acc: 0,
+            valid_bits: 0,
+            packet_bytes: 0,
+            end_seg_with_known_loc: 0,
+            known_loc_for_packet: 0,
+            discard_samples_deferred: 0,
+            samples_output: 0,
+            scan: [CRCscan::default(); STB_PUSHDATA_CRC_COUNT as usize],
+            channel_buffer_start: 0,
+            channel_buffer_end: 0,
+        }
+    }
+}
+
+impl Drop for Vorbis {
+    // close an ogg vorbis file and free all memory in use
+    fn drop(&mut self){
+        unsafe { 
+            let p = self;
+            if p.residue_config.is_null() == false {
+                for i in 0 .. p.residue_count {
+                    let r: &mut Residue = std::mem::transmute(p.residue_config.offset(i as isize));
+                    if r.classdata.is_null() == false {
+                        for j in 0 .. (*p.codebooks.offset(r.classbook as isize)).entries {
+                        setup_free(p, (*r.classdata.offset(j as isize)) as *mut c_void);
+                        }
+                        setup_free(p, r.classdata as *mut c_void);
+                    }
+                    setup_free(p, r.residue_books as *mut c_void);
+                }
+            }
+            if p.codebooks.is_null() == false {
+                //   CHECK!(p);
+                for i in 0 .. p.codebook_count {
+                    let c: &mut Codebook = std::mem::transmute(p.codebooks.offset(i as isize));
+                    setup_free(p, c.codeword_lengths as *mut c_void);
+                    setup_free(p, c.multiplicands as *mut c_void);
+                    setup_free(p, c.codewords as *mut c_void);
+                    setup_free(p, c.sorted_codewords as *mut c_void);
+                    // c.sorted_values[-1] is the first entry in the array
+                    setup_free(p, if c.sorted_values.is_null() == false {
+                            c.sorted_values.offset(-1)
+                        }else {
+                            std::ptr::null_mut()
+                        } as *mut c_void
+                    );
+                }
+                
+                { let x1 = p.codebooks as *mut c_void; setup_free(p, x1); }
+            }
+            
+            { let x2 = p.floor_config as *mut c_void; setup_free(p, x2); }
+            { let x3 = p.residue_config as *mut c_void; setup_free(p, x3); }
+            if p.mapping.is_null() == false {
+                for i in 0 .. p.mapping_count {
+                    { let x4 = (*p.mapping.offset(i as isize)).chan as *mut c_void; setup_free(p, x4); }
+                }
+                { let x5 = p.mapping as *mut c_void; setup_free(p, x5); }
+            }
+            //    CHECK!(p);
+                let mut i = 0;
+                while i < p.channels && i < STB_VORBIS_MAX_CHANNELS {
+                { let x6 = p.channel_buffers[i as usize] as *mut c_void; setup_free(p, x6); }
+                { let x7 = p.previous_window[i as usize] as *mut c_void; setup_free(p, x7); }
+                { let x8 = p.final_y[i as usize] as *mut c_void; setup_free(p, x8); }
+                
+                i += 1;
+            }
+            
+            for i in 0 .. 2 {
+                { let x9 = p.a[i as usize] as *mut c_void; setup_free(p, x9); }
+                { let x10 = p.b[i as usize] as *mut c_void; setup_free(p, x10); }
+                { let x11 = p.c[i as usize] as *mut c_void; setup_free(p, x11); }
+                { let x12 = p.window[i as usize] as *mut c_void; setup_free(p, x12); }
+                { let x13 = p.bit_reverse[i as usize] as *mut c_void; setup_free(p, x13); }
+            }
+            
+        }
+    }
+}
+
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -1229,34 +1373,7 @@ unsafe fn vorbis_pump_first_frame(f: &mut Vorbis)
     }
 }
 
-// NOTE(bungcip): p must be zeroed before using it
-unsafe fn vorbis_init(p: &mut Vorbis, z: Option<VorbisAlloc>)
-{
-   
-   if z.is_none() == false {
-      p.alloc = z.unwrap();
-      p.alloc.alloc_buffer_length_in_bytes = (p.alloc.alloc_buffer_length_in_bytes+3) & !3;
-      p.temp_offset = p.alloc.alloc_buffer_length_in_bytes;
-   }
-   p.eof = false;
-   p.error = VorbisError::_no_error;
-   p.stream = std::ptr::null_mut();
-   p.codebooks = std::ptr::null_mut();
-   p.page_crc_tests = -1;
 
-   p.f = None;
-}
-
-// close an ogg vorbis file and free all memory in use
-pub unsafe fn stb_vorbis_close(p: *mut Vorbis)
-{
-   if p.is_null(){
-       return;
-   }
-   
-   vorbis_deinit(std::mem::transmute(p));
-   setup_free(std::mem::transmute(p),p as *mut c_void);
-}
 
 // create an ogg vorbis decoder from an open FILE *, looking for a stream at
 // the _current_ seek point (ftell); the stream will be of length 'len' bytes.
@@ -1264,22 +1381,16 @@ pub unsafe fn stb_vorbis_close(p: *mut Vorbis)
 // this stream; if you seek it in between calls to stb_vorbis, it will become
 // confused.
 pub unsafe fn stb_vorbis_open_file_section(mut file: File,
-     alloc: Option<VorbisAlloc>, length: u64) -> Result<*mut Vorbis, VorbisError>
+     alloc: Option<VorbisAlloc>, length: u64) -> Result<Vorbis, VorbisError>
 {
-    let mut p : Vorbis = std::mem::zeroed();
-    
-    vorbis_init(&mut p, alloc);
+   let mut p = Vorbis::new(alloc);
    p.f_start = file.seek(SeekFrom::Current(0)).unwrap() as u32; // NOTE(bungcip): change it to i64/u64?
    p.f = Some(BufReader::new(file));
    p.stream_len   = length as u32;
     
    if start_decoder(&mut p) == true {
-      let mut f = vorbis_alloc(&mut p);
-      if f.is_null() == false {
-         *f = p;
-         vorbis_pump_first_frame(std::mem::transmute(f));
-         return Ok(f);
-      }
+       vorbis_pump_first_frame(&mut p);
+       return Ok(p);
    }
 
    return Err(p.error);
@@ -1293,7 +1404,7 @@ pub unsafe fn stb_vorbis_open_file_section(mut file: File,
 // owns the _entire_ rest of the file after the start point. Use the next
 // function, stb_vorbis_open_file_section(), to limit it.
 pub unsafe fn stb_vorbis_open_file(mut file: File, 
-    alloc: Option<VorbisAlloc>) -> Result<*mut Vorbis, VorbisError>
+    alloc: Option<VorbisAlloc>) -> Result<Vorbis, VorbisError>
 {
     let start = file.seek(SeekFrom::Current(0)).unwrap();
     let end = file.seek(SeekFrom::End(0)).unwrap();
@@ -1308,7 +1419,8 @@ pub unsafe fn stb_vorbis_open_file(mut file: File,
 
 // create an ogg vorbis decoder from a filename. on failure,
 // returns Result
-pub unsafe fn stb_vorbis_open_filename(filename: &Path, alloc: Option<VorbisAlloc>) -> Result<*mut Vorbis, VorbisError>
+pub unsafe fn stb_vorbis_open_filename(filename: &Path, alloc: Option<VorbisAlloc>) 
+    -> Result<Vorbis, VorbisError>
 {    
     let file = match File::open(filename){
         Err(_)   => return Err(VorbisError::file_open_failure),
@@ -1518,12 +1630,12 @@ pub unsafe fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis, num_c: i32,
 
 pub unsafe fn stb_vorbis_decode_filename(filename: &Path, channels: *mut i32, sample_rate: *mut i32, output: *mut *mut i16) -> i32
 {
-   let v = match stb_vorbis_open_filename(filename, None){
+   let mut v = match stb_vorbis_open_filename(filename, None){
         Err(_) => return -1,
-        Ok(v)  => v       
+        Ok(v)  => v
    };
    
-   let v: &mut Vorbis = std::mem::transmute(v);
+//    let v: &mut Vorbis = std::mem::transmute(v);
     
    let limit = v.channels * 4096;
    *channels = v.channels;
@@ -1536,13 +1648,13 @@ pub unsafe fn stb_vorbis_decode_filename(filename: &Path, channels: *mut i32, sa
    let mut total = limit;
    let mut data : *mut i16 = libc::malloc(total as usize * std::mem::size_of::<i16>()) as *mut i16;
    if data == std::ptr::null_mut() {
-      stb_vorbis_close(v);
+    //   stb_vorbis_close(v);
       return -2;
    }
 
    loop {
        let ch = v.channels;
-      let  n = stb_vorbis_get_frame_short_interleaved(v, ch, data.offset(offset as isize), total-offset);
+      let  n = stb_vorbis_get_frame_short_interleaved(&mut v, ch, data.offset(offset as isize), total-offset);
       if n == 0{
         break;  
       } 
@@ -1553,14 +1665,15 @@ pub unsafe fn stb_vorbis_decode_filename(filename: &Path, channels: *mut i32, sa
          let data2 = libc::realloc(data as *mut c_void, total as usize * std::mem::size_of::<i16>()) as *mut i16;
          if data2 == std::ptr::null_mut() {
             libc::free(data as *mut c_void);
-            stb_vorbis_close(v);
+            // stb_vorbis_close(v);
             return -2;
          }
          data = data2;
       }
    }
    *output = data;
-   stb_vorbis_close(v);
+//    stb_vorbis_close(v);
+    println!("BISA SAMPAI SINI");
    return data_len;
 }
 
@@ -2285,73 +2398,12 @@ unsafe fn compute_window(n: i32, window: *mut f32)
    }
 }
 
-unsafe fn vorbis_alloc(f: &mut Vorbis) -> *mut Vorbis
-{
-   let p : *mut Vorbis = setup_malloc(f, std::mem::size_of::<Vorbis>() as i32)  as *mut Vorbis;
-   return p;
-}
+// unsafe fn vorbis_alloc(f: &mut Vorbis) -> *mut Vorbis
+// {
+//    let p : *mut Vorbis = setup_malloc(f, std::mem::size_of::<Vorbis>() as i32)  as *mut Vorbis;
+//    return p;
+// }
 
-unsafe fn vorbis_deinit(p: &mut Vorbis)
-{
-   if p.residue_config.is_null() == false {
-      for i in 0 .. p.residue_count {
-         let r: &mut Residue = std::mem::transmute(p.residue_config.offset(i as isize));
-         if r.classdata.is_null() == false {
-            for j in 0 .. (*p.codebooks.offset(r.classbook as isize)).entries {
-               setup_free(p, (*r.classdata.offset(j as isize)) as *mut c_void);
-            }
-            setup_free(p, r.classdata as *mut c_void);
-         }
-         setup_free(p, r.residue_books as *mut c_void);
-      }
-   }
-   if p.codebooks.is_null() == false {
-      CHECK!(p);
-      for i in 0 .. p.codebook_count {
-         let c: &mut Codebook = std::mem::transmute(p.codebooks.offset(i as isize));
-         setup_free(p, c.codeword_lengths as *mut c_void);
-         setup_free(p, c.multiplicands as *mut c_void);
-         setup_free(p, c.codewords as *mut c_void);
-         setup_free(p, c.sorted_codewords as *mut c_void);
-         // c.sorted_values[-1] is the first entry in the array
-         setup_free(p, if c.sorted_values.is_null() == false {
-                c.sorted_values.offset(-1)
-             }else {
-                std::ptr::null_mut()
-             } as *mut c_void
-          );
-      }
-      
-      { let x1 = p.codebooks as *mut c_void; setup_free(p, x1); }
-   }
-   
-   { let x2 = p.floor_config as *mut c_void; setup_free(p, x2); }
-   { let x3 = p.residue_config as *mut c_void; setup_free(p, x3); }
-   if p.mapping.is_null() == false {
-      for i in 0 .. p.mapping_count {
-        { let x4 = (*p.mapping.offset(i as isize)).chan as *mut c_void; setup_free(p, x4); }
-      }
-      { let x5 = p.mapping as *mut c_void; setup_free(p, x5); }
-   }
-   CHECK!(p);
-    let mut i = 0;
-    while i < p.channels && i < STB_VORBIS_MAX_CHANNELS {
-      { let x6 = p.channel_buffers[i as usize] as *mut c_void; setup_free(p, x6); }
-      { let x7 = p.previous_window[i as usize] as *mut c_void; setup_free(p, x7); }
-      { let x8 = p.final_y[i as usize] as *mut c_void; setup_free(p, x8); }
-      
-      i += 1;
-   }
-   
-   for i in 0 .. 2 {
-      { let x9 = p.a[i as usize] as *mut c_void; setup_free(p, x9); }
-      { let x10 = p.b[i as usize] as *mut c_void; setup_free(p, x10); }
-      { let x11 = p.c[i as usize] as *mut c_void; setup_free(p, x11); }
-      { let x12 = p.window[i as usize] as *mut c_void; setup_free(p, x12); }
-      { let x13 = p.bit_reverse[i as usize] as *mut c_void; setup_free(p, x13); }
-   }
-   
-}
 
 unsafe fn compute_samples(mask: i32, output: *mut i16, num_c: i32, data: *mut *mut f32, d_offset: i32, len: i32)
 {
@@ -2577,17 +2629,15 @@ pub fn stb_vorbis_flush_pushdata(f: &mut Vorbis)
 // create an ogg vorbis decoder from an ogg vorbis stream in memory (note
 // this must be the entire stream!). on failure, returns NULL and sets *error
 pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: i32, error: *mut VorbisError, 
-    alloc: Option<VorbisAlloc>) -> *mut Vorbis
+    alloc: Option<VorbisAlloc>) -> Option<Vorbis>
 {
 //    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-//    stb_vorbis *f, p;
    if data.is_null() {
-     return std::ptr::null_mut();       
+     return None;       
    } 
    
-   let mut p : Vorbis = std::mem::zeroed();
-   vorbis_init(&mut p, alloc);
+    let mut p = Vorbis::new(alloc);
    
    p.stream = data as *mut u8;
    p.stream_end = data.offset(len as isize) as *mut u8;
@@ -2596,18 +2646,14 @@ pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: i32, error: *mut Vorb
    p.push_mode = false;
    
    if start_decoder(&mut p) == true {
-      let f = vorbis_alloc(&mut p);
-      if f.is_null() == false {
-         *f = p;
-         vorbis_pump_first_frame(std::mem::transmute(f));
-         return f;
-      }
+        vorbis_pump_first_frame(&mut p);
+        return Some(p);
    }
    if error.is_null() == false {
        *error = p.error;
    }
-   vorbis_deinit(&mut p);
-   return std::ptr::null_mut();
+
+   return None;
 }
 
 // decode an entire file and output the data interleaved into a malloc()ed
@@ -2619,11 +2665,11 @@ pub unsafe fn stb_vorbis_decode_memory(mem: *const u8, len: i32 , channels: *mut
 //    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut error = VorbisError::_no_error;
-   let v : *mut Vorbis = stb_vorbis_open_memory(mem, len, &mut error, None);
-   if v.is_null() {
-       return -1;
-   }
-   let v : &mut Vorbis = std::mem::transmute(v);
+   let mut v : Vorbis = match stb_vorbis_open_memory(mem, len, &mut error, None){
+       None    => return -1,
+       Some(v) => v
+   };
+//    let v : &mut Vorbis = std::mem::transmute(v);
    
    let limit : i32 = v.channels as i32 * 4096;
    *channels = v.channels;
@@ -2635,12 +2681,12 @@ pub unsafe fn stb_vorbis_decode_memory(mem: *const u8, len: i32 , channels: *mut
    let mut total = limit;
    let mut data : *mut i16 = libc::malloc( (total as usize * std::mem::size_of::<i16>()) ) as *mut i16;
    if data.is_null() {
-      stb_vorbis_close(v);
+    //   stb_vorbis_close(v);
       return -2;
    }
    loop {
        let ch = v.channels;
-      let n = stb_vorbis_get_frame_short_interleaved(v, ch, data.offset(offset as isize), total-offset);
+      let n = stb_vorbis_get_frame_short_interleaved(&mut v, ch, data.offset(offset as isize), total-offset);
       
       if n == 0 {break;}
       data_len += n;
@@ -2650,14 +2696,14 @@ pub unsafe fn stb_vorbis_decode_memory(mem: *const u8, len: i32 , channels: *mut
          let data2: *mut i16 = libc::realloc(data as *mut c_void, (total as usize * std::mem::size_of::<i16>()) ) as *mut i16;
          if data2.is_null() {
             libc::free(data as *mut c_void);
-            stb_vorbis_close(v);
+            // stb_vorbis_close(v);
             return -2;
          }
          data = data2;
       }
    }
    *output = data;
-   stb_vorbis_close(v);
+//    stb_vorbis_close(v);
    return data_len;
 }
 
@@ -3087,11 +3133,10 @@ pub unsafe fn stb_vorbis_open_pushdata(
          data: *const u8, data_len: i32, // the memory available for decoding
          data_used: *mut i32,              // only defined if result is not NULL
          error: *mut VorbisError, alloc: Option<VorbisAlloc>)
-         -> *mut Vorbis
+         -> Option<Vorbis>
 {
 
-   let mut p : Vorbis = std::mem::zeroed();
-   vorbis_init(&mut p, alloc);
+   let mut p = Vorbis::new(alloc);
    p.stream     = data as *mut u8;
    p.stream_end = data.offset(data_len as isize) as *mut u8;
    p.push_mode  = true;
@@ -3101,18 +3146,12 @@ pub unsafe fn stb_vorbis_open_pushdata(
       } else {
          *error = p.error;
       }
-      return std::ptr::null_mut();
+      return None;
    }
-   let mut f = vorbis_alloc(&mut p);
-   if f.is_null() == false {
-      *f = p;
-      *data_used = ((*f).stream as usize - data as usize) as i32;
-      *error = VorbisError::_no_error;
-      return f;
-   } else {
-      vorbis_deinit(&mut p);
-      return std::ptr::null_mut();
-   }
+   
+    *data_used = (p.stream as usize - data as usize) as i32;
+    *error = VorbisError::_no_error;
+    return Some(p);   
 }
 
 // decode a frame of audio sample data if possible from the passed-in data block
