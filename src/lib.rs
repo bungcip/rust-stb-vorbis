@@ -187,6 +187,12 @@ pub struct VorbisAlloc
    alloc_buffer_length_in_bytes: i32,
 }
 
+impl Default for VorbisAlloc {
+    fn default() -> Self {
+        VorbisAlloc { alloc_buffer: std::ptr::null(), alloc_buffer_length_in_bytes: 0 }
+    }
+}
+
 pub type CodeType = f32;
 
 // @NOTE
@@ -1224,11 +1230,11 @@ unsafe fn vorbis_pump_first_frame(f: &mut Vorbis)
 }
 
 // NOTE(bungcip): p must be zeroed before using it
-unsafe fn vorbis_init(p: &mut Vorbis, z: *const VorbisAlloc)
+unsafe fn vorbis_init(p: &mut Vorbis, z: Option<VorbisAlloc>)
 {
    
-   if z.is_null() == false {
-      p.alloc = *z;
+   if z.is_none() == false {
+      p.alloc = z.unwrap();
       p.alloc.alloc_buffer_length_in_bytes = (p.alloc.alloc_buffer_length_in_bytes+3) & !3;
       p.temp_offset = p.alloc.alloc_buffer_length_in_bytes;
    }
@@ -1258,7 +1264,7 @@ pub unsafe fn stb_vorbis_close(p: *mut Vorbis)
 // this stream; if you seek it in between calls to stb_vorbis, it will become
 // confused.
 pub unsafe fn stb_vorbis_open_file_section(mut file: File,
-     alloc: *const VorbisAlloc, length: u64) -> Result<*mut Vorbis, VorbisError>
+     alloc: Option<VorbisAlloc>, length: u64) -> Result<*mut Vorbis, VorbisError>
 {
     let mut p : Vorbis = std::mem::zeroed();
     
@@ -1287,7 +1293,7 @@ pub unsafe fn stb_vorbis_open_file_section(mut file: File,
 // owns the _entire_ rest of the file after the start point. Use the next
 // function, stb_vorbis_open_file_section(), to limit it.
 pub unsafe fn stb_vorbis_open_file(mut file: File, 
-    alloc: *const VorbisAlloc) -> Result<*mut Vorbis, VorbisError>
+    alloc: Option<VorbisAlloc>) -> Result<*mut Vorbis, VorbisError>
 {
     let start = file.seek(SeekFrom::Current(0)).unwrap();
     let end = file.seek(SeekFrom::End(0)).unwrap();
@@ -1302,7 +1308,7 @@ pub unsafe fn stb_vorbis_open_file(mut file: File,
 
 // create an ogg vorbis decoder from a filename. on failure,
 // returns Result
-pub unsafe fn stb_vorbis_open_filename(filename: &Path, alloc: *const VorbisAlloc) -> Result<*mut Vorbis, VorbisError>
+pub unsafe fn stb_vorbis_open_filename(filename: &Path, alloc: Option<VorbisAlloc>) -> Result<*mut Vorbis, VorbisError>
 {    
     let file = match File::open(filename){
         Err(_)   => return Err(VorbisError::file_open_failure),
@@ -1512,7 +1518,7 @@ pub unsafe fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis, num_c: i32,
 
 pub unsafe fn stb_vorbis_decode_filename(filename: &Path, channels: *mut i32, sample_rate: *mut i32, output: *mut *mut i16) -> i32
 {
-   let v = match stb_vorbis_open_filename(filename, std::ptr::null_mut()){
+   let v = match stb_vorbis_open_filename(filename, None){
         Err(_) => return -1,
         Ok(v)  => v       
    };
@@ -2570,7 +2576,8 @@ pub fn stb_vorbis_flush_pushdata(f: &mut Vorbis)
 
 // create an ogg vorbis decoder from an ogg vorbis stream in memory (note
 // this must be the entire stream!). on failure, returns NULL and sets *error
-pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: i32, error: *mut VorbisError, alloc: *const VorbisAlloc) -> *mut Vorbis
+pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: i32, error: *mut VorbisError, 
+    alloc: Option<VorbisAlloc>) -> *mut Vorbis
 {
 //    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -2612,7 +2619,7 @@ pub unsafe fn stb_vorbis_decode_memory(mem: *const u8, len: i32 , channels: *mut
 //    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut error = VorbisError::_no_error;
-   let v : *mut Vorbis = stb_vorbis_open_memory(mem, len, &mut error, std::ptr::null_mut());
+   let v : *mut Vorbis = stb_vorbis_open_memory(mem, len, &mut error, None);
    if v.is_null() {
        return -1;
    }
@@ -3079,7 +3086,7 @@ unsafe fn get_seek_page_info(f: &mut Vorbis, z: &mut ProbedPage) -> bool
 pub unsafe fn stb_vorbis_open_pushdata(
          data: *const u8, data_len: i32, // the memory available for decoding
          data_used: *mut i32,              // only defined if result is not NULL
-         error: *mut VorbisError, alloc: *const VorbisAlloc)
+         error: *mut VorbisError, alloc: Option<VorbisAlloc>)
          -> *mut Vorbis
 {
 
