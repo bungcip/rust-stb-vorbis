@@ -1,6 +1,6 @@
 // temporary disable lint for now...
 #![allow(non_snake_case)]
-#![allow(non_upper_case_globals)]
+// #![allow(non_upper_case_globals)]
 
 #![feature(question_mark, custom_derive, box_syntax, float_extras)]
 #![feature(alloc_system)]
@@ -56,12 +56,22 @@ const STB_PUSHDATA_CRC_COUNT : i32 = 4;
 //     to probe (and try multiple ogg vorbis files) to find the sweet spot.
 const STB_FAST_HUFFMAN_LENGTH : i32 = 10;
 
+const PACKET_ID : u8 = 1;
+// const packet_comment : u8 = 3;
+const PACKET_SETUP : u8 = 5;
 
-static mut crc_table: [u32; 256] = [0; 256];
+const PAGEFLAG_CONTINUED_PACKET : i32 =   1;
+const PAGEFLAG_FIRST_PAGE       : i32 =   2;
+const PAGEFLAG_LAST_PAGE        : i32 =   4;
+
+
+
+
+static mut CRC_TABLE: [u32; 256] = [0; 256];
 
 
 // the following table is block-copied from the specification
-static inverse_db_table: [f32; 256] =
+static INVERSE_DB_TABLE: [f32; 256] =
 [
   1.0649863e-07, 1.1341951e-07, 1.2079015e-07, 1.2863978e-07, 
   1.3699951e-07, 1.4590251e-07, 1.5538408e-07, 1.6548181e-07, 
@@ -134,7 +144,7 @@ const CP_L : i8 = (PLAYBACK_LEFT  | PLAYBACK_MONO) as i8;
 const CP_C : i8 = (PLAYBACK_LEFT  | PLAYBACK_RIGHT | PLAYBACK_MONO)  as i8;
 const CP_R : i8 = (PLAYBACK_RIGHT | PLAYBACK_MONO) as i8;
 
-static channel_position: [[i8; 6]; 7] = [
+static CHANNEL_POSITION: [[i8; 6]; 7] = [
    [ 0, 0, 0, 0, 0, 0 ],
    [ CP_C, CP_C, CP_C, CP_C, CP_C, CP_C ],
    [ CP_L, CP_R, CP_R, CP_R, CP_R, CP_R ],
@@ -144,7 +154,7 @@ static channel_position: [[i8; 6]; 7] = [
    [ CP_L, CP_C, CP_R, CP_L, CP_R, CP_C ],
 ];
 
-static ogg_page_header: [u8; 4] = [ 0x4f, 0x67, 0x67, 0x53 ];
+static OGG_PAGE_HEADER: [u8; 4] = [ 0x4f, 0x67, 0x67, 0x53 ];
 
 // normally stb_vorbis uses malloc() to allocate memory at startup,
 // and alloca() to allocate temporary memory during a frame on the
@@ -606,7 +616,7 @@ unsafe fn crc32_init()
        for _ in 0 .. 8 {
            s = (s << 1) ^ (if s >= (1u32<<31) {CRC32_POLY} else {0});
        }
-       crc_table[i as usize] = s;
+       CRC_TABLE[i as usize] = s;
    }
    
 }
@@ -748,33 +758,33 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
 
 fn ilog(n: i32) -> i32
 {
-    static log2_4: [i8; 16] = [0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];
+    static LOG2_4: [i8; 16] = [0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];
 
     let n = n as usize;
 
     // 2 compares if n < 16, 3 compares otherwise (4 if signed or n > 1<<29)
     let result = if n < (1 << 14) {
         if n < (1 << 4) {
-            0 + log2_4[n]
+            0 + LOG2_4[n]
         } else if n < (1 << 9) {
-            5 + log2_4[n >> 5]
+            5 + LOG2_4[n >> 5]
         } else {
-            10 + log2_4[n >> 10]
+            10 + LOG2_4[n >> 10]
         }
     }
     else if n < (1 << 24) {
         if n < (1 << 19) {
-            15 + log2_4[n >> 15]
+            15 + LOG2_4[n >> 15]
         }
         else {
-            20 + log2_4[n >> 20]
+            20 + LOG2_4[n >> 20]
         }
     }
     else if n < (1 << 29) {
-        25 + log2_4[n >> 25]
+        25 + LOG2_4[n >> 25]
     }
     else if n < (1 << 31) {
-        30 + log2_4[n >> 30]
+        30 + LOG2_4[n >> 30]
     }
     else {
         0 // signed n returns 0
@@ -807,8 +817,8 @@ unsafe fn compute_bitreverse(n: i32, rev: *mut u16)
 // only run while parsing the header (3 times)
 fn vorbis_validate(data: &[u8]) -> bool
 {
-    static vorbis_header: &'static [u8; 6] = b"vorbis";
-    return data == vorbis_header;
+    static VORBIS_HEADER: &'static [u8; 6] = b"vorbis";
+    return data == VORBIS_HEADER;
 }
 
 // called from setup only, once per code book
@@ -1095,17 +1105,11 @@ unsafe fn start_page(f: &mut Vorbis) -> bool
 }
 
 
-const PAGEFLAG_continued_packet : i32 =   1;
-const PAGEFLAG_first_page       : i32 =   2;
-const PAGEFLAG_last_page        : i32 =   4;
-
-
-
 unsafe fn start_packet(f: &mut Vorbis) -> bool
 {
    while f.next_seg == -1 {
       if start_page(f) == false { return false; }
-      if (f.page_flag & PAGEFLAG_continued_packet as u8) != 0 {
+      if (f.page_flag & PAGEFLAG_CONTINUED_PACKET as u8) != 0 {
          return error(f, VorbisError::continued_packet_flag_invalid);
       }
    }
@@ -1129,7 +1133,7 @@ unsafe fn maybe_start_packet(f: &mut Vorbis) -> bool
       if 0x67 != get8(f) { return error(f, missing_capture_pattern); }
       if 0x53 != get8(f) { return error(f, missing_capture_pattern); }
       if start_page_no_capturepattern(f) == false { return false; }
-      if (f.page_flag & PAGEFLAG_continued_packet as u8) != 0 {
+      if (f.page_flag & PAGEFLAG_CONTINUED_PACKET as u8) != 0 {
          // set up enough state that we can read this packet if we want,
          // e.g. during recovery
          f.last_seg = false;
@@ -1148,7 +1152,7 @@ unsafe fn next_segment(f: &mut Vorbis) -> i32
    if f.next_seg == -1 {
       f.last_seg_which = f.segment_count-1; // in case start_page fails
       if start_page(f) == false { f.last_seg = true; return 0; }
-      if (f.page_flag & PAGEFLAG_continued_packet as u8) == 0 {
+      if (f.page_flag & PAGEFLAG_CONTINUED_PACKET as u8) == 0 {
           error(f, continued_packet_flag_invalid); 
           return 0;
       }
@@ -1618,14 +1622,14 @@ const PLAYBACK_RIGHT : i32 =   4;
 unsafe fn convert_samples_short(buf_c: i32, buffer: *mut *mut i16, b_offset: i32, data_c: i32, data: *mut *mut f32, d_offset: i32, samples: i32)
 {
    if buf_c != data_c && buf_c <= 2 && data_c <= 6 {
-      static channel_selector: [[i32; 2]; 3] = [
+      static CHANNEL_SELECTOR: [[i32; 2]; 3] = [
           [0, 0],
           [PLAYBACK_MONO, PLAYBACK_MONO],
           [PLAYBACK_LEFT, PLAYBACK_RIGHT]
       ];
       
       for i in 0 .. buf_c {
-         compute_samples(channel_selector[buf_c as usize][i as usize], 
+         compute_samples(CHANNEL_SELECTOR[buf_c as usize][i as usize], 
             (*buffer.offset(i as isize)).offset(b_offset as isize), data_c, data, d_offset, samples as i32);
       }
    } else {
@@ -1894,7 +1898,7 @@ unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut 
       if lx < n2 {
          // optimization of: draw_line(target, lx,ly, n,ly, n2);
          for j in lx .. n2{
-            LINE_OP!(*target.offset(j as isize), inverse_db_table[ly as usize]);
+            LINE_OP!(*target.offset(j as isize), INVERSE_DB_TABLE[ly as usize]);
          }
          CHECK!(f);
       }
@@ -1926,7 +1930,7 @@ unsafe fn draw_line(output: *mut f32, x0: i32, y0: i32, mut x1: i32, y1: i32, n:
    
    if x1 > n {x1 = n;}
    if x < x1 {
-      LINE_OP!(*output.offset(x as isize), inverse_db_table[y as usize]);
+      LINE_OP!(*output.offset(x as isize), INVERSE_DB_TABLE[y as usize]);
       
       x += 1;
       while x < x1 {
@@ -1938,7 +1942,7 @@ unsafe fn draw_line(output: *mut f32, x0: i32, y0: i32, mut x1: i32, y1: i32, n:
          } else{
             y += base;
          }
-         LINE_OP!(*output.offset(x as isize), inverse_db_table[y as usize]);
+         LINE_OP!(*output.offset(x as isize), INVERSE_DB_TABLE[y as usize]);
          
          x += 1;
       }      
@@ -2353,7 +2357,7 @@ unsafe fn compute_samples(mask: i32, output: *mut i16, num_c: i32, data: *mut *m
           n = len - o;
       }
       for j in 0 .. num_c {
-         if (channel_position[num_c as usize][j as usize] as i32 & mask) != 0 {
+         if (CHANNEL_POSITION[num_c as usize][j as usize] as i32 & mask) != 0 {
             for i in 0 .. n {
                buffer[i as usize] += *(*data.offset(j as isize)).offset( (d_offset+o+i) as isize);
             }
@@ -2390,7 +2394,7 @@ unsafe fn compute_stereo_samples(output: *mut i16, num_c: i32, data: *mut *mut f
           n = len - o;
       }
       for j in 0 .. num_c {
-         let m : i32 = channel_position[num_c as usize][j as usize] as i32 & (PLAYBACK_LEFT | PLAYBACK_RIGHT);
+         let m : i32 = CHANNEL_POSITION[num_c as usize][j as usize] as i32 & (PLAYBACK_LEFT | PLAYBACK_RIGHT);
          if m == (PLAYBACK_LEFT | PLAYBACK_RIGHT) {
             for i in 0 .. n {
                buffer[ (i*2+0) as usize] += *(*data.offset(j as isize)).offset( (d_offset+o+i) as isize);
@@ -2905,7 +2909,7 @@ unsafe fn vorbis_find_page(f: &mut Vorbis, end: *mut u32, last: *mut u32) -> u32
          // check the rest of the header
          let mut i = 1;
          while i < 4 {
-            if get8(f) != ogg_page_header[i]{
+            if get8(f) != OGG_PAGE_HEADER[i]{
                break;
             }
              i += 1;
@@ -2916,7 +2920,7 @@ unsafe fn vorbis_find_page(f: &mut Vorbis, end: *mut u32, last: *mut u32) -> u32
             // uint32 i, crc, goal, len;
             let mut i : usize = 0;
             while i < 4 {
-               header[i] = ogg_page_header[i];
+               header[i] = OGG_PAGE_HEADER[i];
                 i += 1;
             }
             while i < 27 {
@@ -2993,7 +2997,7 @@ unsafe fn vorbis_find_page(f: &mut Vorbis, end: *mut u32, last: *mut u32) -> u32
 unsafe fn crc32_update(crc: u32, byte: u8) -> u32
 {
 //   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-   return (crc << 8) ^ crc_table[ (byte as u32 ^ (crc >> 24)) as usize];
+   return (crc << 8) ^ CRC_TABLE[ (byte as u32 ^ (crc >> 24)) as usize];
 }
 
 // given a sufficiently large block of memory, make an array of pointers to subblocks of it
@@ -3246,19 +3250,19 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: i32) -> bool
       {
           // NOTE: create slice to remove libc:memcmp usage
           let p_slice = std::slice::from_raw_parts(p, 4);
-          if p_slice ==  ogg_page_header {
+          if p_slice ==  OGG_PAGE_HEADER {
               return error(f, VorbisError::invalid_stream);
           }
       }
       if *p.offset(4) != 0                             {return error(f, VorbisError::invalid_stream);}
       if first  { // the first segment must NOT have 'continued_packet', later ones MUST
          if f.previous_length != 0 {
-            if (*p.offset(5) & PAGEFLAG_continued_packet as u8) != 0 { return error(f, VorbisError::invalid_stream);}
+            if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET as u8) != 0 { return error(f, VorbisError::invalid_stream);}
          }
          // if no previous length, we're resynching, so we can come in on a continued-packet,
          // which we'll just drop
       } else {
-         if (*p.offset(5) & PAGEFLAG_continued_packet as u8) == 0 {return error(f, VorbisError::invalid_stream);}
+         if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET as u8) == 0 {return error(f, VorbisError::invalid_stream);}
       }
       let n = *p.offset(26); // segment counts
       let q = p.offset(27);  // q points to segment table
@@ -3283,7 +3287,7 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: i32) -> bool
    return true;
 }
 
-const SAMPLE_unknown : u32 = 0xffffffff;
+const SAMPLE_UNKNOWN : u32 = 0xffffffff;
 
 
 // these functions return the total length of the vorbis stream
@@ -3357,7 +3361,7 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
       hi = get32(f);
       if lo == 0xffffffff && hi == 0xffffffff {
          f.error = cant_find_last_page;
-         f.total_samples = SAMPLE_unknown;
+         f.total_samples = SAMPLE_UNKNOWN;
         //  goto done;
         break 'done;
       }
@@ -3376,7 +3380,7 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
     //  done:
       set_file_offset(f, restore_offset);
    }
-   return if f.total_samples == SAMPLE_unknown {0} else {f.total_samples};
+   return if f.total_samples == SAMPLE_UNKNOWN {0} else {f.total_samples};
 }
 
 // implements the search logic for finding a page and starting decoding. if
@@ -3519,7 +3523,7 @@ unsafe fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
 
       start_seg_with_known_loc = i;
 
-      if start_seg_with_known_loc > 0 || (f.page_flag & PAGEFLAG_continued_packet as u8) == 0{
+      if start_seg_with_known_loc > 0 || (f.page_flag & PAGEFLAG_CONTINUED_PACKET as u8) == 0{
          break;
       }
 
@@ -3577,7 +3581,7 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut Vorbis, data: *mut u8, mut dat
                      // one that straddles a boundary
       for i in 0 .. data_len {
          if *data.offset(i as isize) == 0x4f {
-            if 0 == libc::memcmp(data.offset(i as isize) as *mut c_void, ogg_page_header.as_ptr() as *const c_void, 4) {
+            if 0 == libc::memcmp(data.offset(i as isize) as *mut c_void, OGG_PAGE_HEADER.as_ptr() as *const c_void, 4) {
             //    int j,len;
                let mut crc : u32;
                // make sure we have the whole page header
@@ -3768,8 +3772,8 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
       } else {
           let g : &Floor1 = &(*f.floor_config.offset(floor as isize)).floor1;
          if get_bits(f, 1) != 0 {
-            static range_list: [i32; 4] = [ 256, 128, 86, 64 ];
-            let range = range_list[ (g.floor1_multiplier-1) as usize];
+            static RANGE_LIST: [i32; 4] = [ 256, 128, 86, 64 ];
+            let range = RANGE_LIST[ (g.floor1_multiplier-1) as usize];
             let mut offset = 2;
             let finalY : *mut i16 = f.finalY[i as usize];
             *finalY.offset(0) = get_bits(f, ilog(range)-1) as i16;
@@ -4008,7 +4012,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
    // check if we have ogg information about the sample # for this packet
    if f.last_seg_which == f.end_seg_with_known_loc {
       // if we have a valid current loc, and this is final:
-      if f.current_loc_valid == true && (f.page_flag & PAGEFLAG_last_page as u8) != 0 {
+      if f.current_loc_valid == true && (f.page_flag & PAGEFLAG_LAST_PAGE as u8) != 0 {
          let current_end : u32 = f.known_loc_for_packet - (n-right_end) as u32;
          // then let's infer the size of the (probably) short final frame
          if current_end < f.current_loc + (right_end-left_start) as u32 {
@@ -4817,8 +4821,6 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    // this cannot POSSIBLY be in place, so we refer to the buffers directly
 
    {
-//       float *d0,*d1,*d2,*d3;
-
       let mut B = f.B[blocktype as usize].offset( (n2 - 8) as isize);
       let mut e = buf2.offset( (n2 - 8) as isize );
       let mut d0 = buffer.offset(0);
@@ -4826,8 +4828,6 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
       let mut d2 = buffer.offset( n2 as isize);
       let mut d3 = buffer.offset( (n-4) as isize);
       while e >= v {
-//          float p0,p1,p2,p3;
-
          let mut p3 =  *e.offset(6)* *B.offset(7) - *e.offset(7) * *B.offset(6);
          let mut p2 = -*e.offset(6)* *B.offset(6) - *e.offset(7) * *B.offset(7); 
 
@@ -4873,11 +4873,6 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    temp_alloc_restore!(f,save_point);
 }
 
-const packet_id : u8 = 1;
-// const packet_comment : u8 = 3;
-const packet_setup : u8 = 5;
-
-
 pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 {
     let mut header : [u8; 6] = mem::zeroed();
@@ -4892,15 +4887,15 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
    if start_page(f) == false                              {return false;} 
    // validate page flag
-   if (f.page_flag & PAGEFLAG_first_page as u8) == 0       {return error(f, invalid_first_page)}
-   if (f.page_flag & PAGEFLAG_last_page as u8) != 0           {return error(f, invalid_first_page);}
-   if (f.page_flag & PAGEFLAG_continued_packet as u8) != 0   {return error(f, invalid_first_page);}
+   if (f.page_flag & PAGEFLAG_FIRST_PAGE as u8) == 0       {return error(f, invalid_first_page)}
+   if (f.page_flag & PAGEFLAG_LAST_PAGE as u8) != 0           {return error(f, invalid_first_page);}
+   if (f.page_flag & PAGEFLAG_CONTINUED_PACKET as u8) != 0   {return error(f, invalid_first_page);}
    // check for expected packet length
    if f.segment_count != 1                       {return error(f, invalid_first_page);}
    if f.segments[0] != 30                        {return error(f, invalid_first_page);}
    // read packet
    // check packet header
-   if get8(f) != packet_id                 {return error(f, invalid_first_page);}
+   if get8(f) != PACKET_ID                 {return error(f, invalid_first_page);}
    if getn(f, header.as_mut_ptr(), 6) == false                         {return error(f, unexpected_eof);}
    if vorbis_validate(&header) == false                    {return error(f, invalid_first_page);}
    // vorbis_version
@@ -4952,7 +4947,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
    crc32_init(); // always init it, to avoid multithread race conditions
 
-   if get8_packet(f) != packet_setup as i32       {return error(f, invalid_setup);}
+   if get8_packet(f) != PACKET_SETUP as i32       {return error(f, invalid_setup);}
    for i in 0usize .. 6 {header[i] = get8_packet(f) as u8;}
    if vorbis_validate(&header) == false                    {return error(f, invalid_setup);}
 
