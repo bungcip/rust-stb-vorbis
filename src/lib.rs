@@ -1364,9 +1364,9 @@ unsafe fn vorbis_decode_packet(f: &mut Vorbis, len: &mut i32, p_left: &mut i32, 
 
 unsafe fn vorbis_pump_first_frame(f: &mut Vorbis)
 {
-    let mut len: i32 = 0;
-    let mut right: i32 = 0;
-    let mut left: i32 = 0;
+    let mut len = 0;
+    let mut right = 0;
+    let mut left = 0;
     
     if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == true {
         vorbis_finish_frame(f, len, left, right);
@@ -1623,57 +1623,56 @@ pub unsafe fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis, num_c: i32,
    return len;
 }
 
-// decode an entire file and output the data interleaved into a malloc()ed
-// buffer stored in *output. The return value is the number of samples
+// decode an entire file and output the data interleaved into 
+// buffer. The return value is the number of samples
 // decoded, or -1 if the file could not be opened or was not an ogg vorbis file.
 // When you're done with it, just free() the pointer returned in *output.
-
-pub unsafe fn stb_vorbis_decode_filename(filename: &Path, channels: *mut i32, sample_rate: *mut i32, output: *mut *mut i16) -> i32
+pub fn stb_vorbis_decode_filename(filename: &Path, 
+    channels: &mut i32, sample_rate: &mut u32, output: &mut Vec<i16>) -> i32
 {
-   let mut v = match stb_vorbis_open_filename(filename, None){
+   let mut v = unsafe { match stb_vorbis_open_filename(filename, None){
         Err(_) => return -1,
         Ok(v)  => v
-   };
+   }};
    
-//    let v: &mut Vorbis = std::mem::transmute(v);
-    
    let limit = v.channels * 4096;
+
    *channels = v.channels;
-   if sample_rate.is_null() == false {
-      *sample_rate = v.sample_rate as i32;
-   }
+   *sample_rate = v.sample_rate;
    
    let mut offset = 0;
    let mut data_len = 0;
    let mut total = limit;
-   let mut data : *mut i16 = libc::malloc(total as usize * std::mem::size_of::<i16>()) as *mut i16;
-   if data == std::ptr::null_mut() {
-    //   stb_vorbis_close(v);
-      return -2;
-   }
-
+   
+   output.resize(total as usize, 0);
+   
    loop {
        let ch = v.channels;
-      let  n = stb_vorbis_get_frame_short_interleaved(&mut v, ch, data.offset(offset as isize), total-offset);
+       let n = unsafe {
+           // TODO(bungcip): change stb_vorbis_get_frame_short_interleaved() to take mut slice
+           let output_slice = output.as_mut_slice();
+           stb_vorbis_get_frame_short_interleaved(
+               &mut v, ch, 
+               output_slice.as_mut_ptr().offset( offset as isize ), 
+               total-offset
+            )
+       };
+
       if n == 0{
         break;  
-      } 
+      }
+         
       data_len += n;
       offset += n * v.channels;
+      
       if offset + limit > total {
          total *= 2;
-         let data2 = libc::realloc(data as *mut c_void, total as usize * std::mem::size_of::<i16>()) as *mut i16;
-         if data2 == std::ptr::null_mut() {
-            libc::free(data as *mut c_void);
-            // stb_vorbis_close(v);
-            return -2;
-         }
-         data = data2;
+         output.resize(total as usize, 0);
       }
    }
-   *output = data;
-//    stb_vorbis_close(v);
-    println!("BISA SAMPAI SINI");
+
+   // resize to fit data_len
+   output.resize( (data_len * v.channels) as usize , 0);
    return data_len;
 }
 
