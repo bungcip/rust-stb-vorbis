@@ -356,9 +356,9 @@ pub struct Vorbis
    f: Option<BufReader<File>>,
    f_start: u32,
 
-   stream: *mut u8,
-   stream_start: *mut u8,
-   stream_end: *mut u8,
+   stream: *const u8,
+   stream_start: *const u8,
+   stream_end: *const u8,
 
    stream_len: u32,
 
@@ -2627,45 +2627,39 @@ pub fn stb_vorbis_flush_pushdata(f: &mut Vorbis)
 
 // create an ogg vorbis decoder from an ogg vorbis stream in memory (note
 // this must be the entire stream!). on failure, returns NULL and sets *error
-pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: i32, error: *mut VorbisError, 
+pub unsafe fn stb_vorbis_open_memory(data: &[u8], error: &mut VorbisError, 
     alloc: Option<VorbisAlloc>) -> Option<Vorbis>
 {
-//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
-   if data.is_null() {
+   if data.len() == 0 {
      return None;       
    } 
    
-    let mut p = Vorbis::new(alloc);
+   let mut p = Vorbis::new(alloc);
    
-   p.stream = data as *mut u8;
-   p.stream_end = data.offset(len as isize) as *mut u8;
+   p.stream = data.as_ptr();
+   p.stream_end = data.as_ptr().offset(data.len() as isize);
    p.stream_start = p.stream;
-   p.stream_len = len as u32;
+   p.stream_len = data.len() as u32;
    p.push_mode = false;
    
    if start_decoder(&mut p) == true {
         vorbis_pump_first_frame(&mut p);
         return Some(p);
    }
-   if error.is_null() == false {
-       *error = p.error;
-   }
-
-   return None;
+   
+    *error = p.error;
+    return None;
 }
 
 // decode an entire file and output the data interleaved into a malloc()ed
 // buffer stored in *output. The return value is the number of samples
 // decoded, or -1 if the file could not be opened or was not an ogg vorbis file.
 // When you're done with it, just free() the pointer returned in *output.
-pub fn stb_vorbis_decode_memory(mem: *const u8, len: i32,
+pub fn stb_vorbis_decode_memory(mem: &[u8],
      channels: &mut i32, sample_rate: &mut u32, output: &mut Vec<i16>) -> i32
 {
-//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
    let mut error = VorbisError::_no_error;
-   let mut v : Vorbis = unsafe { match stb_vorbis_open_memory(mem, len, &mut error, None){
+   let mut v : Vorbis = unsafe { match stb_vorbis_open_memory(mem, &mut error, None){
        None    => return -1,
        Some(v) => v
    }};

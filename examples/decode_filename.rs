@@ -29,11 +29,10 @@ fn test_decode_filename(filename: &str) -> Vec<i16> {
     return decoded;
 }
 
-unsafe fn test_decode_memory(filename: &str) -> Vec<i16> {
+fn test_decode_memory(filename: &str) -> Vec<i16> {
     println!("stb_vorbis_decode_memory(): {}", filename);
 
     //  load ogg file to memory
-    let path = Path::new(filename);
     let mut f = File::open(filename).unwrap();
     let mut buffer = Vec::new();
     f.read_to_end(&mut buffer).unwrap();
@@ -41,10 +40,8 @@ unsafe fn test_decode_memory(filename: &str) -> Vec<i16> {
     let mut channels = 0;
     let mut sample_rate = 0;
     let mut decoded: Vec<i16> = Vec::new();
-    // NOTE(bungcip): change stb_vorbis_decode_memory() to take slice
     let len = stb_vorbis::stb_vorbis_decode_memory(
-        buffer.as_ptr(),
-        buffer.len() as i32,
+        &buffer,
         &mut channels,
         &mut sample_rate,
         &mut decoded
@@ -67,7 +64,7 @@ fn main() {
     let mut output = File::create(output).unwrap();
 
     let data1 = test_decode_filename(filename);
-    let data2 = unsafe { test_decode_memory(filename) }; 
+    let data2 = test_decode_memory(filename); 
 
     // must be same
     if data1 != data2 {
