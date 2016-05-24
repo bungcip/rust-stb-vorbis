@@ -6,11 +6,7 @@ use std::path::Path;
 use std::mem;
 
 // stb_vorbis_decode_filename: decode an entire file to interleaved shorts
-fn test_decode_filename(mut f: File, filename: &str)
-{
-   let mut channels = 0;
-   let mut sample_rate = 0;
-   
+fn test_decode_filename(filename: &str) -> Vec<i16> {
     // pause
     // println!("PAUSE......");
     // let mut input_text = String::new();
@@ -18,38 +14,76 @@ fn test_decode_filename(mut f: File, filename: &str)
     //     .read_line(&mut input_text)
     //     .expect("failed to read from stdin");
 
-   let mut decoded : Vec<i16> = Vec::new();
-   let path = Path::new(filename);
-   let len = stb_vorbis::stb_vorbis_decode_filename(
-       &path, 
-       &mut channels, 
-       &mut sample_rate, 
-       &mut decoded
-    );
-   
-   println!("decode success, len: {} bytes, buffer length: {} elements", len, decoded.len());
-   
-   let bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(
-            decoded.as_ptr() as *const u8, 
-            decoded.len() * mem::size_of::<i16>()
-        )
-    };
-   
-   f.write_all(bytes).unwrap();
-   println!("write success");
+    println!("stb_vorbis_decode_filename(): {}", filename);
+
+    let mut channels = 0;
+    let mut sample_rate = 0;
+    let mut decoded: Vec<i16> = Vec::new();
+    let path = Path::new(filename);
+    let len = stb_vorbis::stb_vorbis_decode_filename(&path,
+        &mut channels,
+        &mut sample_rate,
+        &mut decoded);
+
+    println!("    decode success, len: {} bytes, buffer length: {} elements", len, decoded.len());
+    return decoded;
 }
 
+unsafe fn test_decode_memory(filename: &str) -> Vec<i16> {
+    println!("stb_vorbis_decode_memory(): {}", filename);
 
-fn main(){
-    let args : Vec<String> = std::env::args().collect();
+    //  load ogg file to memory
+    let path = Path::new(filename);
+    let mut f = File::open(filename).unwrap();
+    let mut buffer = Vec::new();
+    f.read_to_end(&mut buffer).unwrap();
+
+    let mut channels = 0;
+    let mut sample_rate = 0;
+    let mut decoded: Vec<i16> = Vec::new();
+    // NOTE(bungcip): change stb_vorbis_decode_memory() to take slice
+    let len = stb_vorbis::stb_vorbis_decode_memory(
+        buffer.as_ptr(),
+        buffer.len() as i32,
+        &mut channels,
+        &mut sample_rate,
+        &mut decoded
+    );
+
+    println!("    decode success, len: {} bytes, buffer length: {} elements",
+        len,
+        decoded.len());
+        
+    return decoded;
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
     let filename = &args[1];
 
     // let input_path = Path::new(&filename);
     let output = &args[2];
     let output = Path::new(&output);
-    let output = File::create(output).unwrap();
-    
-    println!("decode filename {}", filename);
-    test_decode_filename(output, filename);
+    let mut output = File::create(output).unwrap();
+
+    let data1 = test_decode_filename(filename);
+    let data2 = unsafe { test_decode_memory(filename) }; 
+
+    // must be same
+    if data1 != data2 {
+        println!("Error: decode_filename() != decode_memory");
+        std::process::exit(1);
+    }
+
+    // write to file
+    let bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            data1.as_ptr() as *const u8,
+            data1.len() * mem::size_of::<i16>()
+        )
+    };
+
+    output.write_all(bytes).unwrap();
+    // println!("write success");
+
 }

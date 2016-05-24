@@ -2659,51 +2659,56 @@ pub unsafe fn stb_vorbis_open_memory(data: *const u8, len: i32, error: *mut Vorb
 // buffer stored in *output. The return value is the number of samples
 // decoded, or -1 if the file could not be opened or was not an ogg vorbis file.
 // When you're done with it, just free() the pointer returned in *output.
-pub unsafe fn stb_vorbis_decode_memory(mem: *const u8, len: i32 , channels: *mut i32, sample_rate: *mut i32, output: *mut *mut i16) -> i32
+pub fn stb_vorbis_decode_memory(mem: *const u8, len: i32,
+     channels: &mut i32, sample_rate: &mut u32, output: &mut Vec<i16>) -> i32
 {
 //    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let mut error = VorbisError::_no_error;
-   let mut v : Vorbis = match stb_vorbis_open_memory(mem, len, &mut error, None){
+   let mut v : Vorbis = unsafe { match stb_vorbis_open_memory(mem, len, &mut error, None){
        None    => return -1,
        Some(v) => v
-   };
-//    let v : &mut Vorbis = std::mem::transmute(v);
+   }};
    
-   let limit : i32 = v.channels as i32 * 4096;
+   let limit = v.channels * 4096;
    *channels = v.channels;
-   if sample_rate.is_null() == false {
-      *sample_rate = v.sample_rate as i32;
-   }
+   *sample_rate = v.sample_rate;
+   
    let mut offset = 0;
    let mut data_len = 0;
    let mut total = limit;
-   let mut data : *mut i16 = libc::malloc( (total as usize * std::mem::size_of::<i16>()) ) as *mut i16;
-   if data.is_null() {
-    //   stb_vorbis_close(v);
-      return -2;
-   }
+   
+   output.resize(total as usize, 0);
+   
    loop {
        let ch = v.channels;
-      let n = stb_vorbis_get_frame_short_interleaved(&mut v, ch, data.offset(offset as isize), total-offset);
-      
-      if n == 0 {break;}
+       let n = unsafe {
+           // TODO(bungcip): change stb_vorbis_get_frame_short_interleaved() to take mut slice
+           let output_slice = output.as_mut_slice();
+           stb_vorbis_get_frame_short_interleaved(
+               &mut v, ch, 
+               output_slice.as_mut_ptr().offset( offset as isize ), 
+               total-offset
+            )
+       };
+
+      if n == 0{
+        break;  
+      }
+         
       data_len += n;
       offset += n * v.channels;
+      
       if offset + limit > total {
          total *= 2;
-         let data2: *mut i16 = libc::realloc(data as *mut c_void, (total as usize * std::mem::size_of::<i16>()) ) as *mut i16;
-         if data2.is_null() {
-            libc::free(data as *mut c_void);
-            // stb_vorbis_close(v);
-            return -2;
-         }
-         data = data2;
+         output.resize(total as usize, 0);
       }
    }
-   *output = data;
-//    stb_vorbis_close(v);
+
+   // resize to fit data_len
+   output.resize( (data_len * v.channels) as usize , 0);
    return data_len;
+
 }
 
 // gets num_samples samples, not necessarily on a frame boundary--this requires
