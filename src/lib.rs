@@ -1605,15 +1605,19 @@ unsafe fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -
 //        k    l      k <= l, the first k channels
 //    Note that this is not _good_ surround etc. mixing at all! It's just so
 //    you get something useful.
-pub unsafe fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis, num_c: i32, buffer: *mut i16, num_shorts: i32) -> i32
+pub fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis, 
+    num_c: i32, buffer: &mut [i16]) -> i32
 {
-   let mut output: *mut *mut f32 = std::ptr::null_mut();
-   let mut buffer = buffer;
-   
+    unsafe {
    if num_c == 1 {
-       return stb_vorbis_get_frame_short(f, num_c, &mut buffer, num_shorts);
+       return stb_vorbis_get_frame_short(f, num_c, buffer);
    }
+   
+   let mut output: *mut *mut f32 = std::ptr::null_mut();
+   let num_shorts = buffer.len() as i32;
+   let buffer =  buffer.as_mut_ptr();
    let mut len = stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut output);
+   
    if len != 0 {
       if len*num_c > num_shorts {
         len = num_shorts / num_c;  
@@ -1621,6 +1625,7 @@ pub unsafe fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis, num_c: i32,
       convert_channels_short_interleaved(num_c, buffer, f.channels, output, 0, len);
    }
    return len;
+   }
 }
 
 // decode an entire file and output the data interleaved into 
@@ -1635,26 +1640,23 @@ pub fn stb_vorbis_decode_filename(filename: &Path,
         Ok(v)  => v
    }};
    
-   let limit = v.channels * 4096;
-
    *channels = v.channels;
    *sample_rate = v.sample_rate;
    
    let mut offset = 0;
    let mut data_len = 0;
+   let limit = v.channels as usize * 4096;
    let mut total = limit;
    
    output.resize(total as usize, 0);
    
    loop {
        let ch = v.channels;
-       let n = unsafe {
-           // TODO(bungcip): change stb_vorbis_get_frame_short_interleaved() to take mut slice
-           let output_slice = output.as_mut_slice();
+       let n = {
+           let mut output_slice = output.as_mut_slice();
            stb_vorbis_get_frame_short_interleaved(
                &mut v, ch, 
-               output_slice.as_mut_ptr().offset( offset as isize ), 
-               total-offset
+               &mut output_slice[ offset .. total ]
             )
        };
 
@@ -1663,7 +1665,7 @@ pub fn stb_vorbis_decode_filename(filename: &Path,
       }
          
       data_len += n;
-      offset += n * v.channels;
+      offset += n as usize * v.channels as usize;
       
       if offset + limit > total {
          total *= 2;
@@ -1718,16 +1720,17 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis, channels: *mut i32, out
    return len;
 }
 
-pub unsafe fn stb_vorbis_get_frame_short(f: &mut Vorbis, num_c: i32, buffer: *mut *mut i16, num_samples: i32) -> i32
+pub unsafe fn stb_vorbis_get_frame_short(f: &mut Vorbis, num_c: i32, sample_buffer: &mut [i16]) -> i32
 {
     let mut output: *mut *mut f32 = std::ptr::null_mut();
    let mut len = stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut output);
-   if len > num_samples{
-     len = num_samples;
+   if len > sample_buffer.len() as i32 {
+     len = sample_buffer.len() as i32;
    }
    
     if len != 0 {
-      convert_samples_short(num_c, buffer, 0, f.channels, output, 0, len);
+      let mut sample_buffer_ptr = sample_buffer.as_mut_ptr();
+      convert_samples_short(num_c, &mut sample_buffer_ptr, 0, f.channels, output, 0, len);
     }
    return len;
 }
@@ -2664,25 +2667,23 @@ pub fn stb_vorbis_decode_memory(mem: &[u8],
        Some(v) => v
    }};
    
-   let limit = v.channels * 4096;
    *channels = v.channels;
    *sample_rate = v.sample_rate;
    
    let mut offset = 0;
    let mut data_len = 0;
+   let limit = v.channels as usize * 4096;
    let mut total = limit;
    
    output.resize(total as usize, 0);
    
    loop {
        let ch = v.channels;
-       let n = unsafe {
-           // TODO(bungcip): change stb_vorbis_get_frame_short_interleaved() to take mut slice
-           let output_slice = output.as_mut_slice();
+       let n = {
+           let mut output_slice = output.as_mut_slice();
            stb_vorbis_get_frame_short_interleaved(
                &mut v, ch, 
-               output_slice.as_mut_ptr().offset( offset as isize ), 
-               total-offset
+               &mut output_slice[ offset .. total ]
             )
        };
 
@@ -2691,7 +2692,7 @@ pub fn stb_vorbis_decode_memory(mem: &[u8],
       }
          
       data_len += n;
-      offset += n * v.channels;
+      offset += n as usize * v.channels as usize;
       
       if offset + limit > total {
          total *= 2;
