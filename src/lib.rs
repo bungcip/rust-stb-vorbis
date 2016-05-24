@@ -659,9 +659,8 @@ fn float32_unpack(x: u32) -> f32
 // vorbis allows a huffman table with non-sorted lengths. This
 // requires a more sophisticated construction, since symbols in
 // order do not map to huffman codes "in order".
-unsafe fn add_entry(c: &Codebook, huff_code: u32, symbol: i32, count: i32, len: i32, values: *mut u32)
+unsafe fn add_entry(c: &Codebook, huff_code: u32, symbol: i32, count: i32, len: u8, values: *mut u32)
 {
-    // TODO(bungcip): maybe change len as u8?
     // TODO(bungcip): maybe symbol len as u32?
     
    if c.sparse == false {
@@ -669,7 +668,7 @@ unsafe fn add_entry(c: &Codebook, huff_code: u32, symbol: i32, count: i32, len: 
    } else {
       let count = count as isize;
       *c.codewords.offset(count) = huff_code;
-      *c.codeword_lengths.offset(count) = len as u8;
+      *c.codeword_lengths.offset(count) = len;
       *values.offset(count) = symbol as u32;
    }
 }
@@ -691,7 +690,7 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
    
    // add to the list
    let mut m=0;
-   add_entry(c, 0, k, m, *len.offset(k as isize) as i32, values);
+   add_entry(c, 0, k, m, *len.offset(k as isize), values);
    m += 1;
    
    // add all available leaves
@@ -725,7 +724,7 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
       res = available[z as usize];
       assert!(z < 32); // NOTE(z is u8 so negative is impossible)
       available[z as usize] = 0;
-      add_entry(c, bit_reverse(res), i, m, *len.offset(i as isize) as i32, values);
+      add_entry(c, bit_reverse(res), i, m, *len.offset(i as isize), values);
       m += 1;
       
       // propogate availability up the tree
@@ -3244,13 +3243,17 @@ unsafe fn is_whole_packet_present(f: &mut stb_vorbis, end_page: i32) -> bool
    }
    
    while s == -1 {
-    //   uint8 *q; 
-    //   int n;
-
       // check that we have the page header ready
       if p.offset(26) >= f.stream_end               {return error(f, VorbisError::need_more_data);}
+      
       // validate the page
-      if libc::memcmp(p as *const c_void, ogg_page_header.as_ptr() as *const c_void, 4) != 0         {return error(f, VorbisError::invalid_stream);}
+      {
+          // NOTE: create slice to remove libc:memcmp usage
+          let p_slice = std::slice::from_raw_parts(p, 4);
+          if p_slice ==  ogg_page_header {
+              return error(f, VorbisError::invalid_stream);
+          }
+      }
       if *p.offset(4) != 0                             {return error(f, VorbisError::invalid_stream);}
       if first  { // the first segment must NOT have 'continued_packet', later ones MUST
          if f.previous_length != 0 {
