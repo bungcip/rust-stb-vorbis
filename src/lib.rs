@@ -3129,14 +3129,14 @@ unsafe fn get_seek_page_info(f: &mut Vorbis, z: &mut ProbedPage) -> bool
 //       incomplete and you need to pass in a larger block from the start of the file
 pub unsafe fn stb_vorbis_open_pushdata(
          data: *const u8, data_len: i32, // the memory available for decoding
-         data_used: *mut i32,              // only defined if result is not NULL
-         error: *mut VorbisError, alloc: Option<VorbisAlloc>)
+         data_used: &mut i32,              // only defined if result is not NULL
+         error: &mut VorbisError, alloc: Option<VorbisAlloc>)
          -> Option<Vorbis>
 {
 
    let mut p = Vorbis::new(alloc);
-   p.stream     = data as *mut u8;
-   p.stream_end = data.offset(data_len as isize) as *mut u8;
+   p.stream     = data;
+   p.stream_end = data.offset(data_len as isize);
    p.push_mode  = true;
    if start_decoder(&mut p) == false {
       if p.eof == true {

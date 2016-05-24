@@ -26,48 +26,58 @@ oggs = ['stereo_short', 'mono']
 #print("run stb_vorbic C...")
 #for o in oggs:
 #    subprocess.call(["vorvis-sample.exe", "1", "ogg/{}.ogg".format(o), "c_output/[decode_filename]_{}.out".format(o)])
+#    subprocess.call(["vorvis-sample.exe", "5", "ogg/{}.ogg".format(o), "c_output/[decode_frame_pushdata]_{}.out".format(o)])
+
+binaries = [
+   "decode_filename",
+#    "decode_frame_pushdata",
+]
 
 # compile rust port
 print("compile stb_vorbis rust example...")
-result = subprocess.call(["cargo", "build", "--example", "decode_filename"])
+for bin in binaries:
+    result = subprocess.call(["cargo", "build", "--example", bin])
+    if result != 0:
+        sys.exit()
 
-if result != 0:
-    sys.exit()
-
-
-executable = "../target/debug/examples/decode_filename.exe"
 
 # test output file size
 # test output file hash
 print("check output file size & hash")
 
-for i in oggs:
-    filename = "[decode_filename]_{}.out".format(i)
-    c_name = os.path.join('c_output', filename)
-    rust_name = os.path.join('rust_output', filename)
+for bin in binaries:
+    executable = "../target/debug/examples/{}.exe".format(bin)
+    prefix_output = "[{}]".format(bin)
 
-    try:
-        input = "ogg/{}.ogg".format(i)
-        return_value = subprocess.call([executable, input, rust_name])
-        if return_value != 0:
-            print("stoped due to error...")
+    print("TESTING {}".format(bin))
+
+    for i in oggs:
+        filename = "{}_{}.out".format(prefix_output, i)
+        c_name = os.path.join('c_output', filename)
+        rust_name = os.path.join('rust_output', filename)
+
+        try:
+            input = "ogg/{}.ogg".format(i)
+            return_value = subprocess.call([executable, input, rust_name])
+            if return_value != 0:
+                print("stoped due to error...")
+                sys.exit()
+        except:
+            print("error happened")
             sys.exit()
-    except:
-        print("error happened")
-        sys.exit()
 
 
-    c_size = os.path.getsize(c_name)
-    rust_size = os.path.getsize(rust_name)
-    if c_size != rust_size:
-        print("  [WRONG] size of rust different with original stb_vorbis! filename: {}, size: {}".format(filename, rust_size))
-        sys.exit()
+        c_size = os.path.getsize(c_name)
+        rust_size = os.path.getsize(rust_name)
+        if c_size != rust_size:
+            print("  [WRONG] size of rust different with original stb_vorbis! filename: {}, size: {}".format(filename, rust_size))
+            sys.exit()
 
-    c_md5 = md5(c_name)
-    rust_md5 = md5(rust_name)
-    if c_md5 != rust_md5:
-        print("  [WRONG] rust output have wrong hash! filename: {}, size: {}".format(filename, rust_size))
-        sys.exit()
+        c_md5 = md5(c_name)
+        rust_md5 = md5(rust_name)
+        if c_md5 != rust_md5:
+            print("  [WRONG] rust output have wrong hash! filename: {}, size: {}".format(filename, rust_size))
+            sys.exit()
 
-    print("  {} [OK]".format(filename))
+        print("  {} [OK]".format(filename))
 
