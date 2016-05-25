@@ -1622,23 +1622,23 @@ unsafe fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -
 //    Note that this is not _good_ surround etc. mixing at all! It's just so
 //    you get something useful.
 pub fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis, 
-    num_c: i32, buffer: &mut [i16]) -> i32
+    channel_count: i32, buffer: &mut [i16]) -> i32
 {
     unsafe {
-   if num_c == 1 {
-       return stb_vorbis_get_frame_short(f, num_c, buffer);
+   if channel_count == 1 {
+       return stb_vorbis_get_frame_short(f, channel_count, buffer);
    }
    
    let mut output: *mut *mut f32 = std::ptr::null_mut();
    let num_shorts = buffer.len() as i32;
    let buffer =  buffer.as_mut_ptr();
-   let mut len = stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut output);
+   let mut len = stb_vorbis_get_frame_float(f, None, &mut output);
    
    if len != 0 {
-      if len*num_c > num_shorts {
-        len = num_shorts / num_c;  
+      if len*channel_count > num_shorts {
+        len = num_shorts / channel_count;  
       } 
-      convert_channels_short_interleaved(num_c, buffer, f.channels, output, 0, len);
+      convert_channels_short_interleaved(channel_count, buffer, f.channels, output, 0, len);
    }
    return len;
    }
@@ -1703,7 +1703,8 @@ pub fn stb_vorbis_decode_filename(filename: &Path,
 //
 // You generally should not intermix calls to stb_vorbis_get_frame_*()
 // and stb_vorbis_get_samples_*(), since the latter calls the former.
-pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis, channels: *mut i32, output: *mut *mut *mut f32) -> i32
+pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis, 
+    channel_count: Option<&mut i32>, output: *mut *mut *mut f32) -> i32
 {
    if IS_PUSH_MODE!(f){
        error(f, VorbisError::invalid_api_mixing);
@@ -1713,6 +1714,7 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis, channels: *mut i32, out
     let mut len = 0;
     let mut left = 0;
     let mut right = 0;
+    
    if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == false {
       f.channel_buffer_start = 0;
       f.channel_buffer_end = 0;
@@ -1727,7 +1729,10 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis, channels: *mut i32, out
    f.channel_buffer_start = left;
    f.channel_buffer_end   = left+len;
 
-   if channels.is_null() == false {*channels = f.channels;}
+   if let Some(channel_count) = channel_count {
+       *channel_count = f.channels;
+   }
+
    if output.is_null() == false   {
        let o = f.outputs.as_ptr();
        let o = o as *mut *mut f32;
@@ -1739,7 +1744,7 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis, channels: *mut i32, out
 pub unsafe fn stb_vorbis_get_frame_short(f: &mut Vorbis, num_c: i32, sample_buffer: &mut [i16]) -> i32
 {
     let mut output: *mut *mut f32 = std::ptr::null_mut();
-   let mut len = stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut output);
+   let mut len = stb_vorbis_get_frame_float(f, None, &mut output);
    if len > sample_buffer.len() as i32 {
      len = sample_buffer.len() as i32;
    }
@@ -1851,7 +1856,7 @@ pub unsafe fn stb_vorbis_seek(f: &mut Vorbis, sample_number: u32) -> bool
    if sample_number != f.current_loc {
       let mut n = 0;
       let frame_start = f.current_loc;
-      stb_vorbis_get_frame_float(f, &mut n, std::ptr::null_mut());
+      stb_vorbis_get_frame_float(f, Some(&mut n), std::ptr::null_mut());
       assert!(sample_number > frame_start);
       assert!(f.channel_buffer_start + (sample_number-frame_start) as i32 <= f.channel_buffer_end);
       f.channel_buffer_start += (sample_number - frame_start) as i32;
@@ -2763,7 +2768,7 @@ pub unsafe fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffe
       if n == num_samples{
          break;
       }
-      if stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut outputs) == 0 {
+      if stb_vorbis_get_frame_float(f, None, &mut outputs) == 0 {
          break;
       }
    }
@@ -2806,7 +2811,7 @@ pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut Vorbis, channels:
       if n == len{
          break;
       }
-      if stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut outputs) == 0{
+      if stb_vorbis_get_frame_float(f, None, &mut outputs) == 0{
          break;
       }
    }
@@ -2838,7 +2843,7 @@ pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer
       n += k;
       f.channel_buffer_start += k;
       if n == len{ break;}
-      if stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut outputs) == 0 {break;}
+      if stb_vorbis_get_frame_float(f, None, &mut outputs) == 0 {break;}
    }
    return n;
 }
@@ -2868,7 +2873,7 @@ pub unsafe fn stb_vorbis_get_samples_short_interleaved(f: &mut Vorbis, channels:
       n += k;
       f.channel_buffer_start += k;
       if n == len{ break;}
-      if stb_vorbis_get_frame_float(f, std::ptr::null_mut(), &mut outputs) == 0 {break;}
+      if stb_vorbis_get_frame_float(f, None, &mut outputs) == 0 {break;}
    }
    return n;
 }
