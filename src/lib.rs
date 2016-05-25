@@ -156,6 +156,67 @@ static CHANNEL_POSITION: [[i8; 6]; 7] = [
 
 static OGG_PAGE_HEADER: [u8; 4] = [ 0x4f, 0x67, 0x67, 0x53 ];
 
+
+/// macro to force rust to borrow 
+macro_rules! FORCE_BORROW_MUT {
+    ($e: expr) => {{
+        // satify borrow checker
+        let p = $e;
+        let p = p as *mut _;
+        mem::transmute(p)
+    }}
+}
+
+macro_rules! USE_MEMORY {
+    ($z: expr) => {
+        $z.stream.is_null() == false
+    }
+}
+
+macro_rules! IS_PUSH_MODE {
+    ($f: expr) => {
+        $f.push_mode == true
+    }
+}
+
+macro_rules! MAGIC {
+    ($SHIFT: expr) => { (1.5f32 * (1 << (23-$SHIFT)) as f32 + 0.5f32/(1 << $SHIFT) as f32) }
+}
+
+macro_rules! ADDEND {
+    ($SHIFT: expr) => { (((150-$SHIFT) << 23) + (1 << 22) ) }
+}
+
+macro_rules! FAST_SCALED_FLOAT_TO_INT {
+    ($x: expr, $s: expr) => {{
+        let temp : i32 = $crate::std::mem::transmute($x + MAGIC!($s));
+        temp - ADDEND!($s)        
+    }}
+}
+
+macro_rules! CHECK {
+    ($f: expr) => {
+        // assert!( $f.channel_buffers[1].is_null() == false );
+    }
+}
+
+// @OPTIMIZE: if you want to replace this bresenham line-drawing routine,
+// note that you must produce bit-identical output to decode correctly;
+// this specific sequence of operations is specified in the spec (it's
+// drawing integer-quantized frequency-space lines that the encoder
+// expects to be exactly the same)
+//     ... also, isn't the whole point of Bresenham's algorithm to NOT
+// have to divide in the setup? sigh
+macro_rules! LINE_OP {
+    ($a: expr, $b: expr) => {
+        $a *= $b
+    }
+}
+
+
+
+
+
 // normally stb_vorbis uses malloc() to allocate memory at startup,
 // and alloca() to allocate temporary memory during a frame on the
 // stack. (Memory consumption will depend on the amount of setup
@@ -1055,53 +1116,6 @@ fn neighbors(x: *mut u16, n: i32, plow: *mut i32, phigh: *mut i32)
 }
 
 
-macro_rules! USE_MEMORY {
-    ($z: expr) => {
-        $z.stream.is_null() == false
-    }
-}
-
-macro_rules! IS_PUSH_MODE {
-    ($f: expr) => {
-        $f.push_mode == true
-    }
-}
-
-macro_rules! MAGIC {
-    ($SHIFT: expr) => { (1.5f32 * (1 << (23-$SHIFT)) as f32 + 0.5f32/(1 << $SHIFT) as f32) }
-}
-
-macro_rules! ADDEND {
-    ($SHIFT: expr) => { (((150-$SHIFT) << 23) + (1 << 22) ) }
-}
-
-macro_rules! FAST_SCALED_FLOAT_TO_INT {
-    ($x: expr, $s: expr) => {{
-        let temp : i32 = $crate::std::mem::transmute($x + MAGIC!($s));
-        temp - ADDEND!($s)        
-    }}
-}
-
-macro_rules! CHECK {
-    ($f: expr) => {
-        // assert!( $f.channel_buffers[1].is_null() == false );
-    }
-}
-
-// @OPTIMIZE: if you want to replace this bresenham line-drawing routine,
-// note that you must produce bit-identical output to decode correctly;
-// this specific sequence of operations is specified in the spec (it's
-// drawing integer-quantized frequency-space lines that the encoder
-// expects to be exactly the same)
-//     ... also, isn't the whole point of Bresenham's algorithm to NOT
-// have to divide in the setup? sigh
-macro_rules! LINE_OP {
-    ($a: expr, $b: expr) => {
-        $a *= $b
-    }
-}
-
-
 fn get8(z: &mut Vorbis) -> u8
 {
    if USE_MEMORY!(z) {
@@ -1139,22 +1153,24 @@ fn get32(f: &mut Vorbis) -> u32
    return x;
 }
 
-
-unsafe fn getn(z: &mut Vorbis, data: *mut u8, n: i32) -> bool
+/// get from stream/file and copy to data
+fn getn(z: &mut Vorbis, data: &mut [u8]) -> bool
 {
    if USE_MEMORY!(z) {
-      if z.stream.offset(n as isize) > z.stream_end { 
-          z.eof = true; 
-          return false;
+      unsafe {
+        let n = data.len();
+        if z.stream.offset(n as isize) > z.stream_end { 
+            z.eof = true; 
+            return false;
+        }
+        std::ptr::copy_nonoverlapping(z.stream, data.as_mut_ptr(), n);
+        z.stream = z.stream.offset(n as isize);
+        return true;
       }
-      std::ptr::copy_nonoverlapping(z.stream, data, n as usize);
-      z.stream = z.stream.offset(n as isize);
-      return true;
    }
 
-   let mut data = std::slice::from_raw_parts_mut(data, n as usize);
    let mut f = z.f.as_mut().unwrap();
-   match f.read_exact(&mut data) {
+   match f.read_exact(data) {
        Ok(_) => return true,
        Err(_) => {
            z.eof = true;
@@ -1941,9 +1957,11 @@ unsafe fn start_page_no_capturepattern(f: &mut Vorbis) -> bool
    get32(f);
    // page_segments
    f.segment_count = get8(f) as i32;
-   let sc = f.segment_count;
-   let segments_ptr = (&mut f.segments).as_mut_ptr();
-   if getn(f, segments_ptr, sc) == false {
+   let segments_slice = {
+       let sc = f.segment_count as usize;
+       FORCE_BORROW_MUT!(&mut f.segments[0 .. sc])
+   };
+   if getn(f, segments_slice) == false {
       return error(f, unexpected_eof);
    }
    // assume we _don't_ know any the sample position of any segments
@@ -2636,10 +2654,10 @@ pub unsafe fn stb_vorbis_open_memory(data: &[u8], error: &mut VorbisError,
    
    let mut p = Vorbis::new(alloc);
    
+   p.stream_len = data.len() as u32;
    p.stream = data.as_ptr();
    p.stream_end = data.as_ptr().offset(data.len() as isize);
    p.stream_start = p.stream;
-   p.stream_len = data.len() as u32;
    p.push_mode = false;
    
    if start_decoder(&mut p) == true {
@@ -2859,7 +2877,6 @@ pub unsafe fn stb_vorbis_get_samples_short_interleaved(f: &mut Vorbis, channels:
 unsafe fn peek_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mut i32, p_right_start: &mut i32, p_right_end: &mut i32, mode: &mut i32) -> bool
 {
 //   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-//    int bits_read, bytes_read;
 
    if vorbis_decode_initial(f, p_left_start, p_left_end, p_right_start, p_right_end, mode) == false {
       return false;
@@ -3089,13 +3106,13 @@ unsafe fn get_seek_page_info(f: &mut Vorbis, z: &mut ProbedPage) -> bool
 
    // parse the header
    let mut header: [u8; 27] = std::mem::zeroed();
-   getn(f, header.as_mut_ptr(), 27);
+   getn(f, &mut header[..]);
    if header[0] != b'O' || header[1] != b'g' || header[2] != b'g' || header[3] != b'S'{
       return false;
    }
 
    let mut lacing: [u8; 255] = std::mem::zeroed();
-   getn(f, lacing.as_mut_ptr(), header[26] as i32);
+   getn(f, &mut lacing[..]);
 
    // determine the length of the payload
    let mut len = 0;
@@ -3359,7 +3376,7 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
       let mut last : u32 = 0;
       let mut lo : u32;
       let hi : u32;
-      let mut header: [i8; 6] = std::mem::zeroed();
+      let mut header: [u8; 6] = std::mem::zeroed();
     
       'done: loop {
       // first, store the current decode position so we can restore it
@@ -3407,7 +3424,7 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
       set_file_offset(f, last_page_loc);
 
       // parse the header
-      getn(f, header.as_mut_ptr() as *mut u8, 6);
+      getn(f, &mut header[..]);
       // extract the absolute granule position
       lo = get32(f);
       hi = get32(f);
@@ -4953,7 +4970,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    // read packet
    // check packet header
    if get8(f) != PACKET_ID                 {return error(f, invalid_first_page);}
-   if getn(f, header.as_mut_ptr(), 6) == false                         {return error(f, unexpected_eof);}
+   if getn(f, &mut header[..]) == false                         {return error(f, unexpected_eof);}
    if vorbis_validate(&header) == false                    {return error(f, invalid_first_page);}
    // vorbis_version
    if get32(f) != 0                               {return error(f, invalid_first_page);}
