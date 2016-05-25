@@ -656,7 +656,7 @@ impl Drop for Vorbis {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct stb_vorbis_info
+pub struct VorbisInfo
 {
    pub sample_rate: u32,
    pub channels: i32,
@@ -1279,11 +1279,11 @@ fn start_page(f: &mut Vorbis) -> bool
    if capture_pattern(f) == false {
        return error(f, VorbisError::missing_capture_pattern);
    } 
-   return unsafe { start_page_no_capturepattern(f) };
+   return start_page_no_capturepattern(f);
 }
 
 
-unsafe fn start_packet(f: &mut Vorbis) -> bool
+fn start_packet(f: &mut Vorbis) -> bool
 {
    while f.next_seg == -1 {
       if start_page(f) == false { return false; }
@@ -1299,7 +1299,7 @@ unsafe fn start_packet(f: &mut Vorbis) -> bool
    return true;
 }
 
-unsafe fn maybe_start_packet(f: &mut Vorbis) -> bool
+fn maybe_start_packet(f: &mut Vorbis) -> bool
 {
     use VorbisError::{missing_capture_pattern, continued_packet_flag_invalid};
     
@@ -1396,7 +1396,7 @@ unsafe fn vorbis_pump_first_frame(f: &mut Vorbis)
 // on failure, returns NULL and sets *error. note that stb_vorbis must "own"
 // this stream; if you seek it in between calls to stb_vorbis, it will become
 // confused.
-pub unsafe fn stb_vorbis_open_file_section(mut file: File,
+pub fn stb_vorbis_open_file_section(mut file: File,
      alloc: Option<VorbisAlloc>, length: u64) -> Result<Vorbis, VorbisError>
 {
    let mut p = Vorbis::new(alloc);
@@ -1404,9 +1404,11 @@ pub unsafe fn stb_vorbis_open_file_section(mut file: File,
    p.f = Some(BufReader::new(file));
    p.stream_len   = length as u32;
     
-   if start_decoder(&mut p) == true {
-       vorbis_pump_first_frame(&mut p);
-       return Ok(p);
+   unsafe {
+    if start_decoder(&mut p) == true {
+        vorbis_pump_first_frame(&mut p);
+        return Ok(p);
+    }
    }
 
    return Err(p.error);
@@ -1419,7 +1421,7 @@ pub unsafe fn stb_vorbis_open_file_section(mut file: File,
 // perform stb_vorbis_seek_*() operations on this file, it will assume it
 // owns the _entire_ rest of the file after the start point. Use the next
 // function, stb_vorbis_open_file_section(), to limit it.
-pub unsafe fn stb_vorbis_open_file(mut file: File, 
+pub fn stb_vorbis_open_file(mut file: File, 
     alloc: Option<VorbisAlloc>) -> Result<Vorbis, VorbisError>
 {
     let start = file.seek(SeekFrom::Current(0)).unwrap();
@@ -1435,7 +1437,7 @@ pub unsafe fn stb_vorbis_open_file(mut file: File,
 
 // create an ogg vorbis decoder from a filename. on failure,
 // returns Result
-pub unsafe fn stb_vorbis_open_filename(filename: &Path, alloc: Option<VorbisAlloc>) 
+pub fn stb_vorbis_open_filename(filename: &Path, alloc: Option<VorbisAlloc>) 
     -> Result<Vorbis, VorbisError>
 {    
     let file = match File::open(filename){
@@ -1495,12 +1497,7 @@ unsafe fn vorbis_decode_initial(f: &mut Vorbis, p_left_start: *mut i32, p_left_e
    *mode = i;
 
    // NOTE: hack to forget borrow
-   let &mut m = {
-       let _borrow = &mut f.mode_config[i as usize];
-       let _borrow = _borrow as *mut _;
-       let _borrow : &mut Mode = std::mem::transmute(_borrow);
-       _borrow
-   };
+   let &mut m : &mut Mode = FORCE_BORROW_MUT!(&mut f.mode_config[i as usize]);
    let n : i32;
    let prev: i32;
    let next: i32;
@@ -1538,7 +1535,6 @@ unsafe fn vorbis_decode_initial(f: &mut Vorbis, p_left_start: *mut i32, p_left_e
 
 unsafe fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -> i32
 {
-//    int prev,i,j;
    // we use right&left (the start of the right- and left-window sin()-regions)
    // to determine how much to return, rather than inferring from the rules
    // (same result, clearer code); 'left' indicates where our sin() window
@@ -1549,7 +1545,6 @@ unsafe fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -
 
    // mixin from previous window
    if f.previous_length != 0 {
-    //   int i,j, 
       let n = f.previous_length;
       let w = get_window(f, n);
       for i in 0 .. f.channels {
@@ -1651,10 +1646,10 @@ pub fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis,
 pub fn stb_vorbis_decode_filename(filename: &Path, 
     channels: &mut i32, sample_rate: &mut u32, output: &mut Vec<i16>) -> i32
 {
-   let mut v = unsafe { match stb_vorbis_open_filename(filename, None){
+   let mut v = match stb_vorbis_open_filename(filename, None){
         Err(_) => return -1,
         Ok(v)  => v
-   }};
+   };
    
    *channels = v.channels;
    *sample_rate = v.sample_rate;
@@ -1941,7 +1936,7 @@ pub unsafe fn stb_vorbis_get_file_offset(f: &mut Vorbis) -> u32
    return (current as u32 - f.f_start) as u32;
 }
 
-unsafe fn start_page_no_capturepattern(f: &mut Vorbis) -> bool
+fn start_page_no_capturepattern(f: &mut Vorbis) -> bool
 {
     use VorbisError::*;
     
@@ -1962,12 +1957,14 @@ unsafe fn start_page_no_capturepattern(f: &mut Vorbis) -> bool
    get32(f);
    // page_segments
    f.segment_count = get8(f) as i32;
-   let segments_slice = {
-       let sc = f.segment_count as usize;
-       FORCE_BORROW_MUT!(&mut f.segments[0 .. sc])
-   };
-   if getn(f, segments_slice) == false {
-      return error(f, unexpected_eof);
+   unsafe {
+        let segments_slice = {
+            let sc = f.segment_count as usize;
+            FORCE_BORROW_MUT!(&mut f.segments[0 .. sc])
+        };
+        if getn(f, segments_slice) == false {
+            return error(f, unexpected_eof);
+        }
    }
    // assume we _don't_ know any the sample position of any segments
    f.end_seg_with_known_loc = -2;
@@ -2613,9 +2610,9 @@ pub fn stb_vorbis_get_sample_offset(f: &mut Vorbis) -> i32
 }
 
 // get general information about the file
-pub fn stb_vorbis_get_info(f: &Vorbis) -> stb_vorbis_info
+pub fn stb_vorbis_get_info(f: &Vorbis) -> VorbisInfo
 {
-   stb_vorbis_info {
+   VorbisInfo {
        channels: f.channels,
        sample_rate: f.sample_rate,
        setup_memory_required: f.setup_memory_required,
