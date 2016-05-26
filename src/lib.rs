@@ -2372,7 +2372,7 @@ unsafe fn codebook_decode_step(f: &mut Vorbis, c: &Codebook, output: *mut f32, m
    return true;
 }
 
-unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outputs: *mut *mut f32, ch: i32, c_inter_p: &mut i32, p_inter_p: &mut i32, len: i32, mut total_decode: i32) -> bool
+unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outputs: &[*mut f32], ch: i32, c_inter_p: &mut i32, p_inter_p: &mut i32, len: i32, mut total_decode: i32) -> bool
 {
    let mut c_inter = *c_inter_p;
    let mut p_inter = *p_inter_p;
@@ -2409,8 +2409,8 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
          if c.sequence_p != 0 {
             for i in 0 .. effective {
                let val : f32 = CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
-               if (*outputs.offset(c_inter as isize)).is_null() == false {
-                  *(*outputs.offset(c_inter as isize)).offset(p_inter as isize) += val;
+               if outputs[c_inter as usize].is_null() == false {
+                  *outputs[c_inter as usize].offset(p_inter as isize) += val;
                }
                c_inter += 1;
                if c_inter == ch { c_inter = 0; p_inter += 1; }
@@ -2419,8 +2419,8 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
          } else {
             for i in 0 .. effective {
                let val : f32 = CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
-               if (*outputs.offset(c_inter as isize)).is_null() == false {
-                  *(*outputs.offset(c_inter as isize)).offset(p_inter as isize) += val;
+               if outputs[c_inter as usize].is_null() == false {
+                  *outputs[c_inter as usize].offset(p_inter as isize) += val;
                }
                c_inter += 1;
                if c_inter == ch { c_inter = 0; p_inter += 1; }
@@ -4014,7 +4014,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
          }
       }
       let r = map.submap_residue[i];
-      decode_residue(f, mem::transmute(&mut residue_buffers), ch as i32, n2, r as i32, do_not_decode.as_mut_ptr());
+      decode_residue(f, &mut residue_buffers, ch as i32, n2, r as i32, &do_not_decode);
    }
 
    if f.alloc.alloc_buffer.is_null() == false {
@@ -4211,7 +4211,7 @@ macro_rules! temp_block_array {
 
 
 
-unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32, n: i32, rn: i32, do_not_decode: *mut bool)
+unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i32, n: i32, rn: i32, do_not_decode: &[bool])
 {
    let r: &Residue = FORCE_BORROW!( &f.residue_config[rn as usize] );
    let rtype : i32 = f.residue_types[rn as usize] as i32;
@@ -4230,9 +4230,9 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
 
    CHECK!(f);
 
-   for i in 0 .. ch {
-      if *do_not_decode.offset(i as isize) == false {
-          std::ptr::write_bytes(*residue_buffers.offset(i as isize), 0, n as usize);
+   for i in 0 .. ch as usize {
+      if do_not_decode[i] == false {
+          std::ptr::write_bytes(residue_buffers[i], 0, n as usize);
       }
    }
    
@@ -4242,7 +4242,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
    if rtype == 2 && ch != 1 {
        let mut j = 0;
        while j < ch {
-         if *do_not_decode.offset(j as isize) == false {
+         if do_not_decode[j as usize] == false {
             break;
          }
          j += 1;
@@ -4376,7 +4376,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
       while pcount < part_read {
          if pass == 0 {
             for j in 0 .. ch {
-               if *do_not_decode.offset(j as isize) == false {
+               if do_not_decode[j as usize] == false {
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize]);
                   let mut temp;
                   DECODE!(temp,f,c);
@@ -4391,11 +4391,11 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
             let mut i = 0;
             while i < classwords && pcount < part_read {
             for j in 0 .. ch {
-               if *do_not_decode.offset(j as isize) == false {
+               if do_not_decode[j as usize] == false {
                   let c : i32 = *(*(*part_classdata.offset(j as isize)).offset(class_set as isize)).offset(i as isize) as i32;
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
-                      let target = *residue_buffers.offset(j as isize);
+                      let target = residue_buffers[j as usize];
                       let offset : i32 =  r.begin as i32 + pcount*r.part_size as i32;
                       let n : i32 = r.part_size as i32;
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
