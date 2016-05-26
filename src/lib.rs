@@ -368,7 +368,7 @@ impl Default for Floor {
 }
 
 #[repr(C)] 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Residue
 {
    begin: u32, end: u32,
@@ -376,12 +376,14 @@ pub struct Residue
    classifications: u8,
    classbook: u8,
    classdata: *mut *mut u8,
-   residue_books: *mut [i16; 8],
+   residue_books: Vec<[i16; 8]>,
 } 
 
 impl Default for Residue {
     fn default() -> Self {
-        unsafe { mem::zeroed() }
+        let mut instance : Residue = unsafe { mem::zeroed() };
+        instance.residue_books = Vec::new();
+        instance
     }
 }
 
@@ -646,7 +648,7 @@ impl Drop for Vorbis {
                         }
                         setup_free(p, r.classdata as *mut c_void);
                     }
-                    setup_free(p, r.residue_books as *mut c_void);
+                    // setup_free(p, r.residue_books as *mut c_void);
                 }
             }
             
@@ -1662,7 +1664,7 @@ pub fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis,
    let mut output: *mut *mut f32 = std::ptr::null_mut();
    let num_shorts = buffer.len() as i32;
    let buffer =  buffer.as_mut_ptr();
-   let mut len = stb_vorbis_get_frame_float(f, None, &mut output);
+   let mut len = stb_vorbis_get_frame_float(f, None, Some(&mut output));
    
    if len != 0 {
       if len*channel_count > num_shorts {
@@ -1734,7 +1736,7 @@ pub fn stb_vorbis_decode_filename(filename: &Path,
 // You generally should not intermix calls to stb_vorbis_get_frame_*()
 // and stb_vorbis_get_samples_*(), since the latter calls the former.
 pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis, 
-    channel_count: Option<&mut i32>, output: *mut *mut *mut f32) -> i32
+    channel_count: Option<&mut i32>, output: Option<&mut *mut *mut f32>) -> i32
 {
    if IS_PUSH_MODE!(f){
        error(f, VorbisError::invalid_api_mixing);
@@ -1763,7 +1765,7 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis,
        *channel_count = f.channels;
    }
 
-   if output.is_null() == false   {
+   if let Some(output) = output {
        let o = f.outputs.as_ptr();
        let o = o as *mut *mut f32;
        *output = o;
@@ -1774,7 +1776,7 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis,
 pub unsafe fn stb_vorbis_get_frame_short(f: &mut Vorbis, num_c: i32, sample_buffer: &mut [i16]) -> i32
 {
     let mut output: *mut *mut f32 = std::ptr::null_mut();
-   let mut len = stb_vorbis_get_frame_float(f, None, &mut output);
+   let mut len = stb_vorbis_get_frame_float(f, None, Some(&mut output));
    if len > sample_buffer.len() as i32 {
      len = sample_buffer.len() as i32;
    }
@@ -1886,7 +1888,7 @@ pub unsafe fn stb_vorbis_seek(f: &mut Vorbis, sample_number: u32) -> bool
    if sample_number != f.current_loc {
       let mut n = 0;
       let frame_start = f.current_loc;
-      stb_vorbis_get_frame_float(f, Some(&mut n), std::ptr::null_mut());
+      stb_vorbis_get_frame_float(f, Some(&mut n), None);
       assert!(sample_number > frame_start);
       assert!(f.channel_buffer_start + (sample_number-frame_start) as i32 <= f.channel_buffer_end);
       f.channel_buffer_start += (sample_number - frame_start) as i32;
@@ -2791,7 +2793,7 @@ pub unsafe fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffe
       if n == num_samples{
          break;
       }
-      if stb_vorbis_get_frame_float(f, None, &mut outputs) == 0 {
+      if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0 {
          break;
       }
    }
@@ -2834,7 +2836,7 @@ pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut Vorbis, channels:
       if n == len{
          break;
       }
-      if stb_vorbis_get_frame_float(f, None, &mut outputs) == 0{
+      if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0{
          break;
       }
    }
@@ -2866,7 +2868,7 @@ pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer
       n += k;
       f.channel_buffer_start += k;
       if n == len{ break;}
-      if stb_vorbis_get_frame_float(f, None, &mut outputs) == 0 {break;}
+      if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0 {break;}
    }
    return n;
 }
@@ -2896,7 +2898,7 @@ pub unsafe fn stb_vorbis_get_samples_short_interleaved(f: &mut Vorbis, channels:
       n += k;
       f.channel_buffer_start += k;
       if n == len{ break;}
-      if stb_vorbis_get_frame_float(f, None, &mut outputs) == 0 {break;}
+      if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0 {break;}
    }
    return n;
 }
@@ -4275,7 +4277,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
                while i < classwords && pcount < part_read {
                   let mut z : i32 = r.begin as i32 + (pcount*r.part_size as i32);
                   let c : i32 = *(*(*part_classdata.offset(0)).offset(class_set as isize)).offset(i as isize) as i32;
-                  let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
+                  let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
 //                      // saves 1%
@@ -4311,7 +4313,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
                while i < classwords && pcount < part_read {
                   let mut z : i32 = r.begin as i32 + pcount*r.part_size as i32;
                   let c : i32 = *(*(*part_classdata.offset(0)).offset(class_set as isize)).offset(i as isize) as i32;
-                  let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
+                  let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
                      if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == false {
@@ -4346,7 +4348,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
                while i < classwords && pcount < part_read {
                   let mut z : i32 = r.begin as i32 + pcount*r.part_size as i32;
                   let c : i32 = *(*(*part_classdata.offset(0)).offset(class_set as isize)).offset(i as isize) as i32;
-                  let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
+                  let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
                      if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == false {
@@ -4392,7 +4394,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
             for j in 0 .. ch {
                if *do_not_decode.offset(j as isize) == false {
                   let c : i32 = *(*(*part_classdata.offset(j as isize)).offset(class_set as isize)).offset(i as isize) as i32;
-                  let b : i32 = (*r.residue_books.offset(c as isize))[pass as usize] as i32;
+                  let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let target = *residue_buffers.offset(j as isize);
                       let offset : i32 =  r.begin as i32 + pcount*r.part_size as i32;
@@ -5405,17 +5407,18 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          }
          residue_cascade[j as usize] = high_bits*8 + low_bits;
       }
-      r.residue_books = setup_malloc(f, mem::size_of::<[i16; 8]>() as i32 * r.classifications as i32) as *mut [i16; 8];
-      if r.residue_books.is_null() {return error(f, outofmem);}
-      for j in 0 .. r.classifications {
-         for k in 0 .. 8 {
-            if (residue_cascade[j as usize] & (1 << k)) != 0 {
-               (*r.residue_books.offset(j as isize))[k as usize] = get_bits(f, 8) as i16;
-               if (*r.residue_books.offset(j as isize))[k as usize] as i32 >= f.codebook_count {
+      r.residue_books.resize(r.classifications as usize, [0; 8]);
+    //   r.residue_books = setup_malloc(f, mem::size_of::<[i16; 8]>() as i32 * r.classifications as i32) as *mut [i16; 8];
+    //   if r.residue_books.is_null() {return error(f, outofmem);}
+      for j in 0 .. r.classifications as usize {
+         for k in 0usize .. 8 {
+            if (residue_cascade[j] & (1 << k)) != 0 {
+               r.residue_books[j][k] = get_bits(f, 8) as i16;
+               if r.residue_books[j][k] as i32 >= f.codebook_count {
                    return error(f, invalid_setup);
                 }
             } else {
-               (*r.residue_books.offset(j as isize))[k as usize] = -1;
+               r.residue_books[j][k] = -1;
             }
          }
       }
