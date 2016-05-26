@@ -2372,9 +2372,9 @@ unsafe fn codebook_decode_step(f: &mut Vorbis, c: &Codebook, output: *mut f32, m
    return true;
 }
 
-unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outputs: *mut *mut f32, ch: i32, i32er_p: &mut i32, p_inter_p: &mut i32, len: i32, mut total_decode: i32) -> bool
+unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outputs: *mut *mut f32, ch: i32, c_inter_p: &mut i32, p_inter_p: &mut i32, len: i32, mut total_decode: i32) -> bool
 {
-   let mut i32er = *i32er_p;
+   let mut c_inter = *c_inter_p;
    let mut p_inter = *p_inter_p;
    let mut effective = c.dimensions;
    let mut z : i32;
@@ -2398,10 +2398,10 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
 
       // if this will take us off the end of the buffers, stop short!
       // we check by computing the length of the virtual interleaved
-      // buffer (len*ch), our current offset within it (p_inter*ch)+(i32er),
+      // buffer (len*ch), our current offset within it (p_inter*ch)+(c_inter),
       // and the length we'll be using (effective)
-      if i32er + p_inter*ch + effective > len * ch {
-         effective = len*ch - (p_inter*ch - i32er);
+      if c_inter + p_inter*ch + effective > len * ch {
+         effective = len*ch - (p_inter*ch - c_inter);
       }
 
       {
@@ -2409,28 +2409,28 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
          if c.sequence_p != 0 {
             for i in 0 .. effective {
                let val : f32 = CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
-               if (*outputs.offset(i32er as isize)).is_null() == false {
-                  *(*outputs.offset(i32er as isize)).offset(p_inter as isize) += val;
+               if (*outputs.offset(c_inter as isize)).is_null() == false {
+                  *(*outputs.offset(c_inter as isize)).offset(p_inter as isize) += val;
                }
-               i32er += 1;
-               if i32er == ch { i32er = 0; p_inter += 1; }
+               c_inter += 1;
+               if c_inter == ch { c_inter = 0; p_inter += 1; }
                last = val;
             }
          } else {
             for i in 0 .. effective {
                let val : f32 = CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
-               if (*outputs.offset(i32er as isize)).is_null() == false {
-                  *(*outputs.offset(i32er as isize)).offset(p_inter as isize) += val;
+               if (*outputs.offset(c_inter as isize)).is_null() == false {
+                  *(*outputs.offset(c_inter as isize)).offset(p_inter as isize) += val;
                }
-               i32er += 1;
-               if i32er == ch { i32er = 0; p_inter += 1; }
+               c_inter += 1;
+               if c_inter == ch { c_inter = 0; p_inter += 1; }
             }
          }
       }
 
       total_decode -= effective;
    }
-   *i32er_p = i32er;
+   *c_inter_p = c_inter;
    *p_inter_p = p_inter;
 
    return true;
@@ -3739,28 +3739,28 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut Vorbis, data: *mut u8, mut dat
       }
    }
 
-   let mut i = 0;
-   while i < f.page_crc_tests {
+   let mut i : usize = 0;
+   while i < f.page_crc_tests as usize {
       let mut crc : u32;
-      let n = f.scan[i as usize].bytes_done;
-      let mut m = f.scan[i as usize].bytes_left;
+      let n = f.scan[i].bytes_done;
+      let mut m = f.scan[i].bytes_left;
       if m > data_len - n {m = data_len - n;}
       // m is the bytes to scan in the current chunk
-      crc = f.scan[i as usize].crc_so_far;
+      crc = f.scan[i].crc_so_far;
       for j in 0 .. m {
          crc = crc32_update(crc, *data.offset( (n+j) as isize));
       }
-      f.scan[i as usize].bytes_left -= m;
-      f.scan[i as usize].crc_so_far = crc;
-      if f.scan[i as usize].bytes_left == 0 {
+      f.scan[i].bytes_left -= m;
+      f.scan[i].crc_so_far = crc;
+      if f.scan[i].bytes_left == 0 {
          // does it match?
-         if f.scan[i as usize].crc_so_far == f.scan[i as usize].goal_crc {
+         if f.scan[i].crc_so_far == f.scan[i].goal_crc {
             // Houston, we have page
             data_len = n+m; // consumption amount is wherever that scan ended
             f.page_crc_tests = -1; // drop out of page scan mode
             f.previous_length = 0; // decode-but-don't-output one frame
             f.next_seg = -1;       // start a new page
-            f.current_loc = f.scan[i as usize].sample_loc; // set the current sample location
+            f.current_loc = f.scan[i].sample_loc; // set the current sample location
                                     // to the amount we'd have decoded had we decoded this page
             f.current_loc_valid = true; 
             f.current_loc != !0;
@@ -3768,7 +3768,7 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut Vorbis, data: *mut u8, mut dat
          }
          // delete entry
          f.page_crc_tests -= 1;
-         f.scan[i as usize] = f.scan[f.page_crc_tests as usize];
+         f.scan[i] = f.scan[f.page_crc_tests as usize];
       } else {
          i += 1;
       }
@@ -3997,23 +3997,23 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
 
    CHECK!(f);
 // RESIDUE DECODE
-   for i in 0 .. map.submaps {
+   for i in 0 .. map.submaps as usize {
       let mut residue_buffers: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize] = mem::zeroed();
       let mut do_not_decode: [bool; 256] = mem::zeroed();
       let mut ch : usize = 0;
-      for j in 0 .. f.channels {
-         if map.chan[j as usize].mux == i {
-            if zero_channel[j as usize] {
+      for j in 0 .. f.channels as usize {
+         if map.chan[j].mux as usize == i {
+            if zero_channel[j] {
                do_not_decode[ch] = true;
                residue_buffers[ch] = std::ptr::null_mut();
             } else {
                do_not_decode[ch] = false;
-               residue_buffers[ch] = f.channel_buffers[j as usize];
+               residue_buffers[ch] = f.channel_buffers[j];
             }
             ch += 1;
          }
       }
-      let r = map.submap_residue[i as usize];
+      let r = map.submap_residue[i];
       decode_residue(f, mem::transmute(&mut residue_buffers), ch as i32, n2, r as i32, do_not_decode.as_mut_ptr());
    }
 
@@ -4059,15 +4059,14 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
    CHECK!(f);
 
    // finish decoding the floors
-   for i in 0 .. f.channels {
-      if really_zero_channel[i as usize] {
+   for i in 0 .. f.channels as usize{
+      if really_zero_channel[i] {
         //  memset(f.channel_buffers[i], 0, sizeof(*f.channel_buffers[i]) * n2);
-        std::ptr::write_bytes(f.channel_buffers[i as usize], b'0', n2 as usize);
+        std::ptr::write_bytes(f.channel_buffers[i], b'0', n2 as usize);
       } else {
-          let cb = f.channel_buffers[i as usize];
-          let fy = f.final_y[i as usize]; 
-         do_floor(f, map, i, n, cb,
-            fy, std::ptr::null_mut());
+          let cb = f.channel_buffers[i];
+          let fy = f.final_y[i]; 
+         do_floor(f, map, i as i32, n, cb, fy, std::ptr::null_mut());
       }
    }
 
@@ -4260,7 +4259,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
          if ch == 2 {
             while pcount < part_read {
                let z : i32 = r.begin as i32 + (pcount*r.part_size as i32);
-               let mut i32er : i32 = z & 1;
+               let mut c_inter : i32 = z & 1;
                let mut p_inter : i32 = z>>1;
                if pass == 0 {
                   let c: &Codebook = FORCE_BORROW!(&f.codebooks[r.classbook as usize]);
@@ -4281,13 +4280,13 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
                   if b >= 0 {
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
 //                      // saves 1%
-                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == false {
+                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut c_inter, &mut p_inter, n, r.part_size as i32) == false {
                         // goto done;
                         break 'done;
                      }
                   } else {
                      z += r.part_size as i32;
-                     i32er = z & 1;
+                     c_inter = z & 1;
                      p_inter = z >> 1;
                   }
                     i += 1; pcount += 1;
@@ -4297,7 +4296,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
          } else if ch == 1 {
             while pcount < part_read {
                let z : i32 = r.begin as i32 + pcount*r.part_size as i32;
-               let mut i32er : i32 = 0;
+               let mut c_inter : i32 = 0;
                let mut p_inter = z;
                if pass == 0 {
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize] );
@@ -4316,13 +4315,13 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
-                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == false {
+                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut c_inter, &mut p_inter, n, r.part_size as i32) == false {
                         // goto done;
                         break 'done;
                      }
                   } else {
                      z += r.part_size as i32;
-                     i32er = 0;
+                     c_inter = 0;
                      p_inter = z;
                   }
                     i += 1; pcount += 1;
@@ -4332,7 +4331,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
          } else {
             while pcount < part_read {
                 let z : i32 = r.begin as i32 + pcount*r.part_size as i32;
-               let mut i32er : i32 = z % ch;
+               let mut c_inter : i32 = z % ch;
                let mut p_inter = z/ch;
                if pass == 0 {
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize] );
@@ -4351,13 +4350,13 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: *mut *mut f32, ch: i32
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
-                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut i32er, &mut p_inter, n, r.part_size as i32) == false {
+                     if codebook_decode_deinterleave_repeat(f, book, residue_buffers, ch, &mut c_inter, &mut p_inter, n, r.part_size as i32) == false {
                         // goto done;
                         break 'done;
                      }
                   } else {
                      z += r.part_size as i32;
-                     i32er = z % ch;
+                     c_inter = z % ch;
                      p_inter = z / ch;
                   }
                     i += 1; pcount += 1;
@@ -5264,16 +5263,16 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          }
          else
          {
-            let mut last : f32 = 0.0;
+            let mut last = 0.0;
             CHECK!(f);
             c.multiplicands = setup_malloc(f, mem::size_of::<CodeType>() as i32 * c.lookup_values as i32) as *mut CodeType;
             if c.multiplicands.is_null() {
                  setup_temp_free(f, mults as *mut c_void, mem::size_of::<CodeType>() as i32 * c.lookup_values as i32); 
                  return error(f, outofmem);
             }
-            for j in 0 .. c.lookup_values {
-               let val : f32 = *mults.offset(j as isize) as f32 * c.delta_value + c.minimum_value + last;
-               *c.multiplicands.offset(j as isize) = val;
+            for j in 0 .. c.lookup_values as isize {
+               let val : f32 = *mults.offset(j) as f32 * c.delta_value + c.minimum_value + last;
+               *c.multiplicands.offset(j) = val;
                if c.sequence_p != 0{
                   last = val;
                }
@@ -5323,24 +5322,24 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          let mut g : &mut Floor1 = FORCE_BORROW_MUT!( &mut f.floor_config[i as usize].floor1 );
          let mut max_class : i32 = -1; 
          g.partitions = get_bits(f, 5) as u8;
-         for j in 0 .. g.partitions {
-            g.partition_class_list[j as usize] = get_bits(f, 4) as u8;
-            if g.partition_class_list[j as usize] as i32 > max_class {
-               max_class = g.partition_class_list[j as usize] as i32;
+         for j in 0 .. g.partitions as usize{
+            g.partition_class_list[j] = get_bits(f, 4) as u8;
+            if g.partition_class_list[j] as i32 > max_class {
+               max_class = g.partition_class_list[j] as i32;
             }
          }
-         for j in 0 .. max_class + 1 {
-            g.class_dimensions[j as usize] = get_bits(f, 3) as u8 + 1;
-            g.class_subclasses[j as usize] = get_bits(f, 2) as u8;
-            if g.class_subclasses[j as usize] != 0 {
-               g.class_masterbooks[j as usize] = get_bits(f, 8) as u8;
-               if g.class_masterbooks[j as usize] >= f.codebook_count as u8 {
+         for j in 0 .. (max_class + 1) as usize {
+            g.class_dimensions[j] = get_bits(f, 3) as u8 + 1;
+            g.class_subclasses[j] = get_bits(f, 2) as u8;
+            if g.class_subclasses[j] != 0 {
+               g.class_masterbooks[j] = get_bits(f, 8) as u8;
+               if g.class_masterbooks[j] >= f.codebook_count as u8 {
                    return error(f, invalid_setup);
                }
             }
-            for k in 0 ..  (1 << g.class_subclasses[j as usize]) {
-               g.subclass_books[j as usize][k as usize] = get_bits(f,8) as i16 -1;
-               if g.subclass_books[j as usize][k as usize] >= f.codebook_count as i16 {
+            for k in 0 ..  (1 << g.class_subclasses[j]) as usize {
+               g.subclass_books[j][k] = get_bits(f,8) as i16 -1;
+               if g.subclass_books[j][k] >= f.codebook_count as i16 {
                    return error(f, invalid_setup);
                }
             }
@@ -5350,9 +5349,9 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          g.xlist[0] = 0;
          g.xlist[1] = 1 << g.rangebits;
          g.values = 2;
-         for j in 0 .. g.partitions {
-            let c : i32 = g.partition_class_list[j as usize] as i32;
-            for _ in 0 .. g.class_dimensions[c as usize] {
+         for j in 0 .. g.partitions as usize {
+            let c = g.partition_class_list[j] as usize;
+            for _ in 0 .. g.class_dimensions[c] {
                g.xlist[g.values as usize] = get_bits(f, g.rangebits as i32) as u16;
                g.values += 1;
             }
@@ -5408,8 +5407,6 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          residue_cascade[j as usize] = high_bits*8 + low_bits;
       }
       r.residue_books.resize(r.classifications as usize, [0; 8]);
-    //   r.residue_books = setup_malloc(f, mem::size_of::<[i16; 8]>() as i32 * r.classifications as i32) as *mut [i16; 8];
-    //   if r.residue_books.is_null() {return error(f, outofmem);}
       for j in 0 .. r.classifications as usize {
          for k in 0usize .. 8 {
             if (residue_cascade[j] & (1 << k)) != 0 {
@@ -5468,15 +5465,15 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       }
       if get_bits(f,1) != 0 {
          m.coupling_steps = get_bits(f,8) as u16 + 1;
-         for k in 0 .. m.coupling_steps {
+         for k in 0 .. m.coupling_steps as usize{
              // satify borrow checker
              let ilog_result = ilog(f.channels-1);
-            m.chan[k as usize].magnitude = get_bits(f, ilog_result) as u8;
+            m.chan[k].magnitude = get_bits(f, ilog_result) as u8;
              let ilog_result = ilog(f.channels-1);
-            m.chan[k as usize].angle = get_bits(f, ilog_result) as u8;
-            if m.chan[k as usize].magnitude as i32 >= f.channels        {return error(f, invalid_setup);}
-            if m.chan[k as usize].angle     as i32 >= f.channels        {return error(f, invalid_setup);}
-            if m.chan[k as usize].magnitude == m.chan[k as usize].angle   {return error(f, invalid_setup);}
+            m.chan[k].angle = get_bits(f, ilog_result) as u8;
+            if m.chan[k].magnitude as i32 >= f.channels        {return error(f, invalid_setup);}
+            if m.chan[k].angle     as i32 >= f.channels        {return error(f, invalid_setup);}
+            if m.chan[k].magnitude == m.chan[k].angle   {return error(f, invalid_setup);}
          }
       } else{
          m.coupling_steps = 0;
@@ -5485,30 +5482,32 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       // reserved field
       if get_bits(f,2) != 0 {return error(f, invalid_setup);}
       if m.submaps > 1 {
-         for j in 0 .. f.channels {
-            m.chan[j as usize].mux = get_bits(f, 4) as u8;
-            if m.chan[j as usize].mux >= m.submaps                {return error(f, invalid_setup);}
+         for j in 0 .. f.channels as usize {
+            m.chan[j].mux = get_bits(f, 4) as u8;
+            if m.chan[j].mux >= m.submaps {
+                return error(f, invalid_setup);
+            }
          }
       } else{
          // @SPECIFICATION: this case is missing from the spec
-         for j in 0 .. f.channels {
-            m.chan[j as usize].mux = 0;
+         for j in 0 .. f.channels as usize {
+            m.chan[j].mux = 0;
          }
       }
 
-      for j in 0 .. m.submaps {
+      for j in 0 .. m.submaps as usize {
          get_bits(f,8); // discard
-         m.submap_floor[j as usize] = get_bits(f,8) as u8;
-         m.submap_residue[j as usize] = get_bits(f,8) as u8;
-         if m.submap_floor[j as usize] as i32 >= f.floor_count      {return error(f, invalid_setup);}
-         if m.submap_residue[j as usize] as i32 >= f.residue_count  {return error(f, invalid_setup);}
+         m.submap_floor[j] = get_bits(f,8) as u8;
+         m.submap_residue[j] = get_bits(f,8) as u8;
+         if m.submap_floor[j] as i32 >= f.floor_count      {return error(f, invalid_setup);}
+         if m.submap_residue[j] as i32 >= f.residue_count  {return error(f, invalid_setup);}
       }
    }
 
    // Modes
    f.mode_count = get_bits(f, 6) as i32 + 1;
-   for i in 0 .. f.mode_count {
-      let m: &mut Mode = FORCE_BORROW_MUT!(&mut f.mode_config[i as usize]);
+   for i in 0 .. f.mode_count as usize {
+      let m: &mut Mode = FORCE_BORROW_MUT!(&mut f.mode_config[i]);
       m.blockflag = get_bits(f,1) as u8;
       m.windowtype = get_bits(f,16) as u16;
       m.transformtype = get_bits(f,16) as u16;
@@ -5522,12 +5521,12 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
    f.previous_length = 0;
 
-   for i in 0 .. f.channels {
+   for i in 0 .. f.channels as usize{
        let block_size_1 = f.blocksize_1;
-      f.channel_buffers[i as usize] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1) as *mut f32;
-      f.previous_window[i as usize] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1/2) as *mut f32;
-      f.final_y[i as usize]          = setup_malloc(f, mem::size_of::<i16>() as i32 * longest_floorlist) as *mut i16;
-      if f.channel_buffers[i as usize].is_null() || f.previous_window[i as usize].is_null() || f.final_y[i as usize].is_null() {
+      f.channel_buffers[i] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1) as *mut f32;
+      f.previous_window[i] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1/2) as *mut f32;
+      f.final_y[i]         = setup_malloc(f, mem::size_of::<i16>() as i32 * longest_floorlist) as *mut i16;
+      if f.channel_buffers[i].is_null() || f.previous_window[i].is_null() || f.final_y[i].is_null() {
           return error(f, outofmem);
       }
    }
