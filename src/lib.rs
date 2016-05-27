@@ -283,11 +283,10 @@ const NO_CODE : i32 =   255;
 
 
 #[repr(C)]
-#[derive(Copy)]
 pub struct Codebook
 {
    dimensions: i32, entries: i32,
-   codeword_lengths: *mut u8,
+   codeword_lengths: Vec<u8>,
    minimum_value: f32,
    delta_value: f32,
    value_bits: u8,
@@ -295,23 +294,46 @@ pub struct Codebook
    sequence_p: u8,
    sparse: bool,
    lookup_values: u32,
-   multiplicands: *mut CodeType,
-   codewords: *mut u32,
+   multiplicands: Vec<CodeType>,
+   codewords: Vec<u32>,
    fast_huffman: [i16; FAST_HUFFMAN_TABLE_SIZE as usize],
-   sorted_codewords: *mut u32,
-   sorted_values: *mut i32,
+   sorted_codewords: Vec<u32>,
+   sorted_values: Vec<i32>,
    sorted_entries: i32,
 } 
 
+// NOTE(bungcip): maybe can be deleted?
 impl Clone for Codebook {
     fn clone(&self) -> Self {
-        *self
+        Codebook {
+            dimensions: self.dimensions, entries: self.entries,
+            codeword_lengths: self.codeword_lengths.clone(),
+            minimum_value: self.minimum_value,
+            delta_value: self.delta_value,
+            value_bits: self.value_bits,
+            lookup_type: self.lookup_type,
+            sequence_p: self.sequence_p,
+            sparse: self.sparse,
+            lookup_values: self.lookup_values,
+            multiplicands: self.multiplicands.clone(),
+            codewords: self.codewords.clone(),
+            fast_huffman: self.fast_huffman,
+            sorted_codewords: self.sorted_codewords.clone(),
+            sorted_values: self.sorted_values.clone(),
+            sorted_entries: self.sorted_entries
+        }
     }
 }
 
 impl Default for Codebook {
     fn default() -> Self {
-        unsafe { mem::zeroed() }
+        let mut instance : Codebook = unsafe { mem::zeroed() };
+        instance.multiplicands = Vec::new();
+        instance.codewords = Vec::new();
+        instance.codeword_lengths = Vec::new();
+        instance.sorted_codewords = Vec::new();
+        instance.sorted_values = Vec::new();
+        instance
     } 
 }
 
@@ -375,7 +397,7 @@ pub struct Residue
    part_size: u32,
    classifications: u8,
    classbook: u8,
-   classdata: *mut *mut u8,
+   classdata: Vec<Vec<u8>>,
    residue_books: Vec<[i16; 8]>,
 } 
 
@@ -639,37 +661,37 @@ impl Drop for Vorbis {
     fn drop(&mut self){
         unsafe { 
             let mut p = self;
-            {
-                for i in 0 .. p.residue_count {
-                    let r: &mut Residue = FORCE_BORROW_MUT!(&mut p.residue_config[i as usize]);
-                    if r.classdata.is_null() == false {
-                        for j in 0 .. p.codebooks[r.classbook as usize].entries {
-                            setup_free(p, (*r.classdata.offset(j as isize)) as *mut c_void);
-                        }
-                        setup_free(p, r.classdata as *mut c_void);
-                    }
+            // {
+                // for i in 0 .. p.residue_count {
+                    // let r: &mut Residue = FORCE_BORROW_MUT!(&mut p.residue_config[i as usize]);
+                    // if r.classdata.is_null() == false {
+                    //     for j in 0 .. p.codebooks[r.classbook as usize].entries {
+                    //         setup_free(p, (*r.classdata.offset(j as isize)) as *mut c_void);
+                    //     }
+                    //     setup_free(p, r.classdata as *mut c_void);
+                    // }
                     // setup_free(p, r.residue_books as *mut c_void);
-                }
-            }
+                // }
+            // }
             
-            {
+            // {
                 //   CHECK!(p);
-                let pp : &mut Vorbis = FORCE_BORROW_MUT!(&mut p);
-                for c in p.codebooks.iter() {
-                    setup_free(pp, c.codeword_lengths as *mut c_void);
-                    setup_free(pp, c.multiplicands as *mut c_void);
-                    setup_free(pp, c.codewords as *mut c_void);
-                    setup_free(pp, c.sorted_codewords as *mut c_void);
+                // let pp : &mut Vorbis = FORCE_BORROW_MUT!(&mut p);
+                // for c in p.codebooks.iter() {
+                    // setup_free(pp, c.codeword_lengths as *mut c_void);
+                    // setup_free(pp, c.multiplicands as *mut c_void);
+                    // setup_free(pp, c.codewords as *mut c_void);
+                    // setup_free(pp, c.sorted_codewords as *mut c_void);
                     // c.sorted_values[-1] is the first entry in the array
-                    setup_free(pp, if c.sorted_values.is_null() == false {
-                            c.sorted_values.offset(-1)
-                        }else {
-                            std::ptr::null_mut()
-                        } as *mut c_void
-                    );
-                }
+                    // setup_free(pp, if c.sorted_values.is_null() == false {
+                    //         c.sorted_values.offset(-1)
+                    //     }else {
+                    //         std::ptr::null_mut()
+                    //     } as *mut c_void
+                    // );
+                // }
                 
-            }
+            // }
             
             // { let x3 = p.residue_config as *mut c_void; setup_free(p, x3); }
                 // for i in 0 .. p.mapping_count {
@@ -914,16 +936,16 @@ fn float32_unpack(x: u32) -> f32
 // vorbis allows a huffman table with non-sorted lengths. This
 // requires a more sophisticated construction, since symbols in
 // order do not map to huffman codes "in order".
-unsafe fn add_entry(c: &Codebook, huff_code: u32, symbol: i32, count: i32, len: u8, values: *mut u32)
+unsafe fn add_entry(c: &mut Codebook, huff_code: u32, symbol: i32, count: i32, len: u8, values: *mut u32)
 {
     // TODO(bungcip): maybe symbol len as u32?
     
    if c.sparse == false {
-      *c.codewords.offset(symbol as isize) = huff_code;
+      c.codewords[symbol as usize] = huff_code;
    } else {
       let count = count as isize;
-      *c.codewords.offset(count) = huff_code;
-      *c.codeword_lengths.offset(count) = len;
+      c.codewords[count as usize] = huff_code;
+      c.codeword_lengths[count as usize] = len;
       *values.offset(count) = symbol as u32;
    }
 }
@@ -1931,16 +1953,16 @@ unsafe fn compute_accelerated_huffman(c: &mut Codebook)
    if len > 32767 {len = 32767;} // largest possible value we can encode!
    
    for i in 0 .. len {
-      if *c.codeword_lengths.offset(i as isize) <= STB_FAST_HUFFMAN_LENGTH as u8 {
+      if c.codeword_lengths[i as usize] <= STB_FAST_HUFFMAN_LENGTH as u8 {
          let mut z : u32 = if c.sparse == true { 
-             bit_reverse(*c.sorted_codewords.offset(i as isize)) 
+             bit_reverse(c.sorted_codewords[i as usize]) 
          } else { 
-             *c.codewords.offset(i as isize) 
+             c.codewords[i as usize] 
         };
          // set table entries for all bit combinations in the higher bits
          while z < FAST_HUFFMAN_TABLE_SIZE as u32 {
              c.fast_huffman[z as usize] = i as i16;
-             z += 1 << *c.codeword_lengths.offset(i as isize);
+             z += 1 << c.codeword_lengths[i as usize];
          }
       }
    }
@@ -2156,13 +2178,13 @@ unsafe fn residue_decode(f: &mut Vorbis, book: &Codebook, target: *mut f32, mut 
 // where we avoid one addition
 macro_rules! CODEBOOK_ELEMENT {
     ($c: expr, $off: expr) => {
-        *$c.multiplicands.offset($off as isize)
+        $c.multiplicands[$off as usize]
     }
 }
 
 macro_rules! CODEBOOK_ELEMENT_FAST {
     ($c: expr, $off: expr) => {
-        *$c.multiplicands.offset($off as isize)
+        $c.multiplicands[$off as usize]
     }
 }
 
@@ -2201,7 +2223,7 @@ macro_rules! DECODE {
     ($var: expr, $f: expr, $c: expr) => {
         DECODE_RAW!($var, $f, $c);
         if $c.sparse == true {
-            $var = *$c.sorted_values.offset($var as isize);
+            $var = $c.sorted_values[$var as usize];
         }
     }
 }
@@ -2253,8 +2275,8 @@ unsafe fn codebook_decode_scalar(f: &mut Vorbis, c: &Codebook) -> i32
    i = (f.acc & FAST_HUFFMAN_TABLE_MASK as u32) as i32;
    i = c.fast_huffman[i as usize] as i32;
    if i >= 0 {
-      f.acc >>= *c.codeword_lengths.offset(i as isize);
-      f.valid_bits -= *c.codeword_lengths.offset(i as isize) as i32;
+      f.acc >>= c.codeword_lengths[i as usize];
+      f.valid_bits -= c.codeword_lengths[i as usize] as i32;
       if f.valid_bits < 0 { f.valid_bits = 0; return -1; }
       return i;
    }
@@ -2288,16 +2310,16 @@ unsafe fn codebook_decode_scalar_raw(f: &mut Vorbis, c: &Codebook) -> i32
 {
    prep_huffman(f);
 
-   if c.codewords.is_null()  && c.sorted_codewords.is_null() {
+   if c.codewords.len() == 0 && c.sorted_codewords.len() == 0 {
       return -1;
    }
 
    // cases to use binary search: sorted_codewords && !c.codewords
    //                             sorted_codewords && c.entries > 8
    let case = if c.entries > 8 {
-       c.sorted_codewords.is_null() == false
+       c.sorted_codewords.len() > 0
    }else{
-       c.codewords.is_null()
+       c.codewords.len() == 0
    };
    if case {
       // binary search
@@ -2309,7 +2331,7 @@ unsafe fn codebook_decode_scalar_raw(f: &mut Vorbis, c: &Codebook) -> i32
       while n > 1 {
          // invariant: sc[x] <= code < sc[x+n]
          let m = x + (n >> 1);
-         if *c.sorted_codewords.offset(m as isize) <= code {
+         if c.sorted_codewords[m as usize] <= code {
             x = m;
             n -= n>>1;
          } else {
@@ -2318,10 +2340,10 @@ unsafe fn codebook_decode_scalar_raw(f: &mut Vorbis, c: &Codebook) -> i32
       }
       // x is now the sorted index
       if c.sparse == false {
-          x = *c.sorted_values.offset(x as isize);
+          x = c.sorted_values[x as usize];
       }
       // x is now sorted index if sparse, or symbol otherwise
-      len = *c.codeword_lengths.offset(x as isize) as i32;
+      len = c.codeword_lengths[x as usize] as i32;
       if f.valid_bits >= len {
          f.acc >>= len;
          f.valid_bits -= len;
@@ -2335,11 +2357,11 @@ unsafe fn codebook_decode_scalar_raw(f: &mut Vorbis, c: &Codebook) -> i32
    // if small, linear search
    assert!(c.sparse == false);
    for i in 0 .. c.entries  {
-      if *c.codeword_lengths.offset(i as isize) as i32 == NO_CODE {continue;}
-      if *c.codewords.offset(i as isize) == (f.acc & ((1 << *c.codeword_lengths.offset(i as isize))-1)) {
-         if f.valid_bits >= *c.codeword_lengths.offset(i as isize) as i32 {
-            f.acc >>= *c.codeword_lengths.offset(i as isize);
-            f.valid_bits -= *c.codeword_lengths.offset(i as isize) as i32;
+      if c.codeword_lengths[i as usize] as i32 == NO_CODE {continue;}
+      if c.codewords[i as usize] == (f.acc & ((1 << c.codeword_lengths[i as usize])-1)) {
+         if f.valid_bits >= c.codeword_lengths[i as usize] as i32 {
+            f.acc >>= c.codeword_lengths[i as usize];
+            f.valid_bits -= c.codeword_lengths[i as usize] as i32;
             return i;
          }
          f.valid_bits = 0;
@@ -3787,26 +3809,23 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
       let mut k = 0;
       for i in 0 .. c.entries {
          if include_in_sort(c, *lengths.offset(i as isize)) == true {
-            *c.sorted_codewords.offset(k as isize) = bit_reverse(
-                *c.codewords.offset(i as isize));
+            c.sorted_codewords[k as usize] = bit_reverse(
+                c.codewords[i as usize]);
             k += 1;
          }
       }
       assert!(k == c.sorted_entries);
    } else {
       for i in 0 .. c.sorted_entries {
-         *c.sorted_codewords.offset(i as isize) = bit_reverse(
-                *c.codewords.offset(i as isize));
+         c.sorted_codewords[i as usize] = bit_reverse(
+                c.codewords[i as usize]);
       }
    }
 
-   // NOTE(bungcip): using rust sort instead of libc qsort, so we need to create slice...
-   {
-       let mut sorted_codewords_slice = std::slice::from_raw_parts_mut(c.sorted_codewords, c.sorted_entries as usize);
-       sorted_codewords_slice.sort();
-   }
-       
-   *c.sorted_codewords.offset(c.sorted_entries as isize) = 0xffffffff;
+   // NOTE(bungcip): sorted_codewords length is c.sorted_entries + 1
+   //                we only need to sort except last element
+   c.sorted_codewords[0 .. c.sorted_entries as usize].sort();
+   c.sorted_codewords[c.sorted_entries as usize] = 0xffffffff;
 
    let len = if c.sparse == true  { c.sorted_entries } else { c.entries };
    // now we need to indicate how they correspond; we could either
@@ -3822,25 +3841,25 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
       };
 
       if include_in_sort(c,huff_len) == true {
-         let code: u32 = bit_reverse(*c.codewords.offset(i as isize));
+         let code: u32 = bit_reverse(c.codewords[i as usize]);
          let mut x : i32 = 0;
          let mut n : i32 = c.sorted_entries;
          while n > 1 {
             // invariant: sc[x] <= code < sc[x+n]
             let m : i32 = x + (n >> 1);
-            if *c.sorted_codewords.offset(m as isize) <= code {
+            if c.sorted_codewords[m as usize] <= code {
                x = m;
                n -= n >> 1;
             } else {
                n >>= 1;
             }
          }
-         assert!(*c.sorted_codewords.offset(x as isize) == code);
+         assert!(c.sorted_codewords[x as usize] == code);
          if c.sparse == true {
-            *c.sorted_values.offset(x as isize) = *values.offset(i as isize) as i32;
-            *c.codeword_lengths.offset(x as isize) = huff_len;
+            c.sorted_values[x as usize] = *values.offset(i as isize) as i32;
+            c.codeword_lengths[x as usize] = huff_len;
          } else {
-            *c.sorted_values.offset(x as isize) = i;
+            c.sorted_values[x as usize] = i;
          }
       }
 
@@ -4217,13 +4236,15 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
    let n_read : i32 = (r.end - r.begin) as i32;
    let part_read : i32 = n_read / r.part_size as i32;
    let temp_alloc_point : i32 = temp_alloc_save!(f);
-   let part_classdata: *mut *mut *mut u8 = {
+   
+   // NOTE(bungcip): make it as slice
+   let part_classdata: *mut *mut *const u8 = {
        let temp_1 = f.channels;
        let zz = temp_block_array!(f,
-            temp_1, part_read as usize * mem::size_of::<*mut *mut u8>() 
+            temp_1, part_read as usize * mem::size_of::<*mut *const u8>() 
         );
       zz 
-   } as *mut *mut *mut u8;
+   } as *mut *mut *const u8;
 
    CHECK!(f);
 
@@ -4266,7 +4287,8 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
                     // goto done;
                     break 'done;  
                   } 
-                  *(*part_classdata.offset(0)).offset(class_set as isize) = *r.classdata.offset(q as isize);
+                  
+                  *(*part_classdata.offset(0)).offset(class_set as isize) = r.classdata[q as usize].as_ptr();
                }
                
                let mut i = 0;
@@ -4303,7 +4325,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
                     // goto done;
                     break 'done; 
                   } 
-                  *(*part_classdata.offset(0)).offset(class_set as isize) = *r.classdata.offset(q as isize);
+                  *(*part_classdata.offset(0)).offset(class_set as isize) = r.classdata[q as usize].as_ptr();
                }
                let mut i = 0;
                while i < classwords && pcount < part_read {
@@ -4338,7 +4360,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
                     // goto done;
                     break 'done;  
                   } 
-                  *(*part_classdata.offset(0)).offset(class_set as isize) = *r.classdata.offset(q as isize);
+                  *(*part_classdata.offset(0)).offset(class_set as isize) = r.classdata[q as usize].as_ptr();
                }
                let mut i = 0;
                while i < classwords && pcount < part_read {
@@ -4381,7 +4403,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
                     //   goto done;
                     break 'done;
                   }
-                  *(*part_classdata.offset(j as isize)).offset(class_set as isize) = *r.classdata.offset(temp as isize);
+                  *(*part_classdata.offset(j as isize)).offset(class_set as isize) = r.classdata[temp as usize].as_ptr();
                }
             }
          }
@@ -5061,7 +5083,6 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       let mut values: *mut u32;
       let mut sorted_count: i32;
       let mut total : i32 = 0;
-      let mut lengths: *mut u8;
       let mut c : &mut Codebook= FORCE_BORROW_MUT!( &mut f.codebooks[i as usize] );
       CHECK!(f);
       x = get_bits(f, 8) as u8; if x != 0x42            {return error(f, invalid_setup);}
@@ -5077,14 +5098,15 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       if c.dimensions == 0 && c.entries != 0    {return error(f, invalid_setup);}
 
+      let mut lengths: *mut u8;
+      let mut _lengths: Vec<u8> = Vec::new(); // NOTE(bungcip): just temporary
       if c.sparse == true {
-         lengths = setup_temp_malloc(f, c.entries) as *mut u8;
+          _lengths.resize(c.entries as usize, 0);
+          lengths = _lengths.as_mut_ptr();
       }else{
-         c.codeword_lengths = setup_malloc(f, c.entries) as *mut u8 ;
-        lengths = c.codeword_lengths;
+          c.codeword_lengths.resize(c.entries as usize, 0);
+        lengths = c.codeword_lengths.as_mut_ptr();
       }
-
-      if lengths.is_null() {return error(f, outofmem);}
 
       if is_ordered  {
          let mut current_entry : i32 = 0;
@@ -5099,15 +5121,17 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          }
       } else {
          for j in 0 .. c.entries {
-            let present : i32 = if c.sparse == true { get_bits(f,1) } else { 1 } as i32;
+            let present = if c.sparse == true { get_bits(f,1) } else { 1 };
+            let mut lengths_at_j = lengths.offset(j as isize);
+            
             if present != 0 {
-               *lengths.offset(j as isize) = ( get_bits(f, 5) + 1) as u8;
+               *lengths_at_j = ( get_bits(f, 5) + 1) as u8;
                total += 1;
-               if *lengths.offset(j as isize) == 32 {
+               if *lengths_at_j == 32 {
                   return error(f, invalid_setup);
                }
             } else {
-               *lengths.offset(j as isize) = NO_CODE as u8;
+               *lengths_at_j = NO_CODE as u8;
             }
          }
       }
@@ -5118,11 +5142,8 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             f.setup_temp_memory_required = c.entries as u32;
          }
 
-         c.codeword_lengths = setup_malloc(f, c.entries) as *mut u8;
-         if c.codeword_lengths.is_null() {return error(f, outofmem);}
-         std::ptr::copy_nonoverlapping(lengths, c.codeword_lengths, c.entries as usize);
-         setup_temp_free(f, lengths as *mut c_void, c.entries); // note this is only safe if there have been no intervening temp mallocs!
-         lengths = c.codeword_lengths;
+         c.codeword_lengths = _lengths.clone();
+         lengths = c.codeword_lengths.as_mut_ptr();
          c.sparse = false;
       }
 
@@ -5131,9 +5152,10 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          sorted_count = total;
       } else {
          sorted_count = 0;
-         for j in 0 .. c.entries {
-            if *lengths.offset(j as isize) > STB_FAST_HUFFMAN_LENGTH as u8 && 
-                *lengths.offset(j as isize) != NO_CODE as u8 {
+         for j in 0 .. c.entries as isize {
+            let lengths_at_j = lengths.offset(j);
+            if *lengths_at_j > STB_FAST_HUFFMAN_LENGTH as u8 && 
+                *lengths_at_j != NO_CODE as u8 {
                sorted_count += 1;
             }
          }
@@ -5144,14 +5166,11 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       CHECK!(f);
       if c.sparse == false {
-         c.codewords = setup_malloc(f, mem::size_of_val(&*c.codewords.offset(0)) as i32 * c.entries) as *mut u32;
-         if c.codewords.is_null()                  {return error(f, outofmem);}
+          c.codewords.resize(c.entries as usize, 0);
       } else {
          if c.sorted_entries != 0 {
-            c.codeword_lengths = setup_malloc(f, c.sorted_entries) as *mut u8;
-            if c.codeword_lengths.is_null()           {return error(f, outofmem);}
-            c.codewords = setup_temp_malloc(f, mem::size_of::<u32>() as i32 * c.sorted_entries) as *mut u32;
-            if c.codewords.is_null()                  {return error(f, outofmem);}
+             c.codeword_lengths.resize(c.sorted_entries as usize, 0);
+            c.codewords.resize(c.sorted_entries as usize, 0);
             values = setup_temp_malloc(f, mem::size_of::<u32>()  as i32* c.sorted_entries) as *mut u32 ;
             if values.is_null()                        {return error(f, outofmem);}
          }
@@ -5163,30 +5182,33 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       {
           let temp_entries = c.entries; // note(bungcip): just to satisfy borrow checker
-      if compute_codewords(c, lengths, temp_entries, values) == false {
-         if c.sparse == true {setup_temp_free(f, values as *mut c_void, 0);}
-         return error(f, invalid_setup);
-      }
+          // NOTE(bungcip): change to slice
+            if compute_codewords(c, lengths, temp_entries, values) == false {
+                if c.sparse == true {setup_temp_free(f, values as *mut c_void, 0);}
+                return error(f, invalid_setup);
+            }
       }
 
       if c.sorted_entries != 0 {
          // allocate an extra slot for sentinels
-         c.sorted_codewords = setup_malloc(f, mem::size_of::<u32>() as i32 * (c.sorted_entries+1)) as *mut u32;
-         if c.sorted_codewords.is_null() {return error(f, outofmem);}
+         c.sorted_codewords.resize( (c.sorted_entries+1) as usize, 0);
+        //  c.sorted_codewords = setup_malloc(f, mem::size_of::<u32>() as i32 * (c.sorted_entries+1)) as *mut u32;
+        //  if c.sorted_codewords.is_null() {return error(f, outofmem);}
          // allocate an extra slot at the front so that c.sorted_values[-1] is defined
          // so that we can catch that case without an extra if
-         c.sorted_values    = setup_malloc(f, mem::size_of::<i32>() as i32 * (c.sorted_entries+1)) as *mut i32;
-         if c.sorted_values.is_null() { return error(f, outofmem); }
-         c.sorted_values = c.sorted_values.offset(1);
-         *c.sorted_values.offset(-1) = -1;
+        //  c.sorted_values    = setup_malloc(f, mem::size_of::<i32>() as i32 * (c.sorted_entries+1)) as *mut i32;
+        //  if c.sorted_values.is_null() { return error(f, outofmem); }
+        //  c.sorted_values = c.sorted_values.offset(1);
+        //  *c.sorted_values.offset(-1) = -1;
+        c.sorted_values.resize(c.sorted_entries as usize, 0);
+         
+         // NOTE(bungcip): change to use slice
          compute_sorted_huffman(c, lengths, values);
       }
 
       if c.sparse == true {
          setup_temp_free(f, values as *mut c_void, mem::size_of::<u32>() as i32 * c.sorted_entries);
-         setup_temp_free(f, c.codewords as *mut c_void, mem::size_of::<u32>() as i32 *c.sorted_entries);
-         setup_temp_free(f, lengths as *mut c_void, c.entries);
-         c.codewords = std::ptr::null_mut();
+        c.codewords.clear();
       }
 
       compute_accelerated_huffman(c);
@@ -5219,30 +5241,27 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          'skip: loop {
          if c.lookup_type == 1 {
             let sparse = c.sparse;
-            let mut last : f32 = 0.0;
             // pre-expand the lookup1-style multiplicands, to avoid a divide in the inner loop
             if sparse {
                if c.sorted_entries == 0 { 
                 //    goto skip;
                 break 'skip;
                 }
-               c.multiplicands = setup_malloc(f, mem::size_of::<CodeType>() as i32 * c.sorted_entries * c.dimensions) as *mut CodeType;
+               c.multiplicands.resize( (c.sorted_entries * c.dimensions) as usize, 0.0);
             } else{
-               c.multiplicands = setup_malloc(f, mem::size_of::<CodeType>() as i32 * c.entries        * c.dimensions) as *mut CodeType;
+               c.multiplicands.resize( (c.entries * c.dimensions) as usize, 0.0);
             }
-            if c.multiplicands.is_null() { 
-                setup_temp_free(f, mults as *mut c_void, mem::size_of::<u16>() as i32 * c.lookup_values as i32); 
-                return error(f, outofmem);
-            }
+            
             len = if sparse  { c.sorted_entries } else {c.entries};
+            let mut last : f32 = 0.0;
             for j in 0 .. len {
-               let z : u32 = if sparse  { *c.sorted_values.offset(j as isize) } else {j} as u32;
+               let z : u32 = if sparse  { c.sorted_values[j as usize] } else {j} as u32;
                let mut div: u32 = 1;
                for k in 0 .. c.dimensions {
                   let off: i32 = (z / div) as i32 % c.lookup_values as i32;
                 //   let mut val: f32 = *mults.offset(off as isize) as f32; // NOTE(bungcip) : maybe bugs?
                   let val = *mults.offset(off as isize) as f32 * c.delta_value + c.minimum_value + last;
-                  *c.multiplicands.offset( (j*c.dimensions + k) as isize) = val;
+                  c.multiplicands[ (j*c.dimensions + k) as usize] = val;
                   if c.sequence_p !=0 {
                      last = val;
                   }
@@ -5262,15 +5281,11 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          {
             let mut last = 0.0;
             CHECK!(f);
-            c.multiplicands = setup_malloc(f, mem::size_of::<CodeType>() as i32 * c.lookup_values as i32) as *mut CodeType;
-            if c.multiplicands.is_null() {
-                 setup_temp_free(f, mults as *mut c_void, mem::size_of::<CodeType>() as i32 * c.lookup_values as i32); 
-                 return error(f, outofmem);
-            }
+            c.multiplicands.resize(c.lookup_values as usize, 0.0);
             for j in 0 .. c.lookup_values as isize {
                let val : f32 = *mults.offset(j) as f32 * c.delta_value + c.minimum_value + last;
-               *c.multiplicands.offset(j) = val;
-               if c.sequence_p != 0{
+               c.multiplicands[j as usize] = val;
+               if c.sequence_p != 0 {
                   last = val;
                }
             }
@@ -5418,24 +5433,16 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       }
       // precompute the classifications[] array to avoid inner-loop mod/divide
       // call it 'classdata' since we already have r.classifications
-      {
-          // satify borrow checker
-          let classdata_size =  mem::size_of::<*mut u8>() as i32 * 
-            f.codebooks[r.classbook as usize].entries;
-          r.classdata = setup_malloc(f, classdata_size) as *mut *mut u8;
-          if r.classdata.is_null() {return error(f, outofmem);}
-          std::ptr::write_bytes(r.classdata, 0, f.codebooks[r.classbook as usize].entries as usize);
-      }
-      for j in 0 .. f.codebooks[r.classbook as usize].entries {
+      // NOTE(bungcip): remove resize?
+      r.classdata.resize(f.codebooks[r.classbook as usize].entries as usize, Vec::new());
+      for j in 0 .. f.codebooks[r.classbook as usize].entries as usize {
          let classwords = f.codebooks[r.classbook as usize].dimensions;
-         let mut temp = j;
+         r.classdata[j].resize(classwords as usize, 0);
          
-         *r.classdata.offset(j as isize) = setup_malloc(f, mem::size_of::<u8>() as i32 * classwords) as *mut u8;
-         if (*r.classdata.offset(j as isize)).is_null() {return error(f, outofmem);}
-         
+         let mut temp = j as i32;
          let mut k = classwords-1;
          while k >= 0 {
-            *(*r.classdata.offset(j as isize)).offset(k as isize) = (temp % r.classifications as i32) as u8;
+            r.classdata[j][k as usize] = (temp % r.classifications as i32) as u8;
             temp /= r.classifications as i32;
             k -= 1;
          }
