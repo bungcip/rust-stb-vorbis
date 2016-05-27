@@ -1053,13 +1053,13 @@ fn get_window(f: &mut Vorbis, len: i32) -> *mut f32
    unreachable!();
 }
 
-unsafe fn compute_bitreverse(n: i32, rev: *mut u16)
+fn compute_bitreverse(n: i32, rev: &mut [u16])
 {
    let ld = ilog(n) - 1; // ilog is off-by-one from normal definitions
    let n8 = n >> 3;
    
    for i in 0 .. n8 {
-       *rev.offset(i as isize) = ((bit_reverse(i as u32) >> (32-ld+3)) << 2) as u16;
+       rev[i as usize] = ((bit_reverse(i as u32) >> (32-ld+3)) << 2) as u16;
    }
 }
 
@@ -1133,21 +1133,19 @@ fn compute_twiddle_factors(n: i32, a: *mut f32, b: *mut f32, c: *mut f32)
 
 
 
-fn neighbors(x: *mut u16, n: i32, plow: *mut i32, phigh: *mut i32)
+fn neighbors(x: &[u16], n: usize, plow: &mut i32, phigh: &mut i32)
 {
     let mut low : i32 = -1;
     let mut high : i32 = 65536;
     
     for i in 0 .. n {
-        unsafe {
-            if (*x.offset(i as isize) as i32) > low && (*x.offset(i as isize) as i32) < (*x.offset(n as isize) as i32) { 
-                *plow = i;
-                low = *x.offset(i as isize) as i32; 
-            }
-            if (*x.offset(i as isize) as i32) < high && (*x.offset(i as isize) as i32) > (*x.offset(n as isize) as i32) { 
-                *phigh = i; 
-                high = *x.offset(i as isize) as i32;
-            }
+        if (x[i] as i32) > low && (x[i] as i32) < (x[n] as i32) { 
+            *plow = i as i32;
+            low = x[i] as i32; 
+        }
+        if (x[i] as i32) < high && (x[i] as i32) > (x[n] as i32) { 
+            *phigh = i as i32; 
+            high = x[i] as i32;
         }
     }
 }
@@ -1915,9 +1913,8 @@ unsafe fn init_blocksize(f: &mut Vorbis, b: usize, n: usize)
    f.window[b].resize(n2, 0.0);
    compute_window(n as i32, f.window[b].as_mut_ptr());
 
-   // NOTE(bungcip): change to use slice instead of pointer
    f.bit_reverse[b].resize(n8, 0);
-   compute_bitreverse(n as i32, f.bit_reverse[b].as_mut_ptr());
+   compute_bitreverse(n as i32, &mut f.bit_reverse[b]);
 }
 
 // accelerated huffman table allows fast O(1) match of all symbols
@@ -3753,7 +3750,7 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut Vorbis, data: *mut u8, mut dat
       f.scan[i].bytes_left -= m;
       f.scan[i].crc_so_far = crc;
       if f.scan[i].bytes_left == 0 {
-         // does it match?
+         // does it match? 
          if f.scan[i].crc_so_far == f.scan[i].goal_crc {
             // Houston, we have page
             data_len = n+m; // consumption amount is wherever that scan ended
@@ -5365,16 +5362,16 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          // NOTE(bungcip): using rust sort instead of libc qsort
          p.sort();
          
-         for j in 0 .. g.values {
-            g.sorted_order[j as usize] = p[j as usize].y as u8;
+         for j in 0 .. g.values as usize {
+            g.sorted_order[j] = p[j].y as u8;
          }
          // precompute the neighbors
-         for j in 2 .. g.values {
-            let mut low : i32 = 0;
-            let mut hi: i32 = 0;
-            neighbors(g.xlist.as_mut_ptr(), j, &mut low, &mut hi);
-            g.neighbors[j as usize][0] = low as u8;
-            g.neighbors[j as usize][1] = hi as u8;
+         for j in 2 .. g.values as usize {
+            let mut low = 0;
+            let mut hi = 0;
+            neighbors(&g.xlist, j, &mut low, &mut hi);
+            g.neighbors[j][0] = low as u8;
+            g.neighbors[j][1] = hi as u8;
          }
 
          if g.values > longest_floorlist{
