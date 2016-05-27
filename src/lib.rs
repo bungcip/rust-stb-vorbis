@@ -853,30 +853,6 @@ unsafe fn setup_free(f: &mut Vorbis, p: *mut c_void)
 }
 
 
-unsafe fn setup_temp_malloc(f: &mut Vorbis, sz: i32) -> *mut c_void
-{
-   let sz = (sz+3) & !3;
-   f.setup_memory_required += sz as u32;
-   if f.alloc.alloc_buffer.is_null() == false {
-      if f.temp_offset - sz < f.setup_offset {
-          return std::ptr::null_mut();
-      }
-      f.temp_offset -= sz;
-      return f.alloc.alloc_buffer.offset(f.temp_offset as isize) as *mut c_void;
-   }
-   return libc::malloc(sz as usize);
-}
-
-
-unsafe fn setup_temp_free(f: &mut Vorbis, p: *mut c_void, sz: i32)
-{
-   if f.alloc.alloc_buffer.is_null() == false {
-      f.temp_offset += (sz+3)&!3;
-      return;
-   }
-   libc::free(p);
-}
-
 const  CRC32_POLY  : u32 =  0x04c11db7;   // from spec
 
 
@@ -2790,8 +2766,8 @@ pub unsafe fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffe
           while i < z {
             // memcpy(buffer[i]+n, f.channel_buffers[i]+f.channel_buffer_start, sizeof(float)*k);
             std::ptr::copy_nonoverlapping(
-                (*buffer.offset(i as isize)).offset(n as isize),
                 f.channel_buffers[i as usize].offset(f.channel_buffer_start as isize),
+                (*buffer.offset(i as isize)).offset(n as isize),
                 std::mem::size_of::<f32>() * k as usize
             );
             i += 1;
@@ -3126,16 +3102,16 @@ unsafe fn crc32_update(crc: u32, byte: u8) -> u32
 }
 
 // given a sufficiently large block of memory, make an array of pointers to subblocks of it
-unsafe fn make_block_array(mem: *mut c_void, count: i32, size: usize) -> *mut c_void
-{
-   let p : *mut *mut c_void  = std::mem::transmute(mem);
-   let mut q : *mut i8 = p.offset(count as isize) as *mut i8;
-   for i in 0 .. count {
-      *p.offset(i as isize) = q as *mut c_void;
-      q = q.offset(size as isize);
-   }
-   return p as *mut c_void;
-}
+// unsafe fn make_block_array(mem: *mut c_void, count: i32, size: usize) -> *mut c_void
+// {
+//    let p : *mut *mut c_void  = std::mem::transmute(mem);
+//    let mut q : *mut i8 = p.offset(count as isize) as *mut i8;
+//    for i in 0 .. count {
+//       *p.offset(i as isize) = q as *mut c_void;
+//       q = q.offset(size as isize);
+//    }
+//    return p as *mut c_void;
+// }
 
 // seeking is implemented with a binary search, which narrows down the range to
 // 64K, before using a linear search (because finding the synchronization
@@ -4172,25 +4148,6 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
    return true;
 }
 
-macro_rules! array_size_required {
-    ($count: expr, $size: expr) => {
-        ($count as usize * (::std::mem::size_of::<c_void>() + ($size as usize)))
-    }
-}
-
-macro_rules! temp_alloc {
-    ($f: expr, $size: expr) => {
-        if $f.alloc.alloc_buffer.is_null() == false {
-            setup_temp_malloc($f, $size as i32)
-        }else{
-            // NOTE(bungcip): for now just allocate using libc malloc & leak....
-            //                rust don't have alloca() 
-            // alloca(size)
-            libc::malloc($size)
-        }
-    }
-}
-
 macro_rules! temp_alloc_save {
     ($f: expr) => {
         $f.temp_offset
@@ -4203,26 +4160,8 @@ macro_rules! temp_alloc_restore {
     }
 }
 
-macro_rules! temp_free {
-    ($f: expr, $p: expr) => {
-        0
-    }
-}
-
 macro_rules! temp_alloc_save {
     ($f: expr) => ($f.temp_offset)
-}
-
-
-macro_rules! temp_block_array {
-    ($f: expr, $count: expr, $size: expr) => {
-        make_block_array(
-            temp_alloc!(
-                $f,
-                array_size_required!($count,$size)
-            ) as *mut c_void, 
-            $count, $size)        
-    }
 }
 
 
@@ -4237,14 +4176,13 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
    let part_read : i32 = n_read / r.part_size as i32;
    let temp_alloc_point : i32 = temp_alloc_save!(f);
    
-   // NOTE(bungcip): make it as slice
-   let part_classdata: *mut *mut *const u8 = {
-       let temp_1 = f.channels;
-       let zz = temp_block_array!(f,
-            temp_1, part_read as usize * mem::size_of::<*mut *const u8>() 
-        );
-      zz 
-   } as *mut *mut *const u8;
+   // NOTE(bungcip): optimize?
+   let mut part_classdata = Vec::with_capacity(f.channels as usize);
+   for _ in 0 .. f.channels {
+       let mut temp_1: Vec<Vec<u8>> = Vec::with_capacity(part_read as usize);
+       temp_1.resize(part_read as usize, Vec::new());
+       part_classdata.push( temp_1 );
+   }
 
    CHECK!(f);
 
@@ -4288,13 +4226,14 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
                     break 'done;  
                   } 
                   
-                  *(*part_classdata.offset(0)).offset(class_set as isize) = r.classdata[q as usize].as_ptr();
+                  // NOTE(bungcip): remove .clone() !!!
+                  part_classdata[0][class_set as usize] = r.classdata[q as usize].clone();
                }
                
                let mut i = 0;
                while i < classwords && pcount < part_read {
                   let mut z : i32 = r.begin as i32 + (pcount*r.part_size as i32);
-                  let c : i32 = *(*(*part_classdata.offset(0)).offset(class_set as isize)).offset(i as isize) as i32;
+                  let c : i32 = part_classdata[0][class_set as usize][i as usize] as i32;
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
@@ -4325,12 +4264,13 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
                     // goto done;
                     break 'done; 
                   } 
-                  *(*part_classdata.offset(0)).offset(class_set as isize) = r.classdata[q as usize].as_ptr();
+                  // NOTE: remove .clone() !!!
+                  part_classdata[0][class_set as usize] = r.classdata[q as usize].clone();
                }
                let mut i = 0;
                while i < classwords && pcount < part_read {
                   let mut z : i32 = r.begin as i32 + pcount*r.part_size as i32;
-                  let c : i32 = *(*(*part_classdata.offset(0)).offset(class_set as isize)).offset(i as isize) as i32;
+                  let c : i32 = part_classdata[0][class_set as usize][i as usize] as i32;
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
@@ -4360,12 +4300,14 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
                     // goto done;
                     break 'done;  
                   } 
-                  *(*part_classdata.offset(0)).offset(class_set as isize) = r.classdata[q as usize].as_ptr();
+                  
+                  // NOTE(bungcip): remove .clone() !!
+                  part_classdata[0][class_set as usize] = r.classdata[q as usize].clone();
                }
                let mut i = 0;
                while i < classwords && pcount < part_read {
                   let mut z : i32 = r.begin as i32 + pcount*r.part_size as i32;
-                  let c : i32 = *(*(*part_classdata.offset(0)).offset(class_set as isize)).offset(i as isize) as i32;
+                  let c : i32 = part_classdata[0][class_set as usize][i as usize] as i32;
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
@@ -4403,7 +4345,9 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
                     //   goto done;
                     break 'done;
                   }
-                  *(*part_classdata.offset(j as isize)).offset(class_set as isize) = r.classdata[temp as usize].as_ptr();
+                  
+                  // NOTE(bungcip): remove .clone() !!!
+                  part_classdata[j as usize][class_set as usize] = r.classdata[temp as usize].clone();
                }
             }
          }
@@ -4411,7 +4355,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
             while i < classwords && pcount < part_read {
             for j in 0 .. ch {
                if do_not_decode[j as usize] == false {
-                  let c : i32 = *(*(*part_classdata.offset(j as isize)).offset(class_set as isize)).offset(i as isize) as i32;
+                  let c : i32 = part_classdata[j as usize][class_set as usize][i as usize] as i32;
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let target = residue_buffers[j as usize];
@@ -4436,7 +4380,6 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
     } // loop done
 //   done:
    CHECK!(f);
-   temp_free!(f,part_classdata);
    temp_alloc_restore!(f,temp_alloc_point);
 }
 
@@ -4689,13 +4632,13 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    let n2 : i32 = n >> 1;
    let n4 : i32 = n >> 2; 
    let n8 : i32 = n >> 3;
-   let mut l : i32;
-   let ld: i32;
    // @OPTIMIZE: reduce register pressure by using fewer variables?
    let save_point : i32 = temp_alloc_save!(f);
-   let buf2 : *mut f32 = temp_alloc!(f, n2 as usize * mem::size_of::<f32>() ) as *mut f32;
-   let u: *mut f32;
-   let v: *mut f32;
+   
+   // NOTE(bungcip): need resize() ?
+   let mut buf2 : Vec<f32> = Vec::with_capacity(n2 as usize);
+   buf2.resize(n2 as usize, 0.0);
+   
 //    twiddle factors
    let a: *mut f32 = f.a[blocktype as usize].as_mut_ptr();
 
@@ -4719,11 +4662,11 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    // are 1/2 too small, and need to be compensated for.
 
    {
-       let mut d: *mut f32; let mut e: *mut f32; let mut aa: *mut f32; let e_stop: *mut f32;
-      d = buf2.offset( (n2-2) as isize);
-      aa = a;
-      e = buffer.offset(0);
-      e_stop = buffer.offset(n2 as isize);
+      let mut d  = buf2.as_mut_ptr().offset( (n2-2) as isize);
+      let mut aa = a;
+
+      let e_stop = buffer.offset(n2 as isize);
+      let mut e = buffer.offset(0);
       while e != e_stop {
          *d.offset(1) = *e.offset(0) * *aa.offset(0) - *e.offset(2) * *aa.offset(1);
          *d.offset(0) = *e.offset(0) * *aa.offset(1) + *e.offset(2) * *aa.offset(0);
@@ -4732,8 +4675,8 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
          e = e.offset(4);
       }
 
-      e = buffer.offset( (n2-3) as isize);
-      while d >= buf2 {
+      let mut e = buffer.offset( (n2-3) as isize);
+      while d >= buf2.as_mut_ptr() {
          *d.offset(1) = -*e.offset(2) * *aa.offset(0) - -*e.offset(0) * *aa.offset(1);
          *d.offset(0) = -*e.offset(2) * *aa.offset(1) + -*e.offset(0) * *aa.offset(0);
          d = d.offset(-2);
@@ -4746,8 +4689,8 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    // possibly swap their meaning as we change which operations
    // are in place
 
-   u = buffer;
-   v = buf2;
+   let u: *mut f32 = buffer;
+   let v = buf2.as_mut_ptr();
 
    // step 2    (paper output is w, now u)
    // this could be in place, but the data ends up in the wrong
@@ -4789,7 +4732,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    }
 
    // step 3
-   ld = ilog(n) - 1; // ilog is off-by-one from normal definitions
+   let ld: i32 = ilog(n) - 1; // ilog is off-by-one from normal definitions
 
    // optimized step 3:
 
@@ -4808,28 +4751,26 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*2, -(n >> 4), a, 16);
    imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*3, -(n >> 4), a, 16);
 
-   l=2;
+   let mut l : i32 = 2;
    while l < (ld-3)>>1 {
-      let k0 : i32 = n >> (l+2);
-      let k0_2 : i32 = k0>>1;
-      let lim : i32 = 1 << (l+1);
+      let k0   = n  >> (l+2);
+      let k0_2 = k0 >> 1;
+      let lim  = 1  << (l+1);
       for i in 0 .. lim {
          imdct_step3_inner_r_loop(n >> (l+4), u, n2-1 - k0*i, -k0_2, a, 1 << (l+3));
       }
-    l += 1;
+      l += 1;
    }
 
    while l < ld-6 {
-      let k0 : i32 = n >> (l+2);
+      let k0 = n >> (l+2);
       let k1 = 1 << (l+3);
       let k0_2 = k0>>1;
-      let rlim : i32 = n >> (l+6);
-      let mut r : i32;
+      let rlim = n >> (l+6);
       let lim : i32 = 1 << (l+1);
-      let mut i_off : i32;
       let mut a0 : *mut f32 = a;
-      i_off = n2-1;
-      r = rlim;
+      let mut i_off : i32 = n2-1;
+      let mut r : i32 = rlim;
       while r > 0 {
          imdct_step3_inner_s_loop(lim, u, i_off, -k0_2, a0, k1, k0);
          a0 = a0.offset( (k1*4) as isize);
@@ -4837,7 +4778,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
          
         r -= 1;
       }
-    l += 1;
+      l += 1;
    }
 
    // iterations with count:
@@ -4852,8 +4793,6 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    // step 4, 5, and 6
    // cannot be in-place because of step 5
    {
-       // NOTE(bungcip): change to use slice
-      let mut bitrev : *mut u16 = f.bit_reverse[blocktype as usize].as_mut_ptr();
       // weirdly, I'd have thought reading sequentially and writing
       // erratically would have been better than vice-versa, but in
       // fact that's not what my testing showed. (That is, with
@@ -4861,16 +4800,16 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
 
       let mut d0 : *mut f32 = v.offset( (n4-4) as isize);
       let mut d1 : *mut f32 = v.offset( (n2-4) as isize);
-      while d0 >= v {
-         let mut k4;
+      let mut bitrev = f.bit_reverse[blocktype as usize].iter();
 
-         k4 = *bitrev.offset(0);
+      while d0 >= v {
+         let k4 = bitrev.next().unwrap();
          *d1.offset(3) = *u.offset((k4+0) as isize);
          *d1.offset(2) = *u.offset((k4+1) as isize);
          *d0.offset(3) = *u.offset((k4+2) as isize);
          *d0.offset(2) = *u.offset((k4+3) as isize);
 
-         k4 = *bitrev.offset(1);
+         let k4 = bitrev.next().unwrap();
          *d1.offset(1) = *u.offset((k4+0) as isize);
          *d1.offset(0) = *u.offset((k4+1) as isize);
          *d0.offset(1) = *u.offset((k4+2) as isize);
@@ -4878,35 +4817,31 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
          
          d0 = d0.offset(-4);
          d1 = d1.offset(-4);
-         bitrev = bitrev.offset(2);
+        //  bitrev = bitrev[2..];
       }
    }
    // (paper output is u, now v)
 
 
    // data must be in buf2
-   assert!(v == buf2);
+   assert!(v == buf2.as_mut_ptr());
 
    // step 7   (paper output is v, now v)
    // this is now in place
    {
       let mut c = f.c[blocktype as usize].as_mut_ptr();
-      let mut d : *mut f32; let mut e : *mut f32;
-
-      d = v;
-      e = v.offset( (n2 - 4) as isize );
+      let mut d = v;
+      let mut e = v.offset( (n2 - 4) as isize );
 
       while d < e {
-         let mut a02: f32; let mut a11: f32;let mut b0: f32;let mut b1: f32;let mut b2: f32;let mut b3: f32;
+         let mut a02 = *d.offset(0) - *e.offset(2);
+         let mut a11 = *d.offset(1) + *e.offset(3);
 
-         a02 = *d.offset(0) - *e.offset(2);
-         a11 = *d.offset(1) + *e.offset(3);
+         let mut b0 = *c.offset(1) * a02 + *c.offset(0)*a11;
+         let mut b1 = *c.offset(1) * a11 - *c.offset(0)*a02;
 
-         b0 = *c.offset(1) * a02 + *c.offset(0)*a11;
-         b1 = *c.offset(1) * a11 - *c.offset(0)*a02;
-
-         b2 = *d.offset(0) + *e.offset( 2);
-         b3 = *d.offset(1) - *e.offset( 3);
+         let mut b2 = *d.offset(0) + *e.offset( 2);
+         let mut b3 = *d.offset(1) - *e.offset( 3);
 
          *d.offset(0) = b2 + b0;
          *d.offset(1) = b3 + b1;
@@ -4945,7 +4880,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
 
    {
       let mut b = f.b[blocktype as usize].as_mut_ptr().offset( (n2 - 8) as isize);
-      let mut e = buf2.offset( (n2 - 8) as isize );
+      let mut e = buf2.as_mut_ptr().offset( (n2 - 8) as isize );
       let mut d0 = buffer.offset(0);
       let mut d1 = buffer.offset( (n2-4) as isize);
       let mut d2 = buffer.offset( n2 as isize);
@@ -4992,19 +4927,15 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
       }
    }
 
-   temp_free!(f,buf2);
    temp_alloc_restore!(f,save_point);
 }
 
 pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 {
-    let mut header : [u8; 6] = mem::zeroed();
-    let mut x : u8;
-    let mut y : u8;
-//    int len,i,j,k, max_submaps = 0;
+   let mut header : [u8; 6] = [0; 6];
    let mut max_submaps = 0;
    let mut longest_floorlist = 0;
-    use VorbisError::*;
+   use VorbisError::*;
 
    // first page, first packet
 
@@ -5029,7 +4960,8 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    get32(f); // bitrate_maximum
    get32(f); // bitrate_nominal
    get32(f); // bitrate_minimum
-   x  = get8(f);
+
+   let mut x : u8 = get8(f);
    {
       let log0 : i32 = (x & 15) as i32;
       let log1 : i32 = (x >> 4) as i32;
@@ -5075,12 +5007,12 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    if vorbis_validate(&header) == false                    {return error(f, invalid_setup);}
 
    // codebooks
+   let mut y : u8;
 
    f.codebook_count = (get_bits(f,8) + 1) as i32;
    f.codebooks.resize(f.codebook_count as usize, Codebook::default());
    // NOTE(bungcip): no need to resize f.codebooks? just push...
    for i in 0 .. f.codebook_count {
-      let mut values: *mut u32;
       let mut sorted_count: i32;
       let mut total : i32 = 0;
       let mut c : &mut Codebook= FORCE_BORROW_MUT!( &mut f.codebooks[i as usize] );
@@ -5105,12 +5037,12 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
           lengths = _lengths.as_mut_ptr();
       }else{
           c.codeword_lengths.resize(c.entries as usize, 0);
-        lengths = c.codeword_lengths.as_mut_ptr();
+          lengths = c.codeword_lengths.as_mut_ptr();
       }
 
       if is_ordered  {
-         let mut current_entry : i32 = 0;
-         let mut current_length : i32 = (get_bits(f,5) + 1) as i32;
+         let mut current_entry = 0;
+         let mut current_length = (get_bits(f,5) + 1) as i32;
          while current_entry < c.entries {
             let limit : i32 = c.entries - current_entry;
             let n : i32 = get_bits(f, ilog(limit)) as i32;
@@ -5162,17 +5094,16 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       }
 
       c.sorted_entries = sorted_count;
-      values = std::ptr::null_mut();
+      let mut values: Vec<u32> = Vec::new();
 
       CHECK!(f);
       if c.sparse == false {
           c.codewords.resize(c.entries as usize, 0);
       } else {
          if c.sorted_entries != 0 {
-             c.codeword_lengths.resize(c.sorted_entries as usize, 0);
+            c.codeword_lengths.resize(c.sorted_entries as usize, 0);
             c.codewords.resize(c.sorted_entries as usize, 0);
-            values = setup_temp_malloc(f, mem::size_of::<u32>()  as i32* c.sorted_entries) as *mut u32 ;
-            if values.is_null()                        {return error(f, outofmem);}
+            values.resize(c.sorted_entries as usize, 0);
          }
          let size: u32 = c.entries as u32 + (mem::size_of::<u32>() + mem::size_of::<u32>()) as u32 * c.sorted_entries as u32;
          if size > f.setup_temp_memory_required {
@@ -5183,8 +5114,10 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       {
           let temp_entries = c.entries; // note(bungcip): just to satisfy borrow checker
           // NOTE(bungcip): change to slice
-            if compute_codewords(c, lengths, temp_entries, values) == false {
-                if c.sparse == true {setup_temp_free(f, values as *mut c_void, 0);}
+            if compute_codewords(c, lengths, temp_entries, values.as_mut_ptr()) == false {
+                // if c.sparse == true {
+                //     // setup_temp_free(f, values as *mut c_void, 0);
+                // }
                 return error(f, invalid_setup);
             }
       }
@@ -5192,23 +5125,15 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       if c.sorted_entries != 0 {
          // allocate an extra slot for sentinels
          c.sorted_codewords.resize( (c.sorted_entries+1) as usize, 0);
-        //  c.sorted_codewords = setup_malloc(f, mem::size_of::<u32>() as i32 * (c.sorted_entries+1)) as *mut u32;
-        //  if c.sorted_codewords.is_null() {return error(f, outofmem);}
-         // allocate an extra slot at the front so that c.sorted_values[-1] is defined
-         // so that we can catch that case without an extra if
-        //  c.sorted_values    = setup_malloc(f, mem::size_of::<i32>() as i32 * (c.sorted_entries+1)) as *mut i32;
-        //  if c.sorted_values.is_null() { return error(f, outofmem); }
-        //  c.sorted_values = c.sorted_values.offset(1);
-        //  *c.sorted_values.offset(-1) = -1;
-        c.sorted_values.resize(c.sorted_entries as usize, 0);
+         c.sorted_values.resize(c.sorted_entries as usize, 0);
          
          // NOTE(bungcip): change to use slice
-         compute_sorted_huffman(c, lengths, values);
+         compute_sorted_huffman(c, lengths, values.as_mut_ptr());
       }
 
       if c.sparse == true {
-         setup_temp_free(f, values as *mut c_void, mem::size_of::<u32>() as i32 * c.sorted_entries);
-        c.codewords.clear();
+        values.clear();
+         c.codewords.clear();
       }
 
       compute_accelerated_huffman(c);
@@ -5227,15 +5152,14 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             c.lookup_values = c.entries as u32 * c.dimensions as u32;
          }
          if c.lookup_values == 0 {return error(f, invalid_setup);}
-         let mults : *mut u16 = setup_temp_malloc(f, mem::size_of::<u16>() as i32 * c.lookup_values as i32) as *mut u16;
-         if mults.is_null() {return error(f, outofmem);}
-         for j in 0 .. c.lookup_values {
-            let q : i32 = get_bits(f, c.value_bits as i32) as i32;
-            if q as u32 == EOP as u32 { 
-                setup_temp_free(f,mults as *mut c_void,mem::size_of::<u16>() as i32 * c.lookup_values as i32); 
+         
+         let mut mults : Vec<u16> = Vec::with_capacity(c.lookup_type as usize);
+         for _ in 0 .. c.lookup_values {
+            let q = get_bits(f, c.value_bits as i32);
+            if q == EOP as u32 { 
                 return error(f, invalid_setup); 
             }
-            *mults.offset(j as isize) = q as u16;
+            mults.push(q as u16);
          }
          
          'skip: loop {
@@ -5260,7 +5184,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
                for k in 0 .. c.dimensions {
                   let off: i32 = (z / div) as i32 % c.lookup_values as i32;
                 //   let mut val: f32 = *mults.offset(off as isize) as f32; // NOTE(bungcip) : maybe bugs?
-                  let val = *mults.offset(off as isize) as f32 * c.delta_value + c.minimum_value + last;
+                  let val = mults[off as usize] as f32 * c.delta_value + c.minimum_value + last;
                   c.multiplicands[ (j*c.dimensions + k) as usize] = val;
                   if c.sequence_p !=0 {
                      last = val;
@@ -5268,7 +5192,6 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
                   if k+1 < c.dimensions {
                       use std::u32;
                      if div > u32::MAX / c.lookup_values as u32 {
-                        setup_temp_free(f, mults as *mut c_void, mem::size_of::<u16>() as i32 * c.lookup_values as i32);
                         return error(f, invalid_setup);
                      }
                      div *= c.lookup_values;
@@ -5282,20 +5205,19 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             let mut last = 0.0;
             CHECK!(f);
             c.multiplicands.resize(c.lookup_values as usize, 0.0);
-            for j in 0 .. c.lookup_values as isize {
-               let val : f32 = *mults.offset(j) as f32 * c.delta_value + c.minimum_value + last;
-               c.multiplicands[j as usize] = val;
+            for j in 0 .. c.lookup_values as usize {
+               let val : f32 = mults[j] as f32 * c.delta_value + c.minimum_value + last;
+               c.multiplicands[j] = val;
                if c.sequence_p != 0 {
                   last = val;
                }
             }
          }
          
+         // NOTE(bungcip): maybe we can remove loop-break now?
          break;
          } // loop 'skip
 //         skip:;
-         setup_temp_free(f, mults as *mut c_void, mem::size_of::<CodeType>() as i32 * c.lookup_values as i32);
-
          CHECK!(f);
       }
       CHECK!(f);
@@ -5525,7 +5447,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
    f.previous_length = 0;
 
-   for i in 0 .. f.channels as usize{
+   for i in 0 .. f.channels as usize {
        let block_size_1 = f.blocksize_1;
       f.channel_buffers[i] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1) as *mut f32;
       f.previous_window[i] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1/2) as *mut f32;
