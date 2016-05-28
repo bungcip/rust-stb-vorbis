@@ -2132,7 +2132,9 @@ unsafe fn residue_decode(f: &mut Vorbis, book: &Codebook, target: *mut f32, mut 
    if rtype == 0 {
       let step = n / book.dimensions;
       for k in 0 .. step {
-         if codebook_decode_step(f, book, target.offset((offset+k) as isize), n-offset-k, step) == false {
+         let mut target_slice = std::slice::from_raw_parts_mut(
+              target.offset((offset+k) as isize), (n-offset-k) as usize);
+         if codebook_decode_step(f, book, &mut target_slice, n-offset-k, step) == false {
             return false;
          }
       }
@@ -2353,18 +2355,22 @@ unsafe fn codebook_decode_scalar_raw(f: &mut Vorbis, c: &Codebook) -> i32
    return -1;
 }
 
-unsafe fn codebook_decode_step(f: &mut Vorbis, c: &Codebook, output: *mut f32, mut len: i32 , step: i32 ) -> bool
+fn codebook_decode_step(f: &mut Vorbis, c: &Codebook, output: &mut [f32], mut len: i32 , step: i32 ) -> bool
 {
-   let mut z = codebook_decode_start(f,c);
+   let mut z = unsafe { codebook_decode_start(f,c) };
    let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
    if z < 0 {return false;}
-   if len > c.dimensions { len = c.dimensions; }
+   if len > c.dimensions { 
+       len = c.dimensions;
+   }
 
    z *= c.dimensions;
    for i in 0 .. len  {
       let val : f32 = CODEBOOK_ELEMENT_FAST!(c, z+i) + last;
-      *output.offset( (i*step) as isize) += val;
-      if c.sequence_p != 0 {last = val;}
+      output[ (i*step) as usize] += val;
+      if c.sequence_p != 0 {
+          last = val;
+      }
    }
 
    return true;
