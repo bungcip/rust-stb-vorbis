@@ -1,5 +1,5 @@
 
-#![feature(question_mark, custom_derive, box_syntax, float_extras)]
+#![feature(float_extras)]
 
 /**
  * Rust Stb Vorbis
@@ -13,15 +13,12 @@
  * 2016
  */
 
-extern crate libc;
-
-use libc::*;
 use std::mem;
-use std::io::BufReader;
-use std::fs::File;
 use std::io::prelude::*;
-use std::path::Path;
+use std::io::BufReader;
 use std::io::SeekFrom;
+use std::fs::File;
+use std::path::Path;
 
 
 
@@ -246,7 +243,6 @@ macro_rules! LINE_OP {
 // will occur from it as described above. Otherwise just pass NULL
 // to use malloc()/alloca()
 
-#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct VorbisAlloc
 {
@@ -281,8 +277,6 @@ const FAST_HUFFMAN_TABLE_MASK : i32 =   (FAST_HUFFMAN_TABLE_SIZE - 1);
 // code length assigned to a value with no huffman encoding
 const NO_CODE : i32 =   255;
 
-
-#[repr(C)]
 pub struct Codebook
 {
    dimensions: i32, entries: i32,
@@ -374,7 +368,7 @@ impl Clone for Floor1 {
     }
 }
 
-// union Floor
+// union Floor, still need repr(C) because we transmute it to either Floor0/Floor1
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Floor
@@ -389,7 +383,6 @@ impl Default for Floor {
     }
 }
 
-#[repr(C)] 
 #[derive(Clone)]
 pub struct Residue
 {
@@ -410,7 +403,6 @@ impl Default for Residue {
 }
 
 
-#[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct MappingChannel
 {
@@ -420,7 +412,6 @@ pub struct MappingChannel
 }
 
 
-#[repr(C)]
 #[derive(Clone)]
 pub struct Mapping
 {
@@ -442,7 +433,6 @@ impl Default for Mapping {
 }
 
 
-#[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct Mode
 {
@@ -452,9 +442,6 @@ pub struct Mode
    transformtype: u16,
 }
 
-
-
-#[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct CRCscan
 {
@@ -465,7 +452,6 @@ pub struct CRCscan
    sample_loc: u32,  // granule pos encoded in page
 } 
 
-#[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct ProbedPage
 {
@@ -529,13 +515,13 @@ pub struct Vorbis
    total_samples: u32,
 
   // decode buffer
-   channel_buffers: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize],
+   channel_buffers: Vec<Vec<f32>>,
    outputs        : [*mut f32; STB_VORBIS_MAX_CHANNELS as usize],
 
-   previous_window: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize],
+   previous_window: Vec<Vec<f32>>,
    previous_length: i32,
 
-   final_y: [*mut i16; STB_VORBIS_MAX_CHANNELS as usize],
+   final_y: Vec<Vec<i16>>,
 
    current_loc: u32, // sample location of next frame to decode
    current_loc_valid: bool,
@@ -623,11 +609,11 @@ impl Vorbis {
             mode_count: 0,
             mode_config: [Mode::default(); 64],  // varies
             total_samples: 0,
-            channel_buffers: [std::ptr::null_mut(); STB_VORBIS_MAX_CHANNELS as usize],
+            channel_buffers: Vec::with_capacity(STB_VORBIS_MAX_CHANNELS as usize),
             outputs        : [std::ptr::null_mut(); STB_VORBIS_MAX_CHANNELS as usize],
-            previous_window: [std::ptr::null_mut(); STB_VORBIS_MAX_CHANNELS as usize],
+            previous_window: Vec::with_capacity(STB_VORBIS_MAX_CHANNELS as usize),
             previous_length: 0,
-            final_y: [std::ptr::null_mut(); STB_VORBIS_MAX_CHANNELS as usize],
+            final_y: Vec::with_capacity(STB_VORBIS_MAX_CHANNELS as usize),
             current_loc: 0, // sample location of next frame to decode
             current_loc_valid: false,
             a: [Vec::new(), Vec::new()], b: [Vec::new(), Vec::new()], c: [Vec::new(), Vec::new()],
@@ -656,63 +642,7 @@ impl Vorbis {
     }
 }
 
-impl Drop for Vorbis {
-    // close an ogg vorbis file and free all memory in use
-    fn drop(&mut self){
-        unsafe { 
-            let mut p = self;
-            // {
-                // for i in 0 .. p.residue_count {
-                    // let r: &mut Residue = FORCE_BORROW_MUT!(&mut p.residue_config[i as usize]);
-                    // if r.classdata.is_null() == false {
-                    //     for j in 0 .. p.codebooks[r.classbook as usize].entries {
-                    //         setup_free(p, (*r.classdata.offset(j as isize)) as *mut c_void);
-                    //     }
-                    //     setup_free(p, r.classdata as *mut c_void);
-                    // }
-                    // setup_free(p, r.residue_books as *mut c_void);
-                // }
-            // }
-            
-            // {
-                //   CHECK!(p);
-                // let pp : &mut Vorbis = FORCE_BORROW_MUT!(&mut p);
-                // for c in p.codebooks.iter() {
-                    // setup_free(pp, c.codeword_lengths as *mut c_void);
-                    // setup_free(pp, c.multiplicands as *mut c_void);
-                    // setup_free(pp, c.codewords as *mut c_void);
-                    // setup_free(pp, c.sorted_codewords as *mut c_void);
-                    // c.sorted_values[-1] is the first entry in the array
-                    // setup_free(pp, if c.sorted_values.is_null() == false {
-                    //         c.sorted_values.offset(-1)
-                    //     }else {
-                    //         std::ptr::null_mut()
-                    //     } as *mut c_void
-                    // );
-                // }
-                
-            // }
-            
-            // { let x3 = p.residue_config as *mut c_void; setup_free(p, x3); }
-                // for i in 0 .. p.mapping_count {
-                //     { let x4 = p.mapping[i as usize].chan as *mut c_void; setup_free(p, x4); }
-                // }
-            //    CHECK!(p);
-                let mut i = 0;
-            while i < p.channels && i < STB_VORBIS_MAX_CHANNELS {
-                { let x6 = p.channel_buffers[i as usize] as *mut c_void; setup_free(p, x6); }
-                { let x7 = p.previous_window[i as usize] as *mut c_void; setup_free(p, x7); }
-                { let x8 = p.final_y[i as usize] as *mut c_void; setup_free(p, x8); }
-                
-                i += 1;
-            }
-            
-        }
-    }
-}
 
-
-#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct VorbisInfo
 {
@@ -728,7 +658,7 @@ pub struct VorbisInfo
 
 ////////   ERROR CODES
 
-#[repr(C, i32)]
+#[repr(i32)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum VorbisError
 {
@@ -823,38 +753,8 @@ fn include_in_sort(c: &Codebook, len: u8) -> bool
 
 
 
-unsafe fn setup_malloc(f: &mut Vorbis, sz: i32) -> *mut c_void
-{
-   let sz = (sz+3) & !3;
-   f.setup_memory_required += sz as u32;
-   if f.alloc.alloc_buffer.is_null() == false {
-      let p = f.alloc.alloc_buffer.offset(f.setup_offset as isize);
-      if f.setup_offset + sz > f.temp_offset {
-          return std::ptr::null_mut();
-      }
-      f.setup_offset += sz as i32;
-      return p as *mut c_void;
-   }
-   
-   if sz!= 0 {
-       return libc::malloc(sz as usize);
-   }else{
-       return std::ptr::null_mut();
-   }
-}
-
-
-unsafe fn setup_free(f: &mut Vorbis, p: *mut c_void)
-{
-   if f.alloc.alloc_buffer.is_null() == false {
-       return; // do nothing; setup mem is a stack
-   }
-   libc::free(p);
-}
-
 
 const  CRC32_POLY  : u32 =  0x04c11db7;   // from spec
-
 
 unsafe fn crc32_init()
 {
@@ -1576,13 +1476,13 @@ unsafe fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -
    // mixin from previous window
    if f.previous_length != 0 {
       let n = f.previous_length;
-      let w = get_window(f, n);
+      let w : &[f32] = FORCE_BORROW!( get_window(f, n));
       for i in 0 .. f.channels {
          let i = i as usize;
          for j in 0 .. n {
-            *f.channel_buffers[i].offset( (left + j) as isize ) =
-               *f.channel_buffers[i].offset((left + j) as isize) * w[    j as usize] +
-               *f.previous_window[i].offset(        j  as isize) * w[n as usize - 1 - (j as usize)];
+            f.channel_buffers[i][ (left + j) as usize ] =
+               f.channel_buffers[i][(left + j) as usize] * w[    j as usize] +
+               f.previous_window[i][        j  as usize] * w[n as usize - 1 - (j as usize)];
          }
       }
    }
@@ -1602,7 +1502,7 @@ unsafe fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -
        let i = i as usize;
       let mut j = 0;
       while right + j < len {
-         *f.previous_window[i].offset(j as isize) = *f.channel_buffers[i].offset( (right+j) as isize);
+         f.previous_window[i][j as usize] = f.channel_buffers[i][ (right+j) as usize];
           j += 1;
       }           
    }
@@ -1748,7 +1648,7 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis,
 
    let len = vorbis_finish_frame(f, len, left, right);
    for i in 0 .. f.channels {
-      f.outputs[i as usize] = f.channel_buffers[i as usize].offset(left as isize);
+      f.outputs[i as usize] = f.channel_buffers[i as usize].as_mut_ptr().offset(left as isize);
    }
 
    f.channel_buffer_start = left;
@@ -1768,7 +1668,7 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis,
 
 pub unsafe fn stb_vorbis_get_frame_short(f: &mut Vorbis, num_c: i32, sample_buffer: &mut [i16]) -> i32
 {
-    let mut output: *mut *mut f32 = std::ptr::null_mut();
+   let mut output: *mut *mut f32 = std::ptr::null_mut();
    let mut len = stb_vorbis_get_frame_float(f, None, Some(&mut output));
    if len > sample_buffer.len() as i32 {
      len = sample_buffer.len() as i32;
@@ -2041,7 +1941,7 @@ fn predict_point(x: i32, x0: i32 , x1: i32 , y0: i32 , y1: i32 ) -> i32
 
 pub type YTYPE = i16;
 
-unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut f32, final_y: *mut YTYPE, _: *mut u8) -> bool
+unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut f32, final_y: &[YTYPE], _: *mut u8) -> bool
 {
    let n2 = n >> 1;
 
@@ -2053,15 +1953,14 @@ unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut 
       return error(f, VorbisError::invalid_stream);
    } else {
       let g : &Floor1 = FORCE_BORROW!( &f.floor_config[floor as usize].floor1 );
-      let mut j : i32;
       let mut lx : i32 = 0;
-      let mut ly : i32 = *final_y.offset(0) as i32 * g.floor1_multiplier as i32;
+      let mut ly : i32 = final_y[0] as i32 * g.floor1_multiplier as i32;
       for q in 1 .. g.values {
-         j = g.sorted_order[q as usize] as i32;
-         if *final_y.offset(j as isize) >= 0
+         let j = g.sorted_order[q as usize] as usize;
+         if final_y[j as usize] >= 0
          {
-            let hy : i32 = *final_y.offset(j as isize) as i32 * g.floor1_multiplier as i32;
-            let hx : i32 = g.xlist[j as usize] as i32;
+            let hy : i32 = final_y[j] as i32 * g.floor1_multiplier as i32;
+            let hx : i32 = g.xlist[j] as i32;
             if lx != hx as i32{
                draw_line(target, lx,ly, hx, hy, n2);
             }
@@ -2072,7 +1971,7 @@ unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut 
       }
       if lx < n2 {
          // optimization of: draw_line(target, lx,ly, n,ly, n2);
-         for j in lx .. n2{
+         for j in lx .. n2 {
             LINE_OP!(*target.offset(j as isize), INVERSE_DB_TABLE[ly as usize]);
          }
          CHECK!(f);
@@ -2103,7 +2002,7 @@ unsafe fn draw_line(output: *mut f32, x0: i32, y0: i32, mut x1: i32, y1: i32, n:
    }
 
 
-   ady -= abs(base) * adx;
+   ady -= i32::abs(base) * adx;
    
    if x1 > n {x1 = n;}
    if x < x1 {
@@ -2775,9 +2674,9 @@ pub unsafe fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffe
           while i < z {
             // memcpy(buffer[i]+n, f.channel_buffers[i]+f.channel_buffer_start, sizeof(float)*k);
             std::ptr::copy_nonoverlapping(
-                f.channel_buffers[i as usize].offset(f.channel_buffer_start as isize),
+                f.channel_buffers[i as usize].as_ptr().offset(f.channel_buffer_start as isize),
                 (*buffer.offset(i as isize)).offset(n as isize),
-                std::mem::size_of::<f32>() * k as usize
+                k as usize
             );
             i += 1;
           }
@@ -2824,7 +2723,7 @@ pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut Vorbis, channels:
       for j in 0 .. k  {
           let mut i = 0;
           while i < z {
-            *buffer = *f.channel_buffers[i as usize].offset( (f.channel_buffer_start+j) as isize);
+            *buffer = f.channel_buffers[i as usize][ (f.channel_buffer_start+j) as usize];
             buffer = buffer.offset(1);
               i += 1;
           }
@@ -2852,29 +2751,29 @@ pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut Vorbis, channels:
 // to produce 'channels' channels. Returns the number of samples stored per channel;
 // it may be less than requested at the end of the file. If there are no more
 // samples in the file, returns 0.
-pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer: *mut *mut i16, len: i32) -> i32
+pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer: &mut Vec<Vec<i16>>, len: i32) -> i32
 {
-//    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-   let mut outputs: *mut *mut f32 = std::mem::zeroed();
-   let mut n = 0;
-//    let z = f.channels;
+//    let mut outputs: *mut *mut f32 = std::mem::zeroed();
+//    let mut n = 0;
+// //    let z = f.channels;
    
-   // NOTE(bungcip): useless code?
-//    if z > channels {z = channels;}
+//    // NOTE(bungcip): useless code?
+// //    if z > channels {z = channels;}
 
-   while n < len {
-      let mut k = f.channel_buffer_end - f.channel_buffer_start;
-      if n+k >= len {k = len - n;}
-      if k != 0 {
-         convert_samples_short(channels, buffer, n, f.channels, f.channel_buffers.as_mut_ptr(), f.channel_buffer_start, k);
-      }
-      n += k;
-      f.channel_buffer_start += k;
-      if n == len{ break;}
-      if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0 {break;}
-   }
-   return n;
+//    while n < len {
+//       let mut k = f.channel_buffer_end - f.channel_buffer_start;
+//       if n+k >= len {k = len - n;}
+//       if k != 0 {
+//          convert_samples_short(channels, buffer, n, f.channels, f.channel_buffers, f.channel_buffer_start, k);
+//       }
+//       n += k;
+//       f.channel_buffer_start += k;
+//       if n == len{ break;}
+//       if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0 {break;}
+//    }
+//    return n;
 }
 
 // gets num_samples samples, not necessarily on a frame boundary--this requires
@@ -2884,27 +2783,27 @@ pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer
 // samples in the file, returns 0.
 pub unsafe fn stb_vorbis_get_samples_short_interleaved(f: &mut Vorbis, channels: i32, mut buffer: *mut i16, num_shorts: i32 ) -> i32
 {
-//   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
+  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-   let mut outputs: *mut *mut f32 = std::mem::zeroed();
-   let len = num_shorts / channels;
-   let mut n = 0;
-//    let z = f.channels;
-   // NOTE(bungcip): useless code?
-//    if z > channels {z = channels;}
-   while n < len {
-      let mut k = f.channel_buffer_end - f.channel_buffer_start;
-      if n+k >= len {k = len - n;}
-      if k != 0 {
-         convert_channels_short_interleaved(channels, buffer, f.channels, f.channel_buffers.as_mut_ptr(), f.channel_buffer_start, k);
-      }
-      buffer = buffer.offset( (k*channels) as isize);
-      n += k;
-      f.channel_buffer_start += k;
-      if n == len{ break;}
-      if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0 {break;}
-   }
-   return n;
+//    let mut outputs: *mut *mut f32 = std::mem::zeroed();
+//    let len = num_shorts / channels;
+//    let mut n = 0;
+// //    let z = f.channels;
+//    // NOTE(bungcip): useless code?
+// //    if z > channels {z = channels;}
+//    while n < len {
+//       let mut k = f.channel_buffer_end - f.channel_buffer_start;
+//       if n+k >= len {k = len - n;}
+//       if k != 0 {
+//          convert_channels_short_interleaved(channels, buffer, f.channels, f.channel_buffers, f.channel_buffer_start, k);
+//       }
+//       buffer = buffer.offset( (k*channels) as isize);
+//       n += k;
+//       f.channel_buffer_start += k;
+//       if n == len{ break;}
+//       if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0 {break;}
+//    }
+//    return n;
 }
 
 // the same as vorbis_decode_initial, but without advancing
@@ -3110,17 +3009,6 @@ unsafe fn crc32_update(crc: u32, byte: u8) -> u32
    return (crc << 8) ^ CRC_TABLE[ (byte as u32 ^ (crc >> 24)) as usize];
 }
 
-// given a sufficiently large block of memory, make an array of pointers to subblocks of it
-// unsafe fn make_block_array(mem: *mut c_void, count: i32, size: usize) -> *mut c_void
-// {
-//    let p : *mut *mut c_void  = std::mem::transmute(mem);
-//    let mut q : *mut i8 = p.offset(count as isize) as *mut i8;
-//    for i in 0 .. count {
-//       *p.offset(i as isize) = q as *mut c_void;
-//       q = q.offset(size as isize);
-//    }
-//    return p as *mut c_void;
-// }
 
 // seeking is implemented with a binary search, which narrows down the range to
 // 64K, before using a linear search (because finding the synchronization
@@ -3293,7 +3181,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
    // success!
    let len = vorbis_finish_frame(f, len, left, right);
    for i in 0 .. f.channels {
-      f.outputs[i as usize] = f.channel_buffers[i as usize].offset(left as isize);
+      f.outputs[i as usize] = f.channel_buffers[i as usize].as_mut_ptr().offset(left as isize);
    }
 
    if channels.is_null() == false {
@@ -3880,9 +3768,9 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
             static RANGE_LIST: [i32; 4] = [ 256, 128, 86, 64 ];
             let range = RANGE_LIST[ (g.floor1_multiplier-1) as usize];
             let mut offset = 2;
-            let final_y : *mut i16 = f.final_y[i as usize];
-            *final_y.offset(0) = get_bits(f, ilog(range)-1) as i16;
-            *final_y.offset(1) = get_bits(f, ilog(range)-1) as i16;
+            let mut final_y : &mut [YTYPE] = FORCE_BORROW_MUT!( f.final_y[i as usize].as_mut_slice());
+            final_y[0] = get_bits(f, ilog(range)-1) as i16;
+            final_y[1] = get_bits(f, ilog(range)-1) as i16;
             for j in 0 .. g.partitions {
                let pclass = g.partition_class_list[j as usize] as usize;
                let cdim = g.class_dimensions[pclass];
@@ -3900,9 +3788,9 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
                      let mut temp : i32;
                      let c: &mut Codebook = FORCE_BORROW_MUT!( &mut f.codebooks[book as usize] );
                      DECODE!(temp,f,c);
-                     *final_y.offset(offset) = temp as i16;
+                     final_y[offset] = temp as i16;
                   } else {
-                     *final_y.offset(offset) = 0;
+                     final_y[offset] = 0;
                   }
                     offset += 1;
                }
@@ -3917,18 +3805,18 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
             let mut step2_flag: [u8; 256] = mem::zeroed();
             step2_flag[0] = 1; 
             step2_flag[1] = 1;
-            for j in 2 .. g.values {
-               let j = j as usize;
-               let low = g.neighbors[j][0];
-               let high = g.neighbors[j][1];
+            for j in 2 .. g.values as usize {
+            //    let j = j as usize;
+               let low = g.neighbors[j][0] as usize;
+               let high = g.neighbors[j][1] as usize;
                let pred = predict_point(
                    g.xlist[j] as i32, 
-                   g.xlist[low as usize] as i32,
-                   g.xlist[high as usize] as i32, 
-                   *final_y.offset(low as isize) as i32, 
-                   *final_y.offset(high as isize) as i32
+                   g.xlist[low] as i32,
+                   g.xlist[high] as i32, 
+                   final_y[low] as i32, 
+                   final_y[high] as i32
                );
-               let val = *final_y.offset(j as isize);
+               let val = final_y[j];
                let highroom = range - pred;
                let lowroom = pred;
                let room;
@@ -3938,33 +3826,33 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
                   room = lowroom * 2;
                }
                if val != 0 {
-                  step2_flag[low as usize] = 1;
-                  step2_flag[high as usize] = 1;
+                  step2_flag[low] = 1;
+                  step2_flag[high] = 1;
                   step2_flag[j] = 1;
                   
                   if val >= room as i16 {
                      if highroom > lowroom {
-                        *final_y.offset(j as isize) = (val - lowroom as i16 + pred as i16) as i16;
+                        final_y[j] = (val - lowroom as i16 + pred as i16) as i16;
                      } else {
-                        *final_y.offset(j as isize) = (pred as i16 - val + highroom as i16 - 1) as i16;
+                        final_y[j] = (pred as i16 - val + highroom as i16 - 1) as i16;
                      }
                   } else {
                      if (val & 1) != 0 {
-                        *final_y.offset(j as isize) = pred as i16 - ((val+1)>>1);
+                        final_y[j] = pred as i16 - ((val+1)>>1);
                      } else {
-                        *final_y.offset(j as isize) = pred as i16+ (val>>1);
+                        final_y[j] = pred as i16+ (val>>1);
                      }
                   }
                } else {
                   step2_flag[j] = 0;
-                  *final_y.offset(j as isize) = pred as i16;
+                  final_y[j] = pred as i16;
                }
             }
 
             // defer final floor computation until _after_ residue
-            for j in 0 .. g.values {
-               if step2_flag[j as usize] == 0 {
-                  *final_y.offset(j as isize) = -1;
+            for j in 0 .. g.values as usize {
+               if step2_flag[j] == 0 {
+                  final_y[j] = -1;
                }
             }
          } else {
@@ -4009,7 +3897,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
                residue_buffers[ch] = std::ptr::null_mut();
             } else {
                do_not_decode[ch] = false;
-               residue_buffers[ch] = f.channel_buffers[j];
+               residue_buffers[ch] = f.channel_buffers[j].as_mut_ptr();
             }
             ch += 1;
          }
@@ -4028,8 +3916,8 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
    while i >= 0 {
       let n2 = n >> 1;
       let ref c = map.chan[i as usize];
-      let m : *mut f32 = f.channel_buffers[c.magnitude as usize];
-      let a : *mut f32 = f.channel_buffers[c.angle  as usize];
+      let m : *mut f32 = f.channel_buffers[c.magnitude as usize].as_mut_ptr();
+      let a : *mut f32 = f.channel_buffers[c.angle  as usize].as_mut_ptr();
       for j in 0 .. n2 {
          let a2 : f32;
          let m2 : f32;
@@ -4063,10 +3951,11 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
    for i in 0 .. f.channels as usize{
       if really_zero_channel[i] {
         //  memset(f.channel_buffers[i], 0, sizeof(*f.channel_buffers[i]) * n2);
-        std::ptr::write_bytes(f.channel_buffers[i], b'0', n2 as usize);
+        std::ptr::write_bytes(f.channel_buffers[i].as_mut_ptr(), b'0', n2 as usize);
       } else {
-          let cb = f.channel_buffers[i];
-          let fy = f.final_y[i]; 
+          let cb = f.channel_buffers[i].as_mut_ptr();
+          let fy : &[YTYPE] = FORCE_BORROW!( f.final_y[i].as_slice() ); 
+          // NOTE(bungcip): change to slice
          do_floor(f, map, i as i32, n, cb, fy, std::ptr::null_mut());
       }
    }
@@ -4074,7 +3963,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
 // INVERSE MDCT
    CHECK!(f);
    for i in 0 .. f.channels{
-      inverse_mdct(f.channel_buffers[i as usize], n, f, m.blockflag as i32);
+      inverse_mdct(f.channel_buffers[i as usize].as_mut_ptr(), n, f, m.blockflag as i32);
    }
    CHECK!(f);
 
@@ -5452,15 +5341,16 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    flush_packet(f);
 
    f.previous_length = 0;
-
+   
+   f.channel_buffers.resize(f.channels as usize, Vec::new());
+   f.previous_window.resize(f.channels as usize, Vec::new());
+   f.final_y.resize(f.channels as usize, Vec::new());
+   
    for i in 0 .. f.channels as usize {
        let block_size_1 = f.blocksize_1;
-      f.channel_buffers[i] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1) as *mut f32;
-      f.previous_window[i] = setup_malloc(f, mem::size_of::<f32>() as i32 * block_size_1/2) as *mut f32;
-      f.final_y[i]         = setup_malloc(f, mem::size_of::<i16>() as i32 * longest_floorlist) as *mut i16;
-      if f.channel_buffers[i].is_null() || f.previous_window[i].is_null() || f.final_y[i].is_null() {
-          return error(f, outofmem);
-      }
+       f.channel_buffers[i].resize(block_size_1 as usize, 0.0);
+      f.previous_window[i].resize( (block_size_1/2) as usize, 0.0);
+      f.final_y[i].resize(longest_floorlist as usize, 0);
    }
 
    {  
@@ -5487,7 +5377,9 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             max_part_read = part_read;
          }
       }
-      classify_mem = f.channels as u32 * (mem::size_of::<*mut c_void>() as u32 + max_part_read * mem::size_of::<*mut u8>() as u32);
+      classify_mem = f.channels as u32 * (
+          mem::size_of::<*mut u8>() as u32 + 
+          max_part_read * mem::size_of::<*mut u8>() as u32);
 
       f.temp_memory_required = classify_mem;
       if imdct_mem > f.temp_memory_required{
