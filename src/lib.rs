@@ -912,28 +912,30 @@ fn float32_unpack(x: u32) -> f32
 // vorbis allows a huffman table with non-sorted lengths. This
 // requires a more sophisticated construction, since symbols in
 // order do not map to huffman codes "in order".
-unsafe fn add_entry(c: &mut Codebook, huff_code: u32, symbol: i32, count: i32, len: u8, values: *mut u32)
+fn add_entry(c: &mut Codebook, huff_code: u32, symbol: i32, count: i32, len: u8, values: &mut [u32])
 {
     // TODO(bungcip): maybe symbol len as u32?
     
    if c.sparse == false {
       c.codewords[symbol as usize] = huff_code;
    } else {
-      let count = count as isize;
-      c.codewords[count as usize] = huff_code;
-      c.codeword_lengths[count as usize] = len;
-      *values.offset(count) = symbol as u32;
+      let count = count as usize;
+      c.codewords[count] = huff_code;
+      c.codeword_lengths[count] = len;
+      values[count] = symbol as u32;
    }
 }
 
 
 
-unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut u32) -> bool
+fn compute_codewords(c: &mut Codebook, len: &mut [u8], n: i32, values: &mut [u32]) -> bool
 {
+    // NOTE(bungcip): change n to usize?
+    
    // find the first entry
    let mut k = 0;
    while k < n {
-       if (*len.offset(k as isize) as i32) < NO_CODE {
+       if (len[k as usize] as i32) < NO_CODE {
            break;
        }
        k += 1;
@@ -943,13 +945,13 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
    
    // add to the list
    let mut m=0;
-   add_entry(c, 0, k, m, *len.offset(k as isize), values);
+   add_entry(c, 0, k, m, len[k as usize], values);
    m += 1;
    
    // add all available leaves
-   let mut available: [u32; 32] = std::mem::zeroed();
+   let mut available: [u32; 32] = [0; 32];
    let mut i = 1;
-   while i <= *len.offset(k as isize) {
+   while i <= len[k as usize] {
       available[i as usize] = 1u32 << (32-i);
       i += 1;
    }
@@ -960,7 +962,7 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
    // and I use 0 in available[] to mean 'empty')
    for i in k+1 .. n {
       let res : u32;
-      let mut z = *len.offset(i as isize);
+      let mut z = len[i as usize];
       if z as i32 == NO_CODE {
           continue;
       }
@@ -977,15 +979,15 @@ unsafe fn compute_codewords(c: &mut Codebook, len: *mut u8, n: i32, values: *mut
       res = available[z as usize];
       assert!(z < 32); // NOTE(z is u8 so negative is impossible)
       available[z as usize] = 0;
-      add_entry(c, bit_reverse(res), i, m, *len.offset(i as isize), values);
+      add_entry(c, bit_reverse(res), i, m, len[i as usize], values);
       m += 1;
       
       // propogate availability up the tree
-      if z != *len.offset(i as isize) {
-        //  assert!(*len.offset(i as isize) >= 0 && *len.offset(i as isize) < 32);
-         assert!(*len.offset(i as isize) < 32); // NOTE (len[x] is already unsigned)
+      if z != len[i as usize] {
+        //  assert!(len[i as usize] >= 0 && len[i as usize] < 32);
+         assert!(len[i as usize] < 32); // NOTE (len[x] is already unsigned)
          
-         let mut y = *len.offset(i as isize);
+         let mut y = len[i as usize];
          while y > z {
             assert!(available[y as usize] == 0);
             available[y as usize] = res + (1 << (32-y));
@@ -1041,12 +1043,11 @@ fn ilog(n: i32) -> i32
        
 }
 
-// NOTE(bungcip): change to return slice?
-fn get_window(f: &mut Vorbis, len: i32) -> *mut f32
+fn get_window(f: &Vorbis, len: i32) -> &[f32]
 {
    let len = len << 1;
-   if len == f.blocksize_0 { return f.window[0].as_mut_ptr(); }
-   if len == f.blocksize_1 { return f.window[1].as_mut_ptr(); }
+   if len == f.blocksize_0 { return &f.window[0]; }
+   if len == f.blocksize_1 { return &f.window[1]; }
 
    unreachable!();
 }
@@ -1087,7 +1088,7 @@ fn lookup1_values(entries: i32, dim: i32) -> i32
 const M_PI : f32 = 3.14159265358979323846264;
 
 // called twice per file
-fn compute_twiddle_factors(n: i32, a: *mut f32, b: *mut f32, c: *mut f32)
+fn compute_twiddle_factors(n: i32, a: &mut [f32], b: &mut [f32], c: &mut [f32])
 {
     use std::f32;
     
@@ -1098,15 +1099,13 @@ fn compute_twiddle_factors(n: i32, a: *mut f32, b: *mut f32, c: *mut f32)
     let mut k2 = 0;
     
     while k < n4 {
-        unsafe {
-            let x1 = (4*k) as f32 * M_PI / n as f32;
-            *a.offset(k2 as isize)     = f32::cos(x1) as f32;
-            *a.offset((k2+1) as isize) =  -f32::sin(x1) as f32;
-            
-            let x2 = (k2+1) as f32 * M_PI / n as f32 / 2.0;
-            *b.offset(k2 as isize)     = (f32::cos(x2) * 0.5) as f32;
-            *b.offset((k2+1) as isize) = (f32::sin(x2) * 0.5) as f32;
-        }
+        let x1 = (4*k) as f32 * M_PI / n as f32;
+        a[k2 as usize]     = f32::cos(x1) as f32;
+        a[(k2+1) as usize] =  -f32::sin(x1) as f32;
+        
+        let x2 = (k2+1) as f32 * M_PI / n as f32 / 2.0;
+        b[k2 as usize]    = (f32::cos(x2) * 0.5) as f32;
+        b[(k2+1) as usize] = (f32::sin(x2) * 0.5) as f32;
         
         k += 1; k2 += 2;
     }
@@ -1115,13 +1114,11 @@ fn compute_twiddle_factors(n: i32, a: *mut f32, b: *mut f32, c: *mut f32)
     let mut k2 = 0;
     
     while k < n8 {
-        unsafe {
-            let x1 = (2*(k2+1)) as f32 * M_PI / n as f32;
-            *c.offset(k2) = f32::cos(x1) as f32;
-            
-            let x2 = (2*(k2+1)) as f32 * M_PI / n as f32;
-            *c.offset(k2+1) = -f32::sin(x2) as f32;
-        }
+        let x1 = (2*(k2+1)) as f32 * M_PI / n as f32;
+        c[k2] = f32::cos(x1) as f32;
+        
+        let x2 = (2*(k2+1)) as f32 * M_PI / n as f32;
+        c[k2+1] = -f32::sin(x2) as f32;
         
         k += 1; k2 += 2;
     }
@@ -1584,8 +1581,8 @@ unsafe fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -
          let i = i as usize;
          for j in 0 .. n {
             *f.channel_buffers[i].offset( (left + j) as isize ) =
-               *f.channel_buffers[i].offset((left + j) as isize) * *w.offset(    j as isize) +
-               *f.previous_window[i].offset(        j  as isize) * *w.offset(n as isize - 1 - (j as isize));
+               *f.channel_buffers[i].offset((left + j) as isize) * w[    j as usize] +
+               *f.previous_window[i].offset(        j  as isize) * w[n as usize - 1 - (j as usize)];
          }
       }
    }
@@ -1792,6 +1789,8 @@ const PLAYBACK_RIGHT : i32 =   4;
 
 unsafe fn convert_samples_short(buf_c: i32, buffer: *mut *mut i16, b_offset: i32, data_c: i32, data: *mut *mut f32, d_offset: i32, samples: i32)
 {
+    // NOTE(bungcip): change samples to usize?
+    
    if buf_c != data_c && buf_c <= 2 && data_c <= 6 {
       static CHANNEL_SELECTOR: [[i32; 2]; 3] = [
           [0, 0],
@@ -1808,9 +1807,13 @@ unsafe fn convert_samples_short(buf_c: i32, buffer: *mut *mut i16, b_offset: i32
       
       let mut i = 0;
       while i < limit {
-         copy_samples((*buffer.offset(i as isize)).offset(b_offset as isize),
-             (*data.offset(i as isize)).offset(d_offset as isize), samples);
-          i += 1;
+         let mut buffer_slice = std::slice::from_raw_parts_mut(
+             (*buffer.offset(i as isize)).offset(b_offset as isize), samples as usize);
+         let data_slice = std::slice::from_raw_parts(
+             (*data.offset(i as isize)).offset(d_offset as isize), samples as usize);
+          
+         copy_samples(&mut buffer_slice, &data_slice, samples as usize);
+         i += 1;
       }
       
       while i < buf_c {
@@ -1858,14 +1861,14 @@ unsafe fn convert_channels_short_interleaved(buf_c: i32, buffer: *mut i16, data_
    }
 }
 
-unsafe fn copy_samples(dest: *mut i16, src: *mut f32, len: i32)
+unsafe fn copy_samples(dest: &mut [i16], src: &[f32], len: usize)
 {
    for i in 0 .. len  {
-      let mut v : i32 = FAST_SCALED_FLOAT_TO_INT!(*src.offset(i as isize), 15);
+      let mut v : i32 = FAST_SCALED_FLOAT_TO_INT!(src[i], 15);
       if ((v + 32768) as u32) > 65535 {
          v = if v < 0 { -32768 } else { 32767 };
       }
-      *dest.offset(i as isize) = v as i16;
+      dest[i] = v as i16;
    }
 }
 
@@ -1894,7 +1897,7 @@ pub unsafe fn stb_vorbis_seek(f: &mut Vorbis, sample_number: u32) -> bool
 }
 
 
-unsafe fn init_blocksize(f: &mut Vorbis, b: usize, n: usize)
+fn init_blocksize(f: &mut Vorbis, b: usize, n: usize)
 {
    let n2 = n >> 1;
    let n4 = n >> 2;
@@ -1904,12 +1907,10 @@ unsafe fn init_blocksize(f: &mut Vorbis, b: usize, n: usize)
    f.b[b].resize(n2, 0.0);
    f.c[b].resize(n4, 0.0);
    
-   // NOTE(buncip): change to use slice instead of pointer
-   compute_twiddle_factors(n as i32, f.a[b].as_mut_ptr(), f.b[b].as_mut_ptr(), f.c[b].as_mut_ptr());
+   compute_twiddle_factors(n as i32, &mut f.a[b], &mut f.b[b], &mut f.c[b]);
    
-   // NOTE(bungcip): change to use slice instead of pointer
    f.window[b].resize(n2, 0.0);
-   compute_window(n as i32, f.window[b].as_mut_ptr());
+   compute_window(n as i32, &mut f.window[b]);
 
    f.bit_reverse[b].resize(n8, 0);
    compute_bitreverse(n as i32, &mut f.bit_reverse[b]);
@@ -1918,7 +1919,7 @@ unsafe fn init_blocksize(f: &mut Vorbis, b: usize, n: usize)
 // accelerated huffman table allows fast O(1) match of all symbols
 // of length <= STB_FAST_HUFFMAN_LENGTH
 
-unsafe fn compute_accelerated_huffman(c: &mut Codebook)
+fn compute_accelerated_huffman(c: &mut Codebook)
 {
    for i in 0 .. FAST_HUFFMAN_TABLE_SIZE {
        c.fast_huffman[i as usize] = -1;
@@ -1946,8 +1947,7 @@ unsafe fn compute_accelerated_huffman(c: &mut Codebook)
 
 // returns the current seek point within the file, or offset from the beginning
 // of the memory buffer. In pushdata mode it returns 0.
-
-pub unsafe fn stb_vorbis_get_file_offset(f: &mut Vorbis) -> u32
+pub fn stb_vorbis_get_file_offset(f: &mut Vorbis) -> u32
 {
    if f.push_mode == true {return 0;}
    if USE_MEMORY!(f) {return (f.stream as usize - f.stream_start as usize) as u32;}
@@ -2139,7 +2139,10 @@ unsafe fn residue_decode(f: &mut Vorbis, book: &Codebook, target: *mut f32, mut 
    } else {
        let mut k = 0;
        while k < n {
-         if codebook_decode(f, book, target.offset(offset as isize), n-k) == false {
+        let mut target_slice = std::slice::from_raw_parts_mut(
+            target.offset(offset as isize), (n-k) as usize);
+            
+         if codebook_decode(f, book, &mut target_slice, n-k) == false {
             return false;
          }
          k += book.dimensions;
@@ -2171,9 +2174,9 @@ macro_rules! CODEBOOK_ELEMENT_BASE {
 }
 
 
-unsafe fn codebook_decode(f: &mut Vorbis, c: &Codebook, output: *mut f32, mut len: i32 ) -> bool
+fn codebook_decode(f: &mut Vorbis, c: &Codebook, output: &mut [f32], mut len: i32 ) -> bool
 {
-   let mut z = codebook_decode_start(f,c);
+   let mut z = unsafe { codebook_decode_start(f,c) };
    if z < 0 {return false;}
    if len > c.dimensions {len = c.dimensions;}
 
@@ -2182,13 +2185,13 @@ unsafe fn codebook_decode(f: &mut Vorbis, c: &Codebook, output: *mut f32, mut le
       let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
       for i in 0 .. len  {
          let val : f32 = CODEBOOK_ELEMENT_FAST!(c, z+i) + last;
-         *output.offset(i as isize) += val;
+         output[i as usize] += val;
          last = val + c.minimum_value;
       }
    } else {
       let last : f32 = CODEBOOK_ELEMENT_BASE!(c);
       for i in 0 .. len  {
-         *output.offset(i as isize) += CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
+         output[i as usize] += CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
       }
    }
 
@@ -2431,11 +2434,11 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
    return true;
 }
 
-unsafe fn compute_window(n: i32, window: *mut f32)
+fn compute_window(n: i32, window: &mut [f32])
 {
    let n2 : i32 = n >> 1;
    for i in 0 .. n2 {
-      *window.offset(i as isize) = 
+      window[i as usize] = 
             f64::sin(
                 0.5 as f64 * 
                 M_PI as f64 * 
@@ -3991,7 +3994,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
 // RESIDUE DECODE
    for i in 0 .. map.submaps as usize {
       let mut residue_buffers: [*mut f32; STB_VORBIS_MAX_CHANNELS as usize] = mem::zeroed();
-      let mut do_not_decode: [bool; 256] = mem::zeroed();
+      let mut do_not_decode: [bool; 256] = [false; 256];
       let mut ch : usize = 0;
       for j in 0 .. f.channels as usize {
          if map.chan[j].mux as usize == i {
@@ -5113,13 +5116,10 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       {
           let temp_entries = c.entries; // note(bungcip): just to satisfy borrow checker
-          // NOTE(bungcip): change to slice
-            if compute_codewords(c, lengths, temp_entries, values.as_mut_ptr()) == false {
-                // if c.sparse == true {
-                //     // setup_temp_free(f, values as *mut c_void, 0);
-                // }
-                return error(f, invalid_setup);
-            }
+          let mut lengths_slice = std::slice::from_raw_parts_mut(lengths, temp_entries as usize);
+          if compute_codewords(c, lengths_slice, temp_entries, &mut values) == false {
+            return error(f, invalid_setup);
+          }
       }
 
       if c.sorted_entries != 0 {

@@ -20,8 +20,8 @@ def md5(fname):
     return hash_md5.hexdigest()
 
 oggs = [
-    'stereo_short', 'mono',
-    'single-code-2bits', 'single-code-nonsparse', 'single-code-ordered', 'single-code-sparse'
+    'single-code-2bits', 'single-code-nonsparse', 'single-code-ordered', 'single-code-sparse',
+    'stereo_short', 'mono'
 ]
 
 # run stb_vorbis
