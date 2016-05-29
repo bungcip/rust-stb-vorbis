@@ -729,10 +729,6 @@ fn error(f: &mut Vorbis, e: VorbisError) -> bool
         f.error = e; // breakpoint for debugging
     }
     
-    // if e == VorbisError::InvalidStream {
-    //     panic!("Cek error nya!");
-    // }
-    
     return false;
 }
 
@@ -3136,7 +3132,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
    f.error      = VorbisError::NoError;
 
    // check that we have the entire packet in memory
-   if is_whole_packet_present(f, 0) == false {
+   if is_whole_packet_present(f, false) == false {
       *samples = 0;
       return 0;
    }
@@ -3192,7 +3188,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
 }
 
 
-unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: i32) -> bool
+unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: bool) -> bool
 {
    // make sure that we have the packet available before continuing...
    // this requires a full ogg parse, but we know we can fetch from f->stream
@@ -3209,72 +3205,73 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: i32) -> bool
    if s != -1 { // if we're not starting the packet with a 'continue on next page' flag
       while s < f.segment_count {
          p = p.offset( f.segments[s as usize] as isize);
-         if f.segments[s as usize] < 255{               // stop at first short segment
+         if f.segments[s as usize] < 255 {              // stop at first short segment
             break;
          }
-          
-          s += 1;
+         s += 1;
       }
-      
       // either this continues, or it ends it...
-      if end_page != 0 {
+      if end_page {
          if s < f.segment_count-1 {
             return error(f, VorbisError::InvalidStream);
          }
       }
-      
       if s == f.segment_count {
          s = -1; // set 'crosses page' flag
       }
-      if p > f.stream_end {
+      if p > f.stream_end{
         return error(f, VorbisError::NeedMoreData);
       }
-      first =  false;
+      first = false;
    }
-   
    while s == -1 {
       // check that we have the page header ready
       if p.offset(26) >= f.stream_end               {return error(f, VorbisError::NeedMoreData);}
       
       // validate the page
       {
-          // NOTE: create slice to remove libc:memcmp usage
           let p_slice = std::slice::from_raw_parts(p, 4);
-          if p_slice ==  OGG_PAGE_HEADER {
-              return error(f, VorbisError::InvalidStream);
-          }
+          if p_slice != OGG_PAGE_HEADER {return error(f, VorbisError::InvalidStream);}
       }
       if *p.offset(4) != 0                             {return error(f, VorbisError::InvalidStream);}
       if first  { // the first segment must NOT have 'continued_packet', later ones MUST
          if f.previous_length != 0 {
-            if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET as u8) != 0 { return error(f, VorbisError::InvalidStream);}
+            if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET as u8) != 0  {
+                return error(f, VorbisError::InvalidStream);
+            }
          }
          // if no previous length, we're resynching, so we can come in on a continued-packet,
          // which we'll just drop
       } else {
-         if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET as u8) == 0 {return error(f, VorbisError::InvalidStream);}
+        if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET as u8) == 0 {
+             return error(f, VorbisError::InvalidStream);
+        }
       }
-      let n = *p.offset(26); // segment counts
+      let n = *p.offset(26) as i32; // segment counts
       let q = p.offset(27);  // q points to segment table
       p = q.offset(n as isize); // advance past header
       // make sure we've read the segment table
       if p > f.stream_end                     {return error(f, VorbisError::NeedMoreData);}
-      for s in 0 .. n {
+      
+      s = 0;
+      while s < n {
          p = p.offset( *q.offset(s as isize) as isize);
-         if *q.offset(s as isize) < 255{
+         if *q.offset(s as isize) < 255 {
             break;
          }
+          s += 1;
       }
-      if end_page != 0 {
-         if s < (n-1) as i32                            {return error(f, VorbisError::InvalidStream);}
+      if end_page{
+         if s < n-1                            {return error(f, VorbisError::InvalidStream);}
       }
-      if s == n as i32 {
+      if s == n{
          s = -1; // set 'crosses page' flag
       }
-      if p > f.stream_end                     {return error(f,VorbisError::NeedMoreData);}
+      if p > f.stream_end                     {return error(f, VorbisError::NeedMoreData);}
       first = false;
    }
-   return true;
+   
+   return true;    
 }
 
 const SAMPLE_UNKNOWN : u32 = 0xffffffff;
@@ -4890,7 +4887,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    if start_packet(f) == false                            {return false;} 
 
    if IS_PUSH_MODE!(f) {
-      if is_whole_packet_present(f, 1) == false {
+      if is_whole_packet_present(f, true) == false {
          // convert error in ogg header to write type
          if f.error == InvalidStream {
             f.error = InvalidSetup;
