@@ -3949,7 +3949,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
    for i in 0 .. f.channels as usize{
       if really_zero_channel[i] {
         //  memset(f.channel_buffers[i], 0, sizeof(*f.channel_buffers[i]) * n2);
-        std::ptr::write_bytes(f.channel_buffers[i].as_mut_ptr(), b'0', n2 as usize);
+        std::ptr::write_bytes(f.channel_buffers[i].as_mut_ptr(), 0, n2 as usize);
       } else {
           let cb : &mut [f32] = FORCE_BORROW!( f.channel_buffers[i].as_mut_slice() );
           let fy : &[YTYPE] = FORCE_BORROW!( f.final_y[i].as_slice() ); 
@@ -3960,8 +3960,9 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
 
 // INVERSE MDCT
    CHECK!(f);
-   for i in 0 .. f.channels{
-      inverse_mdct(f.channel_buffers[i as usize].as_mut_ptr(), n, f, m.blockflag as i32);
+   for i in 0 .. f.channels as usize {
+      let cb : &mut Vec<f32> = FORCE_BORROW_MUT!(&mut f.channel_buffers[i]);
+      inverse_mdct(cb, n, f, m.blockflag as i32);
    }
    CHECK!(f);
 
@@ -4523,13 +4524,15 @@ unsafe fn iter_54(z: *mut f32)
 
 
 
-unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
+unsafe fn inverse_mdct(buffer: &mut [f32], n: i32, f: &mut Vorbis, blocktype: i32)
 {
    let n2 : i32 = n >> 1;
    let n4 : i32 = n >> 2; 
    let n8 : i32 = n >> 3;
+
+   let buffer = buffer.as_mut_ptr();
+
    // @OPTIMIZE: reduce register pressure by using fewer variables?
-//    let save_point : i32 = temp_alloc_save!(f);
    
    // NOTE(bungcip): need resize() ?
    let mut buf2 : Vec<f32> = Vec::with_capacity(n2 as usize);
@@ -4585,38 +4588,39 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    // possibly swap their meaning as we change which operations
    // are in place
 
-   let u: *mut f32 = buffer;
+   let u = buffer;
    let v = buf2.as_mut_ptr();
 
    // step 2    (paper output is w, now u)
    // this could be in place, but the data ends up in the wrong
    // place... _somebody_'s got to swap it, so this is nominated
    {
-      let mut aa : *mut f32 = a.offset( (n2-8) as isize);
-      let mut d0 : *mut f32; let mut d1: *mut f32; let mut e0: *mut f32; let mut e1: *mut f32;
+      let mut aa = a.offset( (n2-8) as isize);
 
-      e0 = v.offset(n4 as isize);
-      e1 = v.offset(0);
+      let mut e0 = v.offset(n4 as isize);
+      let mut e1 = v.offset(0);
 
-      d0 = u.offset(n4 as isize);
-      d1 = u.offset(0);
+      let mut d0 = u.offset(n4 as isize);
+      let mut d1 = u.offset(0);
 
       while aa >= a {
-         let mut v40_20 : f32; let mut v41_21: f32;
+         {
+            let v41_21 = *e0.offset(1) - *e1.offset(1);
+            let v40_20 = *e0.offset(0) - *e1.offset(0);
+            *d0.offset(1)  = *e0.offset(1) + *e1.offset(1);
+            *d0.offset(0)  = *e0.offset(0) + *e1.offset(0);
+            *d1.offset(1)  = v41_21 * *aa.offset(4) - v40_20 * *aa.offset(5);
+            *d1.offset(0)  = v40_20 * *aa.offset(4) + v41_21 * *aa.offset(5);
+         }
 
-         v41_21 = *e0.offset(1) - *e1.offset(1);
-         v40_20 = *e0.offset(0) - *e1.offset(0);
-         *d0.offset(1)  = *e0.offset(1) + *e1.offset(1);
-         *d0.offset(0)  = *e0.offset(0) + *e1.offset(0);
-         *d1.offset(1)  = v41_21 * *aa.offset(4) - v40_20 * *aa.offset(5);
-         *d1.offset(0)  = v40_20 * *aa.offset(4) + v41_21 * *aa.offset(5);
-
-         v41_21 = *e0.offset(3) - *e1.offset(3);
-         v40_20 = *e0.offset(2) - *e1.offset(2);
-         *d0.offset(3)  = *e0.offset(3) + *e1.offset(3);
-         *d0.offset(2)  = *e0.offset(2) + *e1.offset(2);
-         *d1.offset(3)  = v41_21 * *aa.offset(0) - v40_20 * *aa.offset(1);
-         *d1.offset(2)  = v40_20 * *aa.offset(0) + v41_21 * *aa.offset(1);
+         {
+            let v41_21 = *e0.offset(3) - *e1.offset(3);
+            let v40_20 = *e0.offset(2) - *e1.offset(2);
+            *d0.offset(3)  = *e0.offset(3) + *e1.offset(3);
+            *d0.offset(2)  = *e0.offset(2) + *e1.offset(2);
+            *d1.offset(3)  = v41_21 * *aa.offset(0) - v40_20 * *aa.offset(1);
+            *d1.offset(2)  = v40_20 * *aa.offset(0) + v41_21 * *aa.offset(1);
+         }
 
          aa = aa.offset(-8);
 
@@ -4823,7 +4827,6 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
       }
    }
 
-//    temp_alloc_restore!(f,save_point);
 }
 
 pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
