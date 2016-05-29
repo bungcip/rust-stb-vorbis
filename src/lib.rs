@@ -233,7 +233,7 @@ macro_rules! LINE_OP {
 // setup_temp_malloc, temp_malloc) to change this behavior, or you
 // can use a simpler allocation model: you pass in a buffer from
 // which stb_vorbis will allocate _all_ its memory (including the
-// temp memory). "open" may fail with a outofmem if you
+// temp memory). "open" may fail with a OutOfMem if you
 // do not pass in enough data; there is no way to determine how
 // much you do need except to succeed (at which point you can
 // query get_info to find the exact amount required. yes I know
@@ -466,9 +466,9 @@ pub struct Vorbis
    pub sample_rate: u32,
    pub channels: i32,
 
-   pub setup_memory_required: u32,
-   pub temp_memory_required: u32,
-   pub setup_temp_memory_required: u32,
+   pub setup_memory_required: usize,
+   pub temp_memory_required: usize,
+   pub setup_temp_memory_required: usize,
 
   // input config
    f: Option<BufReader<File>>,
@@ -497,8 +497,8 @@ pub struct Vorbis
   // user-useful data
 
   // header info
-   blocksize: [i32; 2],
-   blocksize_0: i32, blocksize_1: i32,
+   blocksize: [usize; 2],
+   blocksize_0: usize, blocksize_1: usize,
    codebook_count: i32,
    codebooks: Vec<Codebook>,
    floor_count: i32,
@@ -575,7 +575,7 @@ impl Vorbis {
             alloc: alloc,
             temp_offset: alloc.alloc_buffer_length_in_bytes,
             eof: false,
-            error: VorbisError::_no_error,
+            error: VorbisError::NoError,
             stream: std::ptr::null_mut(),
             codebooks: Vec::new(),
             page_crc_tests: -1,
@@ -649,11 +649,11 @@ pub struct VorbisInfo
    pub sample_rate: u32,
    pub channels: i32,
 
-   pub setup_memory_required: u32,
-   pub setup_temp_memory_required: u32,
-   pub temp_memory_required: u32,
+   pub setup_memory_required: usize,
+   pub setup_temp_memory_required: usize,
+   pub temp_memory_required: usize,
 
-   pub max_frame_size: i32,
+   pub max_frame_size: usize,
 }
 
 ////////   ERROR CODES
@@ -662,36 +662,36 @@ pub struct VorbisInfo
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum VorbisError
 {
-   _no_error,
+   NoError,
 
-   need_more_data=1,             // not a real error
+   NeedMoreData=1,             // not a real error
 
-   invalid_api_mixing,           // can't mix API modes
-   outofmem,                     // not enough memory
-   feature_not_supported,        // uses floor 0
-   too_many_channels,            // STB_VORBIS_MAX_CHANNELS is too small
-   file_open_failure,            // fopen() failed
-   seek_without_length,          // can't seek in unknown-length file
+   InvalidApiMixing,           // can't mix API modes
+   OutOfMem,                     // not enough memory
+   FeatureNotSupported,        // uses floor 0
+   TooManyChannels,            // STB_VORBIS_MAX_CHANNELS is too small
+   FileOpenFailure,            // fopen() failed
+   SeekWithoutLength,          // can't seek in unknown-length file
 
-   unexpected_eof=10,            // file is truncated?
-   seek_invalid,                 // seek past EOF
+   UnexpectedEof=10,            // file is truncated?
+   SeekInvalid,                 // seek past EOF
 
    // decoding errors (corrupt/invalid stream) -- you probably
    // don't care about the exact details of these
 
    // vorbis errors:
-   invalid_setup=20,
-   invalid_stream,
+   InvalidSetup=20,
+   InvalidStream,
 
    // ogg errors:
-   missing_capture_pattern=30,
-   invalid_stream_structure_version,
-   continued_packet_flag_invalid,
-   incorrect_stream_serial_number,
-   invalid_first_page,
-   bad_packet_type,
-   cant_find_last_page,
-   seek_failed
+   MissingCapturePattern=30,
+   InvalidStreamStructureVersion,
+   ContinuedPacketFlagInvalid,
+   IncorrectStreamSerialNumber,
+   InvalidFirstPage,
+   BadPacketType,
+   CantFindLastPage,
+   SeekFailed
 }
 
 
@@ -725,11 +725,11 @@ fn error(f: &mut Vorbis, e: VorbisError) -> bool
 {
     // NOTE: e is VorbisError
     f.error = e;
-    if f.eof == false && e != VorbisError::need_more_data {
+    if f.eof == false && e != VorbisError::NeedMoreData {
         f.error = e; // breakpoint for debugging
     }
     
-    // if e == VorbisError::invalid_stream {
+    // if e == VorbisError::InvalidStream {
     //     panic!("Cek error nya!");
     // }
     
@@ -943,11 +943,11 @@ fn ilog(n: i32) -> i32
        
 }
 
-fn get_window(f: &Vorbis, len: i32) -> &[f32]
+fn get_window(f: &Vorbis, len: usize) -> &[f32]
 {
    let len = len << 1;
-   if len == f.blocksize_0 { return &f.window[0]; }
-   if len == f.blocksize_1 { return &f.window[1]; }
+   if len == f.blocksize_0 as usize { return &f.window[0]; }
+   if len == f.blocksize_1 as usize { return &f.window[1]; }
 
    unreachable!();
 }
@@ -1110,12 +1110,14 @@ fn getn(z: &mut Vorbis, data: &mut [u8]) -> bool
 }
 
 
-unsafe fn skip(z: &mut Vorbis, n: i32)
+fn skip(z: &mut Vorbis, n: i32)
 {
    if USE_MEMORY!(z) {
-      z.stream = z.stream.offset(n as isize);
-      if z.stream >= z.stream_end {z.eof = true;}
-      return;
+      unsafe {
+        z.stream = z.stream.offset(n as isize);
+        if z.stream >= z.stream_end {z.eof = true;}
+        return;
+      }
    }
 
    // file must not None
@@ -1136,7 +1138,7 @@ fn capture_pattern(f: &mut Vorbis) -> bool
 const EOP : i32 = -1;
 const INVALID_BITS : i32 = -1;
 
-unsafe fn get8_packet_raw(f: &mut Vorbis) -> i32
+fn get8_packet_raw(f: &mut Vorbis) -> i32
 {
     if f.bytes_in_seg == 0 {
         if f.last_seg == true {
@@ -1155,7 +1157,7 @@ unsafe fn get8_packet_raw(f: &mut Vorbis) -> i32
 }
 
 
-unsafe fn get8_packet(f: &mut Vorbis) -> i32
+fn get8_packet(f: &mut Vorbis) -> i32
 {
     let x = get8_packet_raw(f);
     f.valid_bits = 0;
@@ -1163,7 +1165,7 @@ unsafe fn get8_packet(f: &mut Vorbis) -> i32
 }
 
 
-unsafe fn flush_packet(f: &mut Vorbis)
+fn flush_packet(f: &mut Vorbis)
 {
     while get8_packet_raw(f) != EOP {}
 }
@@ -1172,7 +1174,7 @@ unsafe fn flush_packet(f: &mut Vorbis)
 // @OPTIMIZE: this is the secondary bit decoder, so it's probably not as important
 // as the huffman decoder?
 
-unsafe fn get_bits(f: &mut Vorbis, n: i32) -> u32
+fn get_bits(f: &mut Vorbis, n: i32) -> u32
 {
    let mut z : u32;
 
@@ -1207,7 +1209,7 @@ unsafe fn get_bits(f: &mut Vorbis, n: i32) -> u32
 fn start_page(f: &mut Vorbis) -> bool
 {
    if capture_pattern(f) == false {
-       return error(f, VorbisError::missing_capture_pattern);
+       return error(f, VorbisError::MissingCapturePattern);
    } 
    return start_page_no_capturepattern(f);
 }
@@ -1218,7 +1220,7 @@ fn start_packet(f: &mut Vorbis) -> bool
    while f.next_seg == -1 {
       if start_page(f) == false { return false; }
       if (f.page_flag & PAGEFLAG_CONTINUED_PACKET as u8) != 0 {
-         return error(f, VorbisError::continued_packet_flag_invalid);
+         return error(f, VorbisError::ContinuedPacketFlagInvalid);
       }
    }
    f.last_seg = false;
@@ -1231,22 +1233,22 @@ fn start_packet(f: &mut Vorbis) -> bool
 
 fn maybe_start_packet(f: &mut Vorbis) -> bool
 {
-    use VorbisError::{missing_capture_pattern, continued_packet_flag_invalid};
+    use VorbisError::{MissingCapturePattern, ContinuedPacketFlagInvalid};
     
    if f.next_seg == -1 {
       let x = get8(f) as i32;
       if f.eof == true { return false; } // EOF at page boundary is not an error!
-      if 0x4f != x       { return error(f, missing_capture_pattern); }
-      if 0x67 != get8(f) { return error(f, missing_capture_pattern); }
-      if 0x67 != get8(f) { return error(f, missing_capture_pattern); }
-      if 0x53 != get8(f) { return error(f, missing_capture_pattern); }
+      if 0x4f != x       { return error(f, MissingCapturePattern); }
+      if 0x67 != get8(f) { return error(f, MissingCapturePattern); }
+      if 0x67 != get8(f) { return error(f, MissingCapturePattern); }
+      if 0x53 != get8(f) { return error(f, MissingCapturePattern); }
       if start_page_no_capturepattern(f) == false { return false; }
       if (f.page_flag & PAGEFLAG_CONTINUED_PACKET as u8) != 0 {
          // set up enough state that we can read this packet if we want,
          // e.g. during recovery
          f.last_seg = false;
          f.bytes_in_seg = 0;
-         return error(f, continued_packet_flag_invalid);
+         return error(f, ContinuedPacketFlagInvalid);
       }
    }
    return start_packet(f);
@@ -1255,13 +1257,12 @@ fn maybe_start_packet(f: &mut Vorbis) -> bool
 
 fn next_segment(f: &mut Vorbis) -> i32
 {
-    use VorbisError::continued_packet_flag_invalid;
    if f.last_seg == true {return 0;}
    if f.next_seg == -1 {
       f.last_seg_which = f.segment_count-1; // in case start_page fails
       if start_page(f) == false { f.last_seg = true; return 0; }
       if (f.page_flag & PAGEFLAG_CONTINUED_PACKET as u8) == 0 {
-          error(f, continued_packet_flag_invalid); 
+          error(f, VorbisError::ContinuedPacketFlagInvalid); 
           return 0;
       }
    }
@@ -1285,22 +1286,15 @@ fn next_segment(f: &mut Vorbis) -> i32
 
 unsafe fn vorbis_decode_packet(f: &mut Vorbis, len: &mut i32, p_left: &mut i32, p_right: &mut i32) -> bool
 {
-    let mut mode_index : i32 = 0;
-    let mut left_end: i32 = 0;
-    let mut right_end: i32 = 0;
+    let mut mode_index = 0;
+    let mut left_end = 0;
+    let mut right_end = 0;
     
     if vorbis_decode_initial(f, p_left, &mut left_end, p_right, &mut right_end, &mut mode_index) ==  false {
         return false;
     }
     
-    // hack to fight borrow checker
-    let mode : &Mode = {
-        let p = &f.mode_config[mode_index as usize];
-        let p = p as *const _;
-        let p : &Mode = std::mem::transmute(p);
-        p
-    };
-    
+    let mode : &Mode = FORCE_BORROW!( &f.mode_config[mode_index as usize] );
     return vorbis_decode_packet_rest(
         f, len, mode, 
         *p_left, left_end, *p_right, right_end, p_left
@@ -1308,13 +1302,13 @@ unsafe fn vorbis_decode_packet(f: &mut Vorbis, len: &mut i32, p_left: &mut i32, 
 }
 
 
-unsafe fn vorbis_pump_first_frame(f: &mut Vorbis)
+fn vorbis_pump_first_frame(f: &mut Vorbis)
 {
     let mut len = 0;
     let mut right = 0;
     let mut left = 0;
     
-    if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == true {
+    if unsafe { vorbis_decode_packet(f, &mut len, &mut left, &mut right) } == true {
         vorbis_finish_frame(f, len, left, right);
     }
 }
@@ -1371,7 +1365,7 @@ pub fn stb_vorbis_open_filename(filename: &Path, alloc: Option<VorbisAlloc>)
     -> Result<Vorbis, VorbisError>
 {    
     let file = match File::open(filename){
-        Err(_)   => return Err(VorbisError::file_open_failure),
+        Err(_)   => return Err(VorbisError::FileOpenFailure),
         Ok(file) => file
     };
     
@@ -1393,7 +1387,7 @@ pub fn stb_vorbis_open_filename(filename: &Path, alloc: Option<VorbisAlloc>)
 //        has to be the same as frame N+1's left_end-left_start (which they are by
 //        construction)
 
-unsafe fn vorbis_decode_initial(f: &mut Vorbis, p_left_start: *mut i32, p_left_end: *mut i32, p_right_start: *mut i32, p_right_end: *mut i32, mode: *mut i32) -> bool
+fn vorbis_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mut i32, p_right_start: &mut i32, p_right_end: &mut i32, mode: &mut i32) -> bool
 {
    f.channel_buffer_start = 0;
    f.channel_buffer_end = 0;
@@ -1406,7 +1400,7 @@ unsafe fn vorbis_decode_initial(f: &mut Vorbis, p_left_start: *mut i32, p_left_e
         // check packet type
         if get_bits(f,1) != 0 {
             if IS_PUSH_MODE!(f) {
-                return error(f, VorbisError::bad_packet_type);
+                return error(f, VorbisError::BadPacketType);
             }
             while EOP != get8_packet(f){}
             continue;
@@ -1427,11 +1421,11 @@ unsafe fn vorbis_decode_initial(f: &mut Vorbis, p_left_start: *mut i32, p_left_e
    *mode = i;
 
    // NOTE: hack to forget borrow
-   let &mut m : &mut Mode = FORCE_BORROW_MUT!(&mut f.mode_config[i as usize]);
-   let n : i32;
-   let prev: i32;
-   let next: i32;
+   let &mut m : &mut Mode = unsafe { FORCE_BORROW_MUT!(&mut f.mode_config[i as usize])};
    
+   let n;
+   let prev;
+   let next;
    if m.blockflag != 0 {
       n = f.blocksize_1;
       prev = get_bits(f,1) as i32;
@@ -1446,24 +1440,24 @@ unsafe fn vorbis_decode_initial(f: &mut Vorbis, p_left_start: *mut i32, p_left_e
 
    let window_center = n >> 1;
    if m.blockflag != 0 && prev == 0 {
-      *p_left_start = (n - f.blocksize_0) >> 2;
-      *p_left_end   = (n + f.blocksize_0) >> 2;
+      *p_left_start = (n - f.blocksize_0) as i32 >> 2;
+      *p_left_end   = (n + f.blocksize_0) as i32 >> 2;
    } else {
       *p_left_start = 0;
-      *p_left_end   = window_center;
+      *p_left_end   = window_center as i32;
    }
    if m.blockflag != 0 && next == 0 {
-      *p_right_start = (n*3 - f.blocksize_0) >> 2;
-      *p_right_end   = (n*3 + f.blocksize_0) >> 2;
+      *p_right_start = (n*3 - f.blocksize_0) as i32 >> 2;
+      *p_right_end   = (n*3 + f.blocksize_0) as i32 >> 2;
    } else {
-      *p_right_start = window_center;
-      *p_right_end   = n;
+      *p_right_start = window_center as i32;
+      *p_right_end   = n as i32;
    }
 
    return true;
 }
 
-unsafe fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -> i32
+fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -> i32
 {
    // we use right&left (the start of the right- and left-window sin()-regions)
    // to determine how much to return, rather than inferring from the rules
@@ -1475,14 +1469,15 @@ unsafe fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -
 
    // mixin from previous window
    if f.previous_length != 0 {
-      let n = f.previous_length;
-      let w : &[f32] = FORCE_BORROW!( get_window(f, n));
-      for i in 0 .. f.channels {
-         let i = i as usize;
+      let n = f.previous_length as usize;
+      // NOTE(bungcip): need to force borrow because mut f is borrowed....
+      let w : &[f32] = unsafe { FORCE_BORROW!( get_window(f, n)) };
+      let left = left as usize;
+      for i in 0 .. f.channels as usize {
          for j in 0 .. n {
-            f.channel_buffers[i][ (left + j) as usize ] =
-               f.channel_buffers[i][(left + j) as usize] * w[    j as usize] +
-               f.previous_window[i][        j  as usize] * w[n as usize - 1 - (j as usize)];
+            f.channel_buffers[i][left + j] =
+               f.channel_buffers[i][left + j] * w[j] +
+               f.previous_window[i][       j] * w[n - 1 - j];
          }
       }
    }
@@ -1498,8 +1493,7 @@ unsafe fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -
    // channel_buffers couldn't be temp mem (although they're NOT
    // currently temp mem, they could be (unless we want to level
    // performance by spreading out the computation))
-   for i in 0 .. f.channels {
-       let i = i as usize;
+   for i in 0 .. f.channels as usize {
       let mut j = 0;
       while right + j < len {
          f.previous_window[i][j as usize] = f.channel_buffers[i][ (right+j) as usize];
@@ -1628,11 +1622,11 @@ pub fn stb_vorbis_decode_filename(filename: &Path,
 //
 // You generally should not intermix calls to stb_vorbis_get_frame_*()
 // and stb_vorbis_get_samples_*(), since the latter calls the former.
-pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis, 
+pub fn stb_vorbis_get_frame_float(f: &mut Vorbis, 
     channel_count: Option<&mut i32>, output: Option<&mut *mut *mut f32>) -> i32
 {
    if IS_PUSH_MODE!(f){
-       error(f, VorbisError::invalid_api_mixing);
+       error(f, VorbisError::InvalidApiMixing);
        return 0;
    } 
 
@@ -1640,7 +1634,7 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis,
     let mut left = 0;
     let mut right = 0;
     
-   if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == false {
+   if unsafe { vorbis_decode_packet(f, &mut len, &mut left, &mut right) } == false {
       f.channel_buffer_start = 0;
       f.channel_buffer_end = 0;
       return 0;
@@ -1648,7 +1642,9 @@ pub unsafe fn stb_vorbis_get_frame_float(f: &mut Vorbis,
 
    let len = vorbis_finish_frame(f, len, left, right);
    for i in 0 .. f.channels {
+    unsafe {
       f.outputs[i as usize] = f.channel_buffers[i as usize].as_mut_ptr().offset(left as isize);
+    }
    }
 
    f.channel_buffer_start = left;
@@ -1864,7 +1860,7 @@ fn start_page_no_capturepattern(f: &mut Vorbis) -> bool
     use VorbisError::*;
     
    // stream structure version
-   if 0 != get8(f) {return error(f, invalid_stream_structure_version);}
+   if 0 != get8(f) {return error(f, InvalidStreamStructureVersion);}
    // header flag
    f.page_flag = get8(f);
    // absolute granule position
@@ -1886,7 +1882,7 @@ fn start_page_no_capturepattern(f: &mut Vorbis) -> bool
             FORCE_BORROW_MUT!(&mut f.segments[0 .. sc])
         };
         if getn(f, segments_slice) == false {
-            return error(f, unexpected_eof);
+            return error(f, UnexpectedEof);
         }
    }
    // assume we _don't_ know any the sample position of any segments
@@ -1941,7 +1937,7 @@ fn predict_point(x: i32, x0: i32 , x1: i32 , y0: i32 , y1: i32 ) -> i32
 
 pub type YTYPE = i16;
 
-unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut f32, final_y: &[YTYPE], _: *mut u8) -> bool
+unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: usize , target: &mut [f32], final_y: &[YTYPE], _: *mut u8) -> bool
 {
    let n2 = n >> 1;
 
@@ -1950,29 +1946,31 @@ unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut 
    let floor = map.submap_floor[s as usize];
    
    if f.floor_types[floor as usize] == 0 {
-      return error(f, VorbisError::invalid_stream);
+      return error(f, VorbisError::InvalidStream);
    } else {
       let g : &Floor1 = FORCE_BORROW!( &f.floor_config[floor as usize].floor1 );
-      let mut lx : i32 = 0;
+      let mut lx = 0;
       let mut ly : i32 = final_y[0] as i32 * g.floor1_multiplier as i32;
-      for q in 1 .. g.values {
-         let j = g.sorted_order[q as usize] as usize;
-         if final_y[j as usize] >= 0
+      for q in 1 .. g.values as usize {
+         let j = g.sorted_order[q] as usize;
+         if final_y[j] >= 0
          {
             let hy : i32 = final_y[j] as i32 * g.floor1_multiplier as i32;
             let hx : i32 = g.xlist[j] as i32;
             if lx != hx as i32{
-               draw_line(target, lx,ly, hx, hy, n2);
+               draw_line(target, lx,ly, hx, hy, n2 as i32);
             }
             CHECK!(f);
             lx = hx;
             ly = hy;
          }
       }
+      
+      let lx = lx as usize;
       if lx < n2 {
          // optimization of: draw_line(target, lx,ly, n,ly, n2);
          for j in lx .. n2 {
-            LINE_OP!(*target.offset(j as isize), INVERSE_DB_TABLE[ly as usize]);
+            LINE_OP!(target[j as usize], INVERSE_DB_TABLE[ly as usize]);
          }
          CHECK!(f);
       }
@@ -1981,7 +1979,7 @@ unsafe fn do_floor(f: &mut Vorbis, map: &Mapping, i: i32, n: i32 , target: *mut 
 }
 
 #[inline(always)]
-unsafe fn draw_line(output: *mut f32, x0: i32, y0: i32, mut x1: i32, y1: i32, n: i32)
+fn draw_line(output: &mut [f32], x0: i32, y0: i32, mut x1: i32, y1: i32, n: i32)
 {
     use std::i32;
     
@@ -2006,7 +2004,7 @@ unsafe fn draw_line(output: *mut f32, x0: i32, y0: i32, mut x1: i32, y1: i32, n:
    
    if x1 > n {x1 = n;}
    if x < x1 {
-      LINE_OP!(*output.offset(x as isize), INVERSE_DB_TABLE[y as usize]);
+      LINE_OP!(output[x as usize], INVERSE_DB_TABLE[y as usize]);
       
       x += 1;
       while x < x1 {
@@ -2018,7 +2016,7 @@ unsafe fn draw_line(output: *mut f32, x0: i32, y0: i32, mut x1: i32, y1: i32, n:
          } else{
             y += base;
          }
-         LINE_OP!(*output.offset(x as isize), INVERSE_DB_TABLE[y as usize]);
+         LINE_OP!(output[x as usize], INVERSE_DB_TABLE[y as usize]);
          
          x += 1;
       }      
@@ -2128,7 +2126,7 @@ unsafe fn codebook_decode_start(f: &mut Vorbis, c: &Codebook) -> i32
 
    // type 0 is only legal in a scalar context
    if c.lookup_type == 0 {
-      error(f, VorbisError::invalid_stream);
+      error(f, VorbisError::InvalidStream);
    } else {
       DECODE_VQ!(z,f,c);
       if c.sparse == true {assert!(z < c.sorted_entries);}
@@ -2138,7 +2136,7 @@ unsafe fn codebook_decode_start(f: &mut Vorbis, c: &Codebook) -> i32
                return z;
             }
          }
-         error(f,  VorbisError::invalid_stream);
+         error(f,  VorbisError::InvalidStream);
       }
    }
    return z;
@@ -2249,7 +2247,7 @@ unsafe fn codebook_decode_scalar_raw(f: &mut Vorbis, c: &Codebook) -> i32
       }
    }
 
-   error(f, VorbisError::invalid_stream);
+   error(f, VorbisError::InvalidStream);
    f.valid_bits = 0;
    return -1;
 }
@@ -2284,7 +2282,7 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
 
    // type 0 is only legal in a scalar context
    if c.lookup_type == 0 {
-     return error(f, VorbisError::invalid_stream);
+     return error(f, VorbisError::InvalidStream);
    } 
    while total_decode > 0 {
       let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
@@ -2296,7 +2294,7 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
               return false;
             } 
          }
-         return error(f, VorbisError::invalid_stream);
+         return error(f, VorbisError::InvalidStream);
       }
 
       // if this will take us off the end of the buffers, stop short!
@@ -2451,7 +2449,7 @@ pub unsafe fn stb_vorbis_seek_frame(f: &mut Vorbis, sample_number: u32) -> bool
    
    let max_frame_samples: u32;
 
-   if IS_PUSH_MODE!(f) { return error(f, VorbisError::invalid_api_mixing);}
+   if IS_PUSH_MODE!(f) { return error(f, VorbisError::InvalidApiMixing);}
 
    // fast page-level search
    if seek_to_sample_coarse(f, sample_number) == false {
@@ -2471,7 +2469,7 @@ pub unsafe fn stb_vorbis_seek_frame(f: &mut Vorbis, sample_number: u32) -> bool
       let mut mode: i32 = 0;
       let frame_samples: i32;
       if peek_decode_initial(f, &mut left_start, &mut left_end, &mut right_start, &mut right_end, &mut mode) == false{
-         return error(f, VorbisError::seek_failed);
+         return error(f, VorbisError::SeekFailed);
       }
       // calculate the number of samples returned by the next frame
       frame_samples = right_start - left_start;
@@ -2499,7 +2497,7 @@ pub fn stb_vorbis_get_error(f: &mut Vorbis) -> VorbisError
 //    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let e = f.error;
-   f.error = VorbisError::_no_error;
+   f.error = VorbisError::NoError;
    return e;
 }
 
@@ -2508,7 +2506,7 @@ pub unsafe fn stb_vorbis_seek_start(f: &mut Vorbis)
 {
 //    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-   if IS_PUSH_MODE!(f) { error(f, VorbisError::invalid_api_mixing); return; }
+   if IS_PUSH_MODE!(f) { error(f, VorbisError::InvalidApiMixing); return; }
    
    let offset = f.first_audio_page_offset;
    set_file_offset(f, offset);
@@ -2609,7 +2607,7 @@ pub unsafe fn stb_vorbis_open_memory(data: &[u8], error: &mut VorbisError,
 pub fn stb_vorbis_decode_memory(mem: &[u8],
      channels: &mut i32, sample_rate: &mut u32, output: &mut Vec<i16>) -> i32
 {
-   let mut error = VorbisError::_no_error;
+   let mut error = VorbisError::NoError;
    let mut v : Vorbis = unsafe { match stb_vorbis_open_memory(mem, &mut error, None){
        None    => return -1,
        Some(v) => v
@@ -2807,7 +2805,7 @@ pub unsafe fn stb_vorbis_get_samples_short_interleaved(f: &mut Vorbis, channels:
 }
 
 // the same as vorbis_decode_initial, but without advancing
-unsafe fn peek_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mut i32, p_right_start: &mut i32, p_right_end: &mut i32, mode: &mut i32) -> bool
+fn peek_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mut i32, p_right_start: &mut i32, p_right_end: &mut i32, mode: &mut i32) -> bool
 {
 //   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -2836,20 +2834,22 @@ unsafe fn peek_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end
    return true;
 }
 
-unsafe fn set_file_offset(f: &mut Vorbis, mut loc: u32) -> bool
+fn set_file_offset(f: &mut Vorbis, mut loc: u32) -> bool
 {
 //   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    if f.push_mode == true {return false;}
    f.eof = false;
    if USE_MEMORY!(f) {
-      if f.stream_start.offset(loc as isize)  >= f.stream_end || f.stream_start.offset(loc as isize) < f.stream_start {
-         f.stream = f.stream_end;
-         f.eof = true;
-         return false;
-      } else {
-         f.stream = f.stream_start.offset(loc as isize);
-         return true;
+      unsafe {
+        if f.stream_start.offset(loc as isize)  >= f.stream_end || f.stream_start.offset(loc as isize) < f.stream_start {
+            f.stream = f.stream_end;
+            f.eof = true;
+            return false;
+        } else {
+            f.stream = f.stream_start.offset(loc as isize);
+            return true;
+        }
       }
    }
    if loc + f.f_start < loc || loc >= 0x80000000 {
@@ -2889,7 +2889,7 @@ unsafe fn go_to_page_before(f: &mut Vorbis, limit_offset: u32) -> bool
 
    set_file_offset(f, previous_safe);
 
-   while vorbis_find_page(f, &mut end, std::ptr::null_mut()) != 0 {
+   while vorbis_find_page(f, Some(&mut end), None) != 0 {
       if end >= limit_offset && stb_vorbis_get_file_offset(f) < limit_offset{
          return true;          
       }
@@ -2899,7 +2899,8 @@ unsafe fn go_to_page_before(f: &mut Vorbis, limit_offset: u32) -> bool
    return false;
 }
 
-unsafe fn vorbis_find_page(f: &mut Vorbis, end: *mut u32, last: *mut u32) -> u32
+// NOTE(bungcip): change signature to Result
+fn vorbis_find_page(f: &mut Vorbis, end: Option<&mut u32>, last: Option<&mut u32>) -> u32
 {
 //   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -2925,8 +2926,7 @@ unsafe fn vorbis_find_page(f: &mut Vorbis, end: *mut u32, last: *mut u32) -> u32
          }
          if f.eof == true {return 0;}
          if i == 4 {
-            let mut header: [u8; 27] = std::mem::zeroed();
-            // uint32 i, crc, goal, len;
+            let mut header: [u8; 27] = [0; 27];
             let mut i : usize = 0;
             while i < 4 {
                header[i] = OGG_PAGE_HEADER[i];
@@ -2934,8 +2934,7 @@ unsafe fn vorbis_find_page(f: &mut Vorbis, end: *mut u32, last: *mut u32) -> u32
             }
             while i < 27 {
                header[i] = get8(f);
-                
-                i += 1;
+               i += 1;
             }
             
             if f.eof == true {return 0;}
@@ -2956,17 +2955,17 @@ unsafe fn vorbis_find_page(f: &mut Vorbis, end: *mut u32, last: *mut u32) -> u32
             }
             let mut crc = 0;
             for i in 0usize .. 27 {
-               crc = crc32_update(crc, header[i]);
+               crc = unsafe { crc32_update(crc, header[i]) };
             }
             let mut len = 0;
             for _ in 0 .. header[26] {
                let s = get8(f) as i32;
-               crc = crc32_update(crc, s as u8);
+               crc = unsafe { crc32_update(crc, s as u8) };
                len += s;
             }
             if len != 0 && f.eof == true {return 0;}
             for _ in 0 .. len {
-               crc = crc32_update(crc, get8(f));
+               crc = unsafe { crc32_update(crc, get8(f)) };
             }
             // finished parsing probable page
             if crc == goal as u32 {
@@ -2978,10 +2977,10 @@ unsafe fn vorbis_find_page(f: &mut Vorbis, end: *mut u32, last: *mut u32) -> u32
                // might decrease the chance of an invalid decode by
                // another 2^32, not worth it since it would hose those
                // invalid-but-useful files?
-               if end.is_null() == false {
+               if let Some(end) = end {
                   *end = stb_vorbis_get_file_offset(f);
                }
-               if last.is_null() == false {
+               if let Some(last) = last {
                   if (header[5] & 0x04) != 0 {
                      *last = 1;
                   }else{
@@ -3062,7 +3061,7 @@ unsafe fn get_seek_page_info(f: &mut Vorbis, z: &mut ProbedPage) -> bool
 // on success, returns an stb_vorbis *, does not set error, returns the amount of
 //    data parsed/consumed on this call in *datablock_memory_consumed_in_bytes;
 // on failure, returns NULL on error and sets *error, does not change *datablock_memory_consumed
-// if returns NULL and *error is need_more_data, then the input block was
+// if returns NULL and *error is NeedMoreData, then the input block was
 //       incomplete and you need to pass in a larger block from the start of the file
 pub unsafe fn stb_vorbis_open_pushdata(
          data: *const u8, data_len: i32, // the memory available for decoding
@@ -3077,7 +3076,7 @@ pub unsafe fn stb_vorbis_open_pushdata(
    p.push_mode  = true;
    if start_decoder(&mut p) == false {
       if p.eof == true {
-         *error = VorbisError::need_more_data;
+         *error = VorbisError::NeedMoreData;
       } else {
          *error = p.error;
       }
@@ -3085,7 +3084,7 @@ pub unsafe fn stb_vorbis_open_pushdata(
    }
    
     *data_used = (p.stream as usize - data as usize) as i32;
-    *error = VorbisError::_no_error;
+    *error = VorbisError::NoError;
     return Some(p);   
 }
 
@@ -3123,7 +3122,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
 {
 
    if IS_PUSH_MODE!(f) == false { 
-       error(f, VorbisError::invalid_api_mixing);
+       error(f, VorbisError::InvalidApiMixing);
        return 0;
     };
 
@@ -3134,7 +3133,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
 
    f.stream     = data as *mut u8;
    f.stream_end = data.offset(data_len as isize) as *mut u8;
-   f.error      = VorbisError::_no_error;
+   f.error      = VorbisError::NoError;
 
    // check that we have the entire packet in memory
    if is_whole_packet_present(f, 0) == false {
@@ -3148,20 +3147,20 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
    if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == false {
       // save the actual error we encountered
       let error = f.error;
-      if error == VorbisError::bad_packet_type {
+      if error == VorbisError::BadPacketType {
          // flush and resynch
-         f.error = VorbisError::_no_error;
+         f.error = VorbisError::NoError;
          while get8_packet(f) != EOP{
             if f.eof == true {break;}
          }
          *samples = 0;
          return (f.stream as usize - data as usize) as i32;
       }
-      if error == VorbisError::continued_packet_flag_invalid {
+      if error == VorbisError::ContinuedPacketFlagInvalid {
          if f.previous_length == 0 {
             // we may be resynching, in which case it's ok to hit one
             // of these; just discard the packet
-            f.error = VorbisError::_no_error;
+            f.error = VorbisError::NoError;
             while get8_packet(f) != EOP{
                 if f.eof == true {break;}
             }
@@ -3220,7 +3219,7 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: i32) -> bool
       // either this continues, or it ends it...
       if end_page != 0 {
          if s < f.segment_count-1 {
-            return error(f, VorbisError::invalid_stream);
+            return error(f, VorbisError::InvalidStream);
          }
       }
       
@@ -3228,38 +3227,38 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: i32) -> bool
          s = -1; // set 'crosses page' flag
       }
       if p > f.stream_end {
-        return error(f, VorbisError::need_more_data);
+        return error(f, VorbisError::NeedMoreData);
       }
       first =  false;
    }
    
    while s == -1 {
       // check that we have the page header ready
-      if p.offset(26) >= f.stream_end               {return error(f, VorbisError::need_more_data);}
+      if p.offset(26) >= f.stream_end               {return error(f, VorbisError::NeedMoreData);}
       
       // validate the page
       {
           // NOTE: create slice to remove libc:memcmp usage
           let p_slice = std::slice::from_raw_parts(p, 4);
           if p_slice ==  OGG_PAGE_HEADER {
-              return error(f, VorbisError::invalid_stream);
+              return error(f, VorbisError::InvalidStream);
           }
       }
-      if *p.offset(4) != 0                             {return error(f, VorbisError::invalid_stream);}
+      if *p.offset(4) != 0                             {return error(f, VorbisError::InvalidStream);}
       if first  { // the first segment must NOT have 'continued_packet', later ones MUST
          if f.previous_length != 0 {
-            if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET as u8) != 0 { return error(f, VorbisError::invalid_stream);}
+            if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET as u8) != 0 { return error(f, VorbisError::InvalidStream);}
          }
          // if no previous length, we're resynching, so we can come in on a continued-packet,
          // which we'll just drop
       } else {
-         if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET as u8) == 0 {return error(f, VorbisError::invalid_stream);}
+         if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET as u8) == 0 {return error(f, VorbisError::InvalidStream);}
       }
       let n = *p.offset(26); // segment counts
       let q = p.offset(27);  // q points to segment table
       p = q.offset(n as isize); // advance past header
       // make sure we've read the segment table
-      if p > f.stream_end                     {return error(f, VorbisError::need_more_data);}
+      if p > f.stream_end                     {return error(f, VorbisError::NeedMoreData);}
       for s in 0 .. n {
          p = p.offset( *q.offset(s as isize) as isize);
          if *q.offset(s as isize) < 255{
@@ -3267,12 +3266,12 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: i32) -> bool
          }
       }
       if end_page != 0 {
-         if s < (n-1) as i32                            {return error(f, VorbisError::invalid_stream);}
+         if s < (n-1) as i32                            {return error(f, VorbisError::InvalidStream);}
       }
       if s == n as i32 {
          s = -1; // set 'crosses page' flag
       }
-      if p > f.stream_end                     {return error(f,VorbisError::need_more_data);}
+      if p > f.stream_end                     {return error(f,VorbisError::NeedMoreData);}
       first = false;
    }
    return true;
@@ -3293,12 +3292,12 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
     let mut end: u32 = 0;
     let mut last_page_loc :u32;
 
-   if IS_PUSH_MODE!(f) { return error(f, invalid_api_mixing) as u32; }
+   if IS_PUSH_MODE!(f) { return error(f, InvalidApiMixing) as u32; }
    if f.total_samples == 0 {
       let mut last : u32 = 0;
       let mut lo : u32;
       let hi : u32;
-      let mut header: [u8; 6] = std::mem::zeroed();
+      let mut header: [u8; 6] = [0; 6];
     
       'done: loop {
       // first, store the current decode position so we can restore it
@@ -3316,9 +3315,9 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
       // previous_safe is now our candidate 'earliest known place that seeking
       // to will lead to the final page'
 
-      if vorbis_find_page(f, &mut end, &mut last) == 0 {
+      if vorbis_find_page(f, Some(&mut end), Some(&mut last)) == 0 {
          // if we can't find a page, we're hosed!
-         f.error = cant_find_last_page;
+         f.error = CantFindLastPage;
          f.total_samples = 0xffffffff;
         //  goto done;
         break 'done;
@@ -3332,7 +3331,7 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
       // explicitly checking the length of the section
       while last == 0 {
          set_file_offset(f, end);
-         if vorbis_find_page(f, &mut end, &mut last) == 0 {
+         if vorbis_find_page(f, Some(&mut end), Some(&mut last)) == 0 {
             // the last page we found didn't have the 'last page' flag
             // set. whoops!
             break;
@@ -3351,7 +3350,7 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
       lo = get32(f);
       hi = get32(f);
       if lo == 0xffffffff && hi == 0xffffffff {
-         f.error = cant_find_last_page;
+         f.error = CantFindLastPage;
          f.total_samples = SAMPLE_UNKNOWN;
         //  goto done;
         break 'done;
@@ -3394,15 +3393,15 @@ unsafe fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
 
    // find the last page and validate the target sample
    let stream_length = stb_vorbis_stream_length_in_samples(f);
-   if stream_length == 0            {return error(f, seek_without_length);}
-   if sample_number > stream_length { return error(f, seek_invalid);}
+   if stream_length == 0            {return error(f, SeekWithoutLength);}
+   if sample_number > stream_length { return error(f, SeekInvalid);}
 
    'error: loop {
    // this is the maximum difference between the window-center (which is the
    // actual granule position value), and the right-start (which the spec
    // indicates should be the granule position (give or take one)).
    let padding = ((f.blocksize_1 - f.blocksize_0) >> 2) as u32;
-   if sample_number < padding{
+   if sample_number < padding {
       sample_number = 0;
    }else{
       sample_number -= padding;
@@ -3465,7 +3464,7 @@ unsafe fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
             set_file_offset(f, left.page_end + (delta / 2) - 32768);
          }
 
-         if vorbis_find_page(f, std::ptr::null_mut(), std::ptr::null_mut()) == 0 {
+         if vorbis_find_page(f, None, None) == 0 {
             break 'error;
         }
       }
@@ -3499,7 +3498,7 @@ unsafe fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
    // seek back to start of the last packet
    page_start = left.page_start as i32;
    set_file_offset(f, page_start as u32);
-   if start_page(f) == false { return error(f, seek_failed);}
+   if start_page(f) == false { return error(f, SeekFailed);}
    end_pos = f.end_seg_with_known_loc;
    assert!(end_pos >= 0);
 
@@ -3552,7 +3551,7 @@ unsafe fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
 // error:
    // try to restore the file to a valid state
    stb_vorbis_seek_start(f);
-   return error(f, seek_failed);
+   return error(f, SeekFailed);
 }
 
 unsafe fn vorbis_search_for_page_pushdata(f: &mut Vorbis, data: *mut u8, mut data_len: i32) -> i32
@@ -3739,11 +3738,13 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: *mut u8, values: *mu
    }
 }
 
-unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut left_start: i32, _: i32, right_start: i32, right_end: i32, p_left: *mut i32) -> bool
+// NOTE(bungcip): reduce parameter count?
+unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, 
+    mut left_start: i32, _: i32, right_start: i32, right_end: i32, p_left: &mut i32) -> bool
 {
 // WINDOWING
 
-    let n : i32 = f.blocksize[m.blockflag as usize];
+    let n = f.blocksize[m.blockflag as usize] as i32;
     let map: &Mapping = FORCE_BORROW!( &f.mapping[ m.mapping as usize ] );
 
 // FLOORS
@@ -3753,15 +3754,15 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
 
    use VorbisError::*;
 
-    let mut zero_channel: [bool; 256] = std::mem::zeroed();
-    let mut really_zero_channel : [bool; 256] = std::mem::zeroed();
+    let mut zero_channel: [bool; 256] = [false; 256];
+    let mut really_zero_channel : [bool; 256] = [false; 256];
 
    for i in 0 .. f.channels {
       let s: i32 = map.chan[i as usize].mux as i32;
       zero_channel[ i as usize ] = false;
       let floor : i32 = map.submap_floor[s as usize] as i32;
       if f.floor_types[floor as usize] == 0 {
-         return error(f, invalid_stream);
+         return error(f, InvalidStream);
       } else {
           let g : &Floor1 = FORCE_BORROW!( &f.floor_config[floor as usize].floor1);
          if get_bits(f, 1) != 0 {
@@ -3802,7 +3803,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
                 continue;
             } // behavior according to spec
             
-            let mut step2_flag: [u8; 256] = mem::zeroed();
+            let mut step2_flag: [u8; 256] = [0; 256];
             step2_flag[0] = 1; 
             step2_flag[1] = 1;
             for j in 2 .. g.values as usize {
@@ -3953,10 +3954,10 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
         //  memset(f.channel_buffers[i], 0, sizeof(*f.channel_buffers[i]) * n2);
         std::ptr::write_bytes(f.channel_buffers[i].as_mut_ptr(), b'0', n2 as usize);
       } else {
-          let cb = f.channel_buffers[i].as_mut_ptr();
+          let cb : &mut [f32] = FORCE_BORROW!( f.channel_buffers[i].as_mut_slice() );
           let fy : &[YTYPE] = FORCE_BORROW!( f.final_y[i].as_slice() ); 
           // NOTE(bungcip): change to slice
-         do_floor(f, map, i as i32, n, cb, fy, std::ptr::null_mut());
+         do_floor(f, map, i as i32, n as usize, cb, fy, std::ptr::null_mut());
       }
    }
 
@@ -4046,21 +4047,21 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, mut
    return true;
 }
 
-macro_rules! temp_alloc_save {
-    ($f: expr) => {
-        $f.temp_offset
-    }
-}
+// macro_rules! temp_alloc_save {
+//     ($f: expr) => {
+//         $f.temp_offset
+//     }
+// }
 
-macro_rules! temp_alloc_restore {
-    ($f: expr, $p: expr) => {
-        $f.temp_offset = $p        
-    }
-}
+// macro_rules! temp_alloc_restore {
+//     ($f: expr, $p: expr) => {
+//         $f.temp_offset = $p        
+//     }
+// }
 
-macro_rules! temp_alloc_save {
-    ($f: expr) => ($f.temp_offset)
-}
+// macro_rules! temp_alloc_save {
+//     ($f: expr) => ($f.temp_offset)
+// }
 
 
 
@@ -4072,7 +4073,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
    let classwords : i32 = f.codebooks[c as usize].dimensions;
    let n_read : i32 = (r.end - r.begin) as i32;
    let part_read : i32 = n_read / r.part_size as i32;
-   let temp_alloc_point : i32 = temp_alloc_save!(f);
+//    let temp_alloc_point : i32 = temp_alloc_save!(f);
    
    // NOTE(bungcip): optimize?
    let mut part_classdata = Vec::with_capacity(f.channels as usize);
@@ -4234,8 +4235,8 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
       let mut class_set : i32 = 0;
       while pcount < part_read {
          if pass == 0 {
-            for j in 0 .. ch {
-               if do_not_decode[j as usize] == false {
+            for j in 0 .. ch as usize {
+               if do_not_decode[j] == false {
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize]);
                   let mut temp;
                   DECODE!(temp,f,c);
@@ -4245,18 +4246,18 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
                   }
                   
                   // NOTE(bungcip): remove .clone() !!!
-                  part_classdata[j as usize][class_set as usize] = r.classdata[temp as usize].clone();
+                  part_classdata[j][class_set as usize] = r.classdata[temp as usize].clone();
                }
             }
          }
             let mut i = 0;
             while i < classwords && pcount < part_read {
-            for j in 0 .. ch {
-               if do_not_decode[j as usize] == false {
-                  let c : i32 = part_classdata[j as usize][class_set as usize][i as usize] as i32;
+            for j in 0 .. ch as usize {
+               if do_not_decode[j] == false {
+                  let c : i32 = part_classdata[j][class_set as usize][i as usize] as i32;
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
-                      let target = residue_buffers[j as usize];
+                      let target = residue_buffers[j];
                       let offset : i32 =  r.begin as i32 + pcount*r.part_size as i32;
                       let n : i32 = r.part_size as i32;
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
@@ -4278,7 +4279,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut [*mut f32], ch: i
     } // loop done
 //   done:
    CHECK!(f);
-   temp_alloc_restore!(f,temp_alloc_point);
+//    temp_alloc_restore!(f,temp_alloc_point);
 }
 
 // the following were split out into separate functions while optimizing;
@@ -4531,7 +4532,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
    let n4 : i32 = n >> 2; 
    let n8 : i32 = n >> 3;
    // @OPTIMIZE: reduce register pressure by using fewer variables?
-   let save_point : i32 = temp_alloc_save!(f);
+//    let save_point : i32 = temp_alloc_save!(f);
    
    // NOTE(bungcip): need resize() ?
    let mut buf2 : Vec<f32> = Vec::with_capacity(n2 as usize);
@@ -4825,7 +4826,7 @@ unsafe fn inverse_mdct(buffer: *mut f32, n: i32, f: &mut Vorbis, blocktype: i32)
       }
    }
 
-   temp_alloc_restore!(f,save_point);
+//    temp_alloc_restore!(f,save_point);
 }
 
 pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
@@ -4839,22 +4840,22 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
    if start_page(f) == false                              {return false;} 
    // validate page flag
-   if (f.page_flag & PAGEFLAG_FIRST_PAGE as u8) == 0       {return error(f, invalid_first_page)}
-   if (f.page_flag & PAGEFLAG_LAST_PAGE as u8) != 0           {return error(f, invalid_first_page);}
-   if (f.page_flag & PAGEFLAG_CONTINUED_PACKET as u8) != 0   {return error(f, invalid_first_page);}
+   if (f.page_flag & PAGEFLAG_FIRST_PAGE as u8) == 0       {return error(f, InvalidFirstPage)}
+   if (f.page_flag & PAGEFLAG_LAST_PAGE as u8) != 0           {return error(f, InvalidFirstPage);}
+   if (f.page_flag & PAGEFLAG_CONTINUED_PACKET as u8) != 0   {return error(f, InvalidFirstPage);}
    // check for expected packet length
-   if f.segment_count != 1                       {return error(f, invalid_first_page);}
-   if f.segments[0] != 30                        {return error(f, invalid_first_page);}
+   if f.segment_count != 1                       {return error(f, InvalidFirstPage);}
+   if f.segments[0] != 30                        {return error(f, InvalidFirstPage);}
    // read packet
    // check packet header
-   if get8(f) != PACKET_ID                 {return error(f, invalid_first_page);}
-   if getn(f, &mut header[..]) == false                         {return error(f, unexpected_eof);}
-   if vorbis_validate(&header) == false                    {return error(f, invalid_first_page);}
+   if get8(f) != PACKET_ID                 {return error(f, InvalidFirstPage);}
+   if getn(f, &mut header[..]) == false                         {return error(f, UnexpectedEof);}
+   if vorbis_validate(&header) == false                    {return error(f, InvalidFirstPage);}
    // vorbis_version
-   if get32(f) != 0                               {return error(f, invalid_first_page);}
-   f.channels = get8(f) as i32; if f.channels == 0        { return error(f, invalid_first_page);}
-   if f.channels > STB_VORBIS_MAX_CHANNELS       {return error(f, too_many_channels);}
-   f.sample_rate = get32(f); if f.sample_rate == 0  {return error(f, invalid_first_page);}
+   if get32(f) != 0                               {return error(f, InvalidFirstPage);}
+   f.channels = get8(f) as i32; if f.channels == 0        { return error(f, InvalidFirstPage);}
+   if f.channels > STB_VORBIS_MAX_CHANNELS       {return error(f, TooManyChannels);}
+   f.sample_rate = get32(f); if f.sample_rate == 0  {return error(f, InvalidFirstPage);}
    get32(f); // bitrate_maximum
    get32(f); // bitrate_nominal
    get32(f); // bitrate_minimum
@@ -4865,13 +4866,13 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       let log1 : i32 = (x >> 4) as i32;
       f.blocksize_0 = 1 << log0;
       f.blocksize_1 = 1 << log1;
-      if log0 < 6 || log0 > 13                       {return error(f, invalid_setup);}
-      if log1 < 6 || log1 > 13                       {return error(f, invalid_setup);}
-      if log0 > log1                                 {return error(f, invalid_setup);}
+      if log0 < 6 || log0 > 13                       {return error(f, InvalidSetup);}
+      if log1 < 6 || log1 > 13                       {return error(f, InvalidSetup);}
+      if log0 > log1                                 {return error(f, InvalidSetup);}
    }
    // framing_flag
    x = get8(f);
-   if (x & 1) == 0                                    {return error(f, invalid_first_page);}
+   if (x & 1) == 0                                    {return error(f, InvalidFirstPage);}
 
    // second packet!
    if start_page(f) == false                              {return false;} 
@@ -4891,8 +4892,8 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    if IS_PUSH_MODE!(f) {
       if is_whole_packet_present(f, 1) == false {
          // convert error in ogg header to write type
-         if f.error == invalid_stream {
-            f.error = invalid_setup;
+         if f.error == InvalidStream {
+            f.error = InvalidSetup;
          }
          return false;
       }
@@ -4900,9 +4901,9 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
    crc32_init(); // always init it, to avoid multithread race conditions
 
-   if get8_packet(f) != PACKET_SETUP as i32       {return error(f, invalid_setup);}
+   if get8_packet(f) != PACKET_SETUP as i32       {return error(f, InvalidSetup);}
    for i in 0usize .. 6 {header[i] = get8_packet(f) as u8;}
-   if vorbis_validate(&header) == false                    {return error(f, invalid_setup);}
+   if vorbis_validate(&header) == false                    {return error(f, InvalidSetup);}
 
    // codebooks
    let mut y : u8;
@@ -4915,9 +4916,9 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       let mut total : i32 = 0;
       let mut c : &mut Codebook= FORCE_BORROW_MUT!( &mut f.codebooks[i as usize] );
       CHECK!(f);
-      x = get_bits(f, 8) as u8; if x != 0x42            {return error(f, invalid_setup);}
-      x = get_bits(f, 8) as u8; if x != 0x43            {return error(f, invalid_setup);}
-      x = get_bits(f, 8) as u8; if x != 0x56            {return error(f, invalid_setup);}
+      x = get_bits(f, 8) as u8; if x != 0x42            {return error(f, InvalidSetup);}
+      x = get_bits(f, 8) as u8; if x != 0x43            {return error(f, InvalidSetup);}
+      x = get_bits(f, 8) as u8; if x != 0x56            {return error(f, InvalidSetup);}
       x = get_bits(f, 8) as u8;
       c.dimensions = ((get_bits(f, 8) << 8) as i32 + x as i32) as i32;
       x = get_bits(f, 8) as u8;
@@ -4926,7 +4927,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       let is_ordered = get_bits(f,1) != 0;
       c.sparse = if is_ordered { false } else { get_bits(f,1) != 0 };
 
-      if c.dimensions == 0 && c.entries != 0    {return error(f, invalid_setup);}
+      if c.dimensions == 0 && c.entries != 0    {return error(f, InvalidSetup);}
 
       let mut lengths: *mut u8;
       let mut _lengths: Vec<u8> = Vec::new(); // NOTE(bungcip): just temporary
@@ -4944,7 +4945,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          while current_entry < c.entries {
             let limit : i32 = c.entries - current_entry;
             let n : i32 = get_bits(f, ilog(limit)) as i32;
-            if current_entry + n > c.entries as i32 { return error(f, invalid_setup); }
+            if current_entry + n > c.entries as i32 { return error(f, InvalidSetup); }
             std::ptr::write_bytes(lengths.offset(current_entry as isize), current_length as u8, n as usize);
             current_entry += n;
             current_length += 1;
@@ -4958,7 +4959,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
                *lengths_at_j = ( get_bits(f, 5) + 1) as u8;
                total += 1;
                if *lengths_at_j == 32 {
-                  return error(f, invalid_setup);
+                  return error(f, InvalidSetup);
                }
             } else {
                *lengths_at_j = NO_CODE as u8;
@@ -4969,7 +4970,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       if c.sparse == true && total >= c.entries >> 2 {
          // convert sparse items to non-sparse!
          if c.entries > f.setup_temp_memory_required as i32 {
-            f.setup_temp_memory_required = c.entries as u32;
+            f.setup_temp_memory_required = c.entries as usize;
          }
 
          c.codeword_lengths = _lengths.clone();
@@ -5003,9 +5004,9 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             c.codewords.resize(c.sorted_entries as usize, 0);
             values.resize(c.sorted_entries as usize, 0);
          }
-         let size: u32 = c.entries as u32 + (mem::size_of::<u32>() + mem::size_of::<u32>()) as u32 * c.sorted_entries as u32;
+         let size = c.entries as usize + (mem::size_of::<u32>() + mem::size_of::<u32>()) * c.sorted_entries as usize;
          if size > f.setup_temp_memory_required {
-            f.setup_temp_memory_required = size as u32;
+            f.setup_temp_memory_required = size;
          }
       }
 
@@ -5013,7 +5014,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
           let temp_entries = c.entries; // note(bungcip): just to satisfy borrow checker
           let mut lengths_slice = std::slice::from_raw_parts_mut(lengths, temp_entries as usize);
           if compute_codewords(c, lengths_slice, temp_entries, &mut values) == false {
-            return error(f, invalid_setup);
+            return error(f, InvalidSetup);
           }
       }
 
@@ -5035,7 +5036,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       CHECK!(f);
       c.lookup_type = get_bits(f, 4) as u8;
-      if c.lookup_type > 2 {return error(f, invalid_setup);}
+      if c.lookup_type > 2 {return error(f, InvalidSetup);}
       if c.lookup_type > 0 {
          c.minimum_value = float32_unpack(get_bits(f, 32));
          c.delta_value = float32_unpack(get_bits(f, 32));
@@ -5046,13 +5047,13 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          } else {
             c.lookup_values = c.entries as u32 * c.dimensions as u32;
          }
-         if c.lookup_values == 0 {return error(f, invalid_setup);}
+         if c.lookup_values == 0 {return error(f, InvalidSetup);}
          
          let mut mults : Vec<u16> = Vec::with_capacity(c.lookup_type as usize);
          for _ in 0 .. c.lookup_values {
             let q = get_bits(f, c.value_bits as i32);
             if q == EOP as u32 { 
-                return error(f, invalid_setup); 
+                return error(f, InvalidSetup); 
             }
             mults.push(q as u16);
          }
@@ -5087,7 +5088,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
                   if k+1 < c.dimensions {
                       use std::u32;
                      if div > u32::MAX / c.lookup_values as u32 {
-                        return error(f, invalid_setup);
+                        return error(f, InvalidSetup);
                      }
                      div *= c.lookup_values;
                   }
@@ -5123,7 +5124,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    x = ( get_bits(f, 6) + 1) as u8;
    for _ in 0 .. x {
       let z : u32 = get_bits(f, 16);
-      if z != 0 { return error(f, invalid_setup); }
+      if z != 0 { return error(f, InvalidSetup); }
    }
 
    // Floors
@@ -5132,7 +5133,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    // NOTE(bungcip): no need to resize? just push...
    for i in 0 .. f.floor_count {
       f.floor_types[i as usize] = get_bits(f, 16) as u16;
-      if f.floor_types[i as usize] > 1 {return error(f, invalid_setup);}
+      if f.floor_types[i as usize] > 1 {return error(f, InvalidSetup);}
       if f.floor_types[i as usize] == 0 {
       // NOTE(bungcip): using transmute because rust don't have support for union yet.. 
       //                transmute floor0 to floor1
@@ -5146,7 +5147,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          for j in 0 .. g.number_of_books{
             g.book_list[j as usize] = get_bits(f,8) as u8;
          }
-         return error(f, feature_not_supported);
+         return error(f, FeatureNotSupported);
       } else {
          let mut g : &mut Floor1 = FORCE_BORROW_MUT!( &mut f.floor_config[i as usize].floor1 );
          let mut max_class : i32 = -1; 
@@ -5163,13 +5164,13 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             if g.class_subclasses[j] != 0 {
                g.class_masterbooks[j] = get_bits(f, 8) as u8;
                if g.class_masterbooks[j] >= f.codebook_count as u8 {
-                   return error(f, invalid_setup);
+                   return error(f, InvalidSetup);
                }
             }
             for k in 0 ..  (1 << g.class_subclasses[j]) as usize {
                g.subclass_books[j][k] = get_bits(f,8) as i16 -1;
                if g.subclass_books[j][k] >= f.codebook_count as i16 {
-                   return error(f, invalid_setup);
+                   return error(f, InvalidSetup);
                }
             }
          }
@@ -5219,14 +5220,14 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
        let mut residue_cascade: [u8; 64] = mem::zeroed();
       let mut r : &mut Residue = FORCE_BORROW_MUT!( &mut f.residue_config[ i as usize] );
       f.residue_types[i as usize] = get_bits(f, 16) as u16;
-      if f.residue_types[i as usize] > 2 {return error(f, invalid_setup);}
+      if f.residue_types[i as usize] > 2 {return error(f, InvalidSetup);}
       r.begin = get_bits(f, 24);
       r.end = get_bits(f, 24);
-      if r.end < r.begin {return error(f, invalid_setup);}
+      if r.end < r.begin {return error(f, InvalidSetup);}
       r.part_size = get_bits(f,24)+1;
       r.classifications = get_bits(f,6) as u8 + 1;
       r.classbook = get_bits(f,8) as u8;
-      if r.classbook as i32 >= f.codebook_count {return error(f, invalid_setup);}
+      if r.classbook as i32 >= f.codebook_count {return error(f, InvalidSetup);}
       for j in 0 .. r.classifications {
          let mut high_bits: u8 = 0;
          let low_bits: u8 = get_bits(f,3) as u8;
@@ -5241,7 +5242,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             if (residue_cascade[j] & (1 << k)) != 0 {
                r.residue_books[j][k] = get_bits(f, 8) as i16;
                if r.residue_books[j][k] as i32 >= f.codebook_count {
-                   return error(f, invalid_setup);
+                   return error(f, InvalidSetup);
                 }
             } else {
                r.residue_books[j][k] = -1;
@@ -5271,7 +5272,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    for i in 0 .. f.mapping_count {
       let m : &mut Mapping = FORCE_BORROW_MUT!( &mut f.mapping[i as usize]);      
       let mapping_type : i32 = get_bits(f,16) as i32;
-      if mapping_type != 0 {return error(f, invalid_setup);}
+      if mapping_type != 0 {return error(f, InvalidSetup);}
 
       m.chan.resize(f.channels as usize, MappingChannel::default());
       
@@ -5292,21 +5293,21 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             m.chan[k].magnitude = get_bits(f, ilog_result) as u8;
              let ilog_result = ilog(f.channels-1);
             m.chan[k].angle = get_bits(f, ilog_result) as u8;
-            if m.chan[k].magnitude as i32 >= f.channels        {return error(f, invalid_setup);}
-            if m.chan[k].angle     as i32 >= f.channels        {return error(f, invalid_setup);}
-            if m.chan[k].magnitude == m.chan[k].angle   {return error(f, invalid_setup);}
+            if m.chan[k].magnitude as i32 >= f.channels        {return error(f, InvalidSetup);}
+            if m.chan[k].angle     as i32 >= f.channels        {return error(f, InvalidSetup);}
+            if m.chan[k].magnitude == m.chan[k].angle   {return error(f, InvalidSetup);}
          }
       } else{
          m.coupling_steps = 0;
       }
 
       // reserved field
-      if get_bits(f,2) != 0 {return error(f, invalid_setup);}
+      if get_bits(f,2) != 0 {return error(f, InvalidSetup);}
       if m.submaps > 1 {
          for j in 0 .. f.channels as usize {
             m.chan[j].mux = get_bits(f, 4) as u8;
             if m.chan[j].mux >= m.submaps {
-                return error(f, invalid_setup);
+                return error(f, InvalidSetup);
             }
          }
       } else{
@@ -5320,8 +5321,8 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          get_bits(f,8); // discard
          m.submap_floor[j] = get_bits(f,8) as u8;
          m.submap_residue[j] = get_bits(f,8) as u8;
-         if m.submap_floor[j] as i32 >= f.floor_count      {return error(f, invalid_setup);}
-         if m.submap_residue[j] as i32 >= f.residue_count  {return error(f, invalid_setup);}
+         if m.submap_floor[j] as i32 >= f.floor_count      {return error(f, InvalidSetup);}
+         if m.submap_residue[j] as i32 >= f.residue_count  {return error(f, InvalidSetup);}
       }
    }
 
@@ -5333,9 +5334,9 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       m.windowtype = get_bits(f,16) as u16;
       m.transformtype = get_bits(f,16) as u16;
       m.mapping = get_bits(f,8) as u8;
-      if m.windowtype != 0                 {return error(f, invalid_setup);}
-      if m.transformtype != 0              {return error(f, invalid_setup);}
-      if m.mapping as i32 >= f.mapping_count     {return error(f, invalid_setup);}
+      if m.windowtype != 0                 {return error(f, InvalidSetup);}
+      if m.transformtype != 0              {return error(f, InvalidSetup);}
+      if m.mapping as i32 >= f.mapping_count     {return error(f, InvalidSetup);}
    }
 
    flush_packet(f);
@@ -5356,8 +5357,8 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    {  
        let blocksize_0 = f.blocksize_0;
        let blocksize_1 = f.blocksize_1;
-       init_blocksize(f, 0, blocksize_0 as usize); 
-       init_blocksize(f, 1, blocksize_1 as usize); 
+       init_blocksize(f, 0, blocksize_0); 
+       init_blocksize(f, 1, blocksize_1); 
         f.blocksize[0] = blocksize_0;
         f.blocksize[1] = blocksize_1;
    }
@@ -5366,20 +5367,19 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
    // 1.
    {
-      let imdct_mem : u32 = f.blocksize_1 as u32 * mem::size_of::<f32>() as u32 >> 1;
-      let classify_mem : u32;
-      let mut max_part_read = 0;
-      for i in 0 .. f.residue_count {
-         let r : &Residue = FORCE_BORROW!( &f.residue_config[i as usize] );
-         let n_read = r.end - r.begin;
-         let part_read = n_read / r.part_size;
+      let imdct_mem = f.blocksize_1 * mem::size_of::<f32>()  >> 1;
+      let mut max_part_read : usize = 0;
+      for i in 0 .. f.residue_count as usize {
+         let r : &Residue = FORCE_BORROW!( &f.residue_config[i] );
+         let n_read = (r.end - r.begin) as usize;
+         let part_read = n_read / r.part_size as usize;
          if part_read > max_part_read{
             max_part_read = part_read;
          }
       }
-      classify_mem = f.channels as u32 * (
-          mem::size_of::<*mut u8>() as u32 + 
-          max_part_read * mem::size_of::<*mut u8>() as u32);
+      let classify_mem = f.channels as usize * (
+          mem::size_of::<*mut u8>()  + 
+          max_part_read * mem::size_of::<*mut u8>() );
 
       f.temp_memory_required = classify_mem;
       if imdct_mem > f.temp_memory_required{
@@ -5393,7 +5393,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       assert!(f.temp_offset == f.alloc.alloc_buffer_length_in_bytes);
       // check if there's enough temp memory so we don't error later
       if f.setup_offset as u32 + mem::size_of::<Vorbis>() as u32 + f.temp_memory_required as u32 > f.temp_offset as u32{
-         return error(f, outofmem);
+         return error(f, OutOfMem);
       }
    }
 
