@@ -90,8 +90,6 @@ unsafe fn test_decode_frame_pushdata(mut out_file: File, filename: &str) {
     let mut v = v.unwrap();
     show_info(&mut v);
 
-    let data = buffer.as_mut_ptr();
-
     'forever: loop {
         let mut n = 0;
         let left: *mut f32;
@@ -106,8 +104,7 @@ unsafe fn test_decode_frame_pushdata(mut out_file: File, filename: &str) {
                 q = len - p;
             }
             used = stb_vorbis_decode_frame_pushdata(&mut v,
-                                                    data.offset(p as isize),
-                                                    q,
+                                                    &buffer[ p as usize .. (p + q) as usize ],
                                                     &mut num_c,
                                                     &mut outputs,
                                                     &mut n);
