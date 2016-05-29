@@ -1658,7 +1658,7 @@ pub fn stb_vorbis_get_frame_float(f: &mut Vorbis,
    return len;
 }
 
-pub unsafe fn stb_vorbis_get_frame_short(f: &mut Vorbis, num_c: i32, sample_buffer: &mut [i16]) -> i32
+pub fn stb_vorbis_get_frame_short(f: &mut Vorbis, num_c: i32, sample_buffer: &mut [i16]) -> i32
 {
    let mut output: *mut *mut f32 = std::ptr::null_mut();
    let mut len = stb_vorbis_get_frame_float(f, None, Some(&mut output));
@@ -1668,7 +1668,9 @@ pub unsafe fn stb_vorbis_get_frame_short(f: &mut Vorbis, num_c: i32, sample_buff
    
     if len != 0 {
       let mut sample_buffer_ptr = sample_buffer.as_mut_ptr();
-      convert_samples_short(num_c, &mut sample_buffer_ptr, 0, f.channels, output, 0, len);
+      unsafe { 
+          convert_samples_short(num_c, &mut sample_buffer_ptr, 0, f.channels, output, 0, len);
+      }
     }
    return len;
 }
@@ -3059,29 +3061,32 @@ unsafe fn get_seek_page_info(f: &mut Vorbis, z: &mut ProbedPage) -> bool
 // on failure, returns NULL on error and sets *error, does not change *datablock_memory_consumed
 // if returns NULL and *error is NeedMoreData, then the input block was
 //       incomplete and you need to pass in a larger block from the start of the file
-pub unsafe fn stb_vorbis_open_pushdata(
-         data: *const u8, data_len: i32, // the memory available for decoding
+pub fn stb_vorbis_open_pushdata(
+         data: &[u8],                      // the memory available for decoding
          data_used: &mut i32,              // only defined if result is not NULL
          error: &mut VorbisError, alloc: Option<VorbisAlloc>)
          -> Option<Vorbis>
 {
 
    let mut p = Vorbis::new(alloc);
-   p.stream     = data;
-   p.stream_end = data.offset(data_len as isize);
-   p.push_mode  = true;
-   if start_decoder(&mut p) == false {
-      if p.eof == true {
-         *error = VorbisError::NeedMoreData;
-      } else {
-         *error = p.error;
-      }
-      return None;
+   let start_position = data.as_ptr() as usize;
+   unsafe {
+        p.stream     = data.as_ptr();
+        p.stream_end = p.stream.offset(data.len() as isize);
+        p.push_mode  = true;
+        if start_decoder(&mut p) == false {
+            if p.eof == true {
+                *error = VorbisError::NeedMoreData;
+            } else {
+                *error = p.error;
+            }
+            return None;
+        }
    }
    
-    *data_used = (p.stream as usize - data as usize) as i32;
+    *data_used = (p.stream as usize - start_position) as i32;
     *error = VorbisError::NoError;
-    return Some(p);   
+    return Some(p);
 }
 
 // decode a frame of audio sample data if possible from the passed-in data block
