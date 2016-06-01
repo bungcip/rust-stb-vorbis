@@ -77,7 +77,7 @@ unsafe fn test_decode_frame_pushdata(mut out_file: File, filename: &str) {
                 continue; //goto retry;
             }
             println!("Error {:?}", error);
-            process::exit(1);
+            process::exit(error as i32);
         }
 
         break;

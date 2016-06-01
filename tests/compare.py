@@ -30,7 +30,8 @@ oggs = [
     'sketch008-floor0', 
     'square', 'square-interleaved', 'square-stereo', 
     'thingy-floor0',
-    #'stereo_short', 'mono', ~~ cannot be distributed, this is a just song from my playlist...
+    
+    'stereo_short', 'mono', #~~ cannot be distributed, this is a just song from my playlist...
     
     # rust-stb-vorbis
     # 'thingy', 'sketch008', 'sketch039', ~~ very slow
@@ -47,6 +48,19 @@ oggs = [
     #'bad-continued-packet-flag', 
 ]
 
+expected_errors = {
+    # floor 0 is not supported
+    "6ch-moving-sine-floor0": 4,
+    "thingy-floor0": 4, 
+    "sketch008-floor0": 4,
+    
+    # MissingCapturePattern
+    "empty-page": 30,
+    
+    # InvalidSetup
+    "square-interleaved": 20
+}
+
 # run stb_vorbis
 #print("run stb_vorbic C...")
 #for o in oggs:
@@ -56,7 +70,7 @@ oggs = [
 
 binaries = [
    "decode_filename",
-#    "decode_frame_pushdata",
+   "decode_frame_pushdata",
 ]
 
 # compile rust port
@@ -70,6 +84,7 @@ for bin in binaries:
 # test output file size
 # test output file hash
 print("check output file size & hash")
+total_time = 0
 
 for bin in binaries:
     executable = "../target/debug/examples/{}.exe".format(bin)
@@ -86,10 +101,16 @@ for bin in binaries:
             input = "ogg/{}.ogg".format(i)
             start_time = time.time()
             return_value = subprocess.call([executable, input, rust_name])
-            if return_value != 0:
-                print("stoped due to error...")
-                sys.exit()
             end_time = time.time()
+            if return_value != 0:
+                # check if filename exist in expected error code
+                if i in expected_errors.keys() and expected_errors[i] == return_value:
+                    print("  [OK: EXPECTED ERROR] in {:.3f} seconds".format(end_time - start_time))
+                    total_time += end_time - start_time 
+                    continue
+                else:
+                    print("stoped due to unexpected error (return value = {})...".format(return_value))
+                    sys.exit()
         except:
             print("error happened")
             sys.exit()
@@ -108,4 +129,6 @@ for bin in binaries:
             sys.exit()
 
         print("  [OK] in {:.3f} seconds".format(end_time - start_time))
+        total_time += end_time - start_time 
 
+print("TOTAL TIME: {:.3f} seconds".format(total_time))

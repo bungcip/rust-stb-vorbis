@@ -7,5 +7,3 @@ exclude = ["tests/*"]
 license = "MIT"
 keywords = ["audio", "ogg", "vorbis"]
 
-[dependencies]
-libc = "*"
