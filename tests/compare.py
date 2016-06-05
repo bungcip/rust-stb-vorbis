@@ -67,10 +67,12 @@ expected_errors = {
 #    print("  run {}".format(o))
 #    subprocess.call(["vorvis-sample.exe", "1", "ogg/{}.ogg".format(o), "c_output/[decode_filename]_{}.out".format(o)])
 #    subprocess.call(["vorvis-sample.exe", "5", "ogg/{}.ogg".format(o), "c_output/[decode_frame_pushdata]_{}.out".format(o)])
+#   subprocess.call(["vorvis-sample.exe", "3", "ogg/{}.ogg".format(o), "c_output/[get_samples_short_interleaved]_{}.out".format(o)])
 
 binaries = [
    "decode_filename",
    "decode_frame_pushdata",
+   "get_samples_short_interleaved"
 ]
 
 # compile rust port
@@ -119,7 +121,7 @@ for bin in binaries:
         c_size = os.path.getsize(c_name)
         rust_size = os.path.getsize(rust_name)
         if c_size != rust_size:
-            print("  [WRONG] size of rust different with original stb_vorbis! filename: {}, size: {}".format(filename, rust_size))
+            print("  [WRONG] size of rust different with original stb_vorbis! filename: {}, rust size: {}, c size: {}".format(filename, rust_size, c_size))
             sys.exit()
 
         c_md5 = md5(c_name)

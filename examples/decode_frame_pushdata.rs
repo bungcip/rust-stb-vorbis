@@ -32,7 +32,7 @@ fn clamp<T: PartialOrd>(value: T, min: T, max: T) -> T {
     return value;
 }
 
-unsafe fn write_floats(out_file: &mut File, len: i32, left: *mut f32, right: *mut f32) {
+unsafe fn write_floats(out_file: &mut File, len: i32, left: *const f32, right: *const f32) {
 
     const SCALE: f32 = 32768.0;
     for j in 0..len {
@@ -92,10 +92,8 @@ unsafe fn test_decode_frame_pushdata(mut out_file: File, filename: &str) {
 
     'forever: loop {
         let mut n = 0;
-        let left: *mut f32;
-        let right: *mut f32;
 
-        let mut outputs: *mut *mut f32 = ptr::null_mut();
+        let mut outputs: *const *const f32 = ptr::null_mut();
         let mut num_c: i32 = 0;
         let mut q = 32;
 
@@ -124,8 +122,8 @@ unsafe fn test_decode_frame_pushdata(mut out_file: File, filename: &str) {
         if n == 0 {
             continue;
         } // seek/error recovery
-        left = *outputs.offset(0);
-        right = if num_c > 1 {
+        let left = *outputs.offset(0);
+        let right = if num_c > 1 {
             *outputs.offset(1)
         } else {
             *outputs.offset(0)
