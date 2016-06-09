@@ -174,18 +174,6 @@ macro_rules! FORCE_BORROW {
     }}
 }
 
-macro_rules! USE_MEMORY {
-    ($z: expr) => {
-        $z.stream.is_null() == false
-    }
-}
-
-macro_rules! IS_PUSH_MODE {
-    ($f: expr) => {
-        $f.push_mode == true
-    }
-}
-
 macro_rules! MAGIC {
     ($SHIFT: expr) => { (1.5f32 * (1 << (23-$SHIFT)) as f32 + 0.5f32/(1 << $SHIFT) as f32) }
 }
@@ -1048,7 +1036,7 @@ fn neighbors(x: &[u16], n: usize, plow: &mut i32, phigh: &mut i32)
 
 fn get8(z: &mut Vorbis) -> u8
 {
-   if USE_MEMORY!(z) {
+   if !z.stream.is_null() {
       if z.stream >= z.stream_end { 
           z.eof = true;
           return 0;
@@ -1086,7 +1074,7 @@ fn get32(f: &mut Vorbis) -> u32
 /// get from stream/file and copy to data
 fn getn(z: &mut Vorbis, data: &mut [u8]) -> bool
 {
-   if USE_MEMORY!(z) {
+   if !z.stream.is_null() {
       unsafe {
         let n = data.len();
         if z.stream.offset(n as isize) > z.stream_end { 
@@ -1112,7 +1100,7 @@ fn getn(z: &mut Vorbis, data: &mut [u8]) -> bool
 
 fn skip(z: &mut Vorbis, n: i32)
 {
-   if USE_MEMORY!(z) {
+   if !z.stream.is_null() {
       unsafe {
         z.stream = z.stream.offset(n as isize);
         if z.stream >= z.stream_end {z.eof = true;}
@@ -1282,8 +1270,6 @@ fn next_segment(f: &mut Vorbis) -> i32
    return len as i32;
 }
 
-
-
 fn vorbis_decode_packet(f: &mut Vorbis, len: &mut i32, p_left: &mut i32, p_right: &mut i32) -> bool
 {
     let mut mode_index = 0;
@@ -1389,7 +1375,10 @@ pub fn stb_vorbis_open_filename(filename: &Path, alloc: Option<VorbisAlloc>)
 //        has to be the same as frame N+1's left_end-left_start (which they are by
 //        construction)
 
-fn vorbis_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mut i32, p_right_start: &mut i32, p_right_end: &mut i32, mode: &mut i32) -> bool
+fn vorbis_decode_initial(f: &mut Vorbis, 
+    p_left_start: &mut i32, p_left_end: &mut i32, 
+    p_right_start: &mut i32, p_right_end: &mut i32, 
+    mode: &mut i32) -> bool
 {
    f.channel_buffer_start = 0;
    f.channel_buffer_end = 0;
@@ -1401,7 +1390,7 @@ fn vorbis_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mu
         }
         // check packet type
         if get_bits(f,1) != 0 {
-            if IS_PUSH_MODE!(f) {
+            if f.push_mode {
                 return error(f, VorbisError::BadPacketType);
             }
             while EOP != get8_packet(f){}
@@ -1624,7 +1613,7 @@ pub fn stb_vorbis_decode_filename(filename: &Path,
 pub fn stb_vorbis_get_frame_float(f: &mut Vorbis, 
     channel_count: Option<&mut i32>, output: Option<&mut AudioBufferSlice>) -> i32
 {
-   if IS_PUSH_MODE!(f){
+   if f.push_mode{
        error(f, VorbisError::InvalidApiMixing);
        return 0;
    } 
@@ -1845,7 +1834,7 @@ fn compute_accelerated_huffman(c: &mut Codebook)
 pub fn stb_vorbis_get_file_offset(f: &mut Vorbis) -> u32
 {
    if f.push_mode == true {return 0;}
-   if USE_MEMORY!(f) {return (f.stream as usize - f.stream_start as usize) as u32;}
+   if !f.stream.is_null() {return (f.stream as usize - f.stream_start as usize) as u32;}
 
    let mut file = f.f.as_mut().unwrap();
    let current = file.seek(SeekFrom::Current(0)).unwrap();
@@ -2475,7 +2464,7 @@ pub unsafe fn stb_vorbis_seek_frame(f: &mut Vorbis, sample_number: u32) -> bool
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
  
-   if IS_PUSH_MODE!(f) { 
+   if f.push_mode { 
        return error(f, VorbisError::InvalidApiMixing);
    }
 
@@ -2536,7 +2525,7 @@ pub fn stb_vorbis_seek_start(f: &mut Vorbis)
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-   if IS_PUSH_MODE!(f) { 
+   if f.push_mode { 
        error(f, VorbisError::InvalidApiMixing); 
        return;
    }
@@ -2790,27 +2779,27 @@ pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut Vorbis, channels:
 // it may be less than requested at the end of the file. If there are no more
 // samples in the file, returns 0.
 #[allow(unreachable_code, unused_variables)]
-pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer: &mut Vec<Vec<i16>>, len: i32) -> i32
+pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer: *mut *mut i16, len: i32) -> i32
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-//    let mut outputs: AudioBufferSlice = AudioBufferSlice::new(channels as usize);
-//    let mut n = 0;
+   let mut outputs: AudioBufferSlice = AudioBufferSlice::new(channels as usize);
+   let mut n = 0;
 
-//    while n < len {
-//       let mut k = f.channel_buffer_end - f.channel_buffer_start;
-//       if n+k >= len {k = len - n;}
-//       if k != 0 {
-//          let channel_buffers_slice = AudioBufferSlice::from(&f.channel_buffers);
-//          convert_samples_short(channels, buffer, n, &channel_buffers_slice,
-//              f.channel_buffer_start as usize, k); 
-//       }
-//       n += k;
-//       f.channel_buffer_start += k;
-//       if n == len{ break;}
-//       if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0 {break;}
-//    }
-//    return n;
+   while n < len {
+      let mut k = f.channel_buffer_end - f.channel_buffer_start;
+      if n+k >= len {k = len - n;}
+      if k != 0 {
+         let channel_buffers_slice = AudioBufferSlice::from(&f.channel_buffers);
+         convert_samples_short(channels, buffer, n, &channel_buffers_slice,
+             f.channel_buffer_start as usize, k); 
+      }
+      n += k;
+      f.channel_buffer_start += k;
+      if n == len{ break;}
+      if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0 {break;}
+   }
+   return n;
 }
 
 // gets num_samples samples, not necessarily on a frame boundary--this requires
@@ -2891,7 +2880,7 @@ fn set_file_offset(f: &mut Vorbis, mut loc: u32) -> bool
 
    if f.push_mode == true {return false;}
    f.eof = false;
-   if USE_MEMORY!(f) {
+   if !f.stream.is_null() {
       unsafe {
         if f.stream_start.offset(loc as isize)  >= f.stream_end || f.stream_start.offset(loc as isize) < f.stream_start {
             f.stream = f.stream_end;
@@ -3177,7 +3166,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
      ) -> i32
 {
 
-   if IS_PUSH_MODE!(f) == false { 
+   if f.push_mode == false { 
        error(f, VorbisError::InvalidApiMixing);
        return 0;
     };
@@ -3282,7 +3271,7 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: bool) -> bool
       if s == f.segment_count {
          s = -1; // set 'crosses page' flag
       }
-      if p > f.stream_end{
+      if p > f.stream_end {
         return error(f, VorbisError::NeedMoreData);
       }
       first = false;
@@ -3324,13 +3313,19 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: bool) -> bool
          }
           s += 1;
       }
-      if end_page{
-         if s < n-1                            {return error(f, VorbisError::InvalidStream);}
+      
+      if end_page && s < n-1 {
+          return error(f, VorbisError::InvalidStream);
       }
-      if s == n{
+      
+      if s == n {
          s = -1; // set 'crosses page' flag
       }
-      if p > f.stream_end                     {return error(f, VorbisError::NeedMoreData);}
+      
+      if p > f.stream_end {
+          return error(f, VorbisError::NeedMoreData);
+      }
+      
       first = false;
    }
    
@@ -3353,7 +3348,7 @@ pub unsafe fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
     let mut end: u32 = 0;
     let mut last_page_loc :u32;
 
-   if IS_PUSH_MODE!(f) { return error(f, InvalidApiMixing) as u32; }
+   if f.push_mode { return error(f, InvalidApiMixing) as u32; }
    if f.total_samples == 0 {
       let mut last : u32 = 0;
       let mut lo : u32;
@@ -4935,7 +4930,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    // third packet!
    if start_packet(f) == false                            {return false;} 
 
-   if IS_PUSH_MODE!(f) {
+   if f.push_mode {
       if is_whole_packet_present(f, true) == false {
          // convert error in ogg header to write type
          if f.error == InvalidStream {
