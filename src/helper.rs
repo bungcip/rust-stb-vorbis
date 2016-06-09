@@ -10,7 +10,7 @@ use ::std::slice;
 /// Vorbis struct.
 #[derive(Copy, Clone)]
 pub struct AudioBufferSlice {
-    channel_count: usize,
+    pub channel_count: usize,
     buffers: [*const f32; 16],
     sizes: [usize; 16],
 }

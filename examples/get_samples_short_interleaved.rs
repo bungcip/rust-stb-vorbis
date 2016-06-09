@@ -47,7 +47,7 @@ fn test_get_samples_short_interleaved(mut out_file: File, filename: &str) {
 
     loop {
         let mut sbuffer: [i16; 333] = [0; 333];
-        let n = unsafe { stb_vorbis_get_samples_short_interleaved(&mut v, 2, sbuffer.as_mut_ptr(), 333) };
+        let n = stb_vorbis_get_samples_short_interleaved(&mut v, 2, &mut sbuffer, 333);
         if n == 0 {
             break;
         }

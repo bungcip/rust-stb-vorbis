@@ -5,5 +5,5 @@ authors = ["Gigih Aji Ibrahim <bungcip@gmail.com>"]
 description = "A straight translation of the stb_vorbis.c from C to Rust."
 exclude = ["tests/*"]
 license = "MIT"
-keywords = ["audio", "ogg", "vorbis"]
+keywords = ["audio", "ogg", "vorbis", "decoder"]
 
