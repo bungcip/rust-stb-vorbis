@@ -507,7 +507,7 @@ pub struct Vorbis
 
   // decode buffer
    channel_buffers: Vec<Vec<f32>>,
-   outputs        : AudioBufferSlice,
+   outputs        : AudioBufferSlice<f32>,
 
    previous_window: Vec<Vec<f32>>,
    previous_length: i32,
@@ -1538,7 +1538,7 @@ pub fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis,
        return stb_vorbis_get_frame_short(f, channel_count, buffer);
    }
    
-   let mut output: AudioBufferSlice = AudioBufferSlice::new(f.channels as usize);
+   let mut output: AudioBufferSlice<f32> = AudioBufferSlice::new(f.channels as usize);
    let num_shorts = buffer.len() as i32;
    let mut len = stb_vorbis_get_frame_float(f, None, Some(&mut output));
    
@@ -1611,7 +1611,7 @@ pub fn stb_vorbis_decode_filename(filename: &Path,
 // You generally should not intermix calls to stb_vorbis_get_frame_*()
 // and stb_vorbis_get_samples_*(), since the latter calls the former.
 pub fn stb_vorbis_get_frame_float(f: &mut Vorbis, 
-    channel_count: Option<&mut i32>, output: Option<&mut AudioBufferSlice>) -> i32
+    channel_count: Option<&mut i32>, output: Option<&mut AudioBufferSlice<f32>>) -> i32
 {
    if f.push_mode{
        error(f, VorbisError::InvalidApiMixing);
@@ -1643,16 +1643,15 @@ pub fn stb_vorbis_get_frame_float(f: &mut Vorbis,
    }
 
    if let Some(output) = output {
-    //    let o = f.outputs.as_ptr();
-    //    let o = o as *mut *mut f32;
        *output = f.outputs;
    }
+
    return len;
 }
 
 pub fn stb_vorbis_get_frame_short(f: &mut Vorbis, num_c: i32, sample_buffer: &mut [i16]) -> i32
 {
-   let mut output: AudioBufferSlice = AudioBufferSlice::new(f.channels as usize);
+   let mut output: AudioBufferSlice<f32> = AudioBufferSlice::new(f.channels as usize);
    let len = stb_vorbis_get_frame_float(f, None, Some(&mut output));
    let len = std::cmp::min(len, sample_buffer.len() as i32);
    
@@ -1671,7 +1670,7 @@ const PLAYBACK_LEFT  : i32 =   2;
 const PLAYBACK_RIGHT : i32 =   4;
 
 
-unsafe fn convert_samples_short(buf_c: i32, buffer: *mut *mut i16, b_offset: i32, data: &AudioBufferSlice, data_offset: usize, samples: i32)
+unsafe fn convert_samples_short(buf_c: i32, buffer: *mut *mut i16, b_offset: i32, data: &AudioBufferSlice<f32>, data_offset: usize, samples: i32)
 {
     // NOTE(bungcip): change samples to usize?
    let buf_c = buf_c as usize;
@@ -1710,7 +1709,7 @@ unsafe fn convert_samples_short(buf_c: i32, buffer: *mut *mut i16, b_offset: i32
 
 
 // NOTE(bungcip): remove buf_c? remove d_offset?
-fn convert_channels_short_interleaved(buf_c: i32, buffer: &mut [i16], data: &AudioBufferSlice, d_offset: i32, len: i32)
+fn convert_channels_short_interleaved(buf_c: i32, buffer: &mut [i16], data: &AudioBufferSlice<f32>, d_offset: i32, len: i32)
 {
    if buf_c != data.channel_count as i32 && buf_c <= 2 && data.channel_count <= 6 {
        assert!(buf_c == 2);
@@ -2361,7 +2360,7 @@ fn compute_window(n: i32, window: &mut [f32])
 }
 
 #[allow(unreachable_code, unused_variables)]
-unsafe fn compute_samples(mask: i32, output: *mut i16, data: &AudioBufferSlice, d_offset: usize, len: i32)
+unsafe fn compute_samples(mask: i32, output: *mut i16, data: &AudioBufferSlice<f32>, d_offset: usize, len: i32)
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    
@@ -2398,7 +2397,7 @@ unsafe fn compute_samples(mask: i32, output: *mut i16, data: &AudioBufferSlice, 
    }
 }
 
-fn compute_stereo_samples(output: &mut [i16], data: &AudioBufferSlice, d_offset: i32, len: i32)
+fn compute_stereo_samples(output: &mut [i16], data: &AudioBufferSlice<f32>, d_offset: i32, len: i32)
 {
     // NOTE(bungcip): remove d_offset?
     //                change len to usize?
@@ -2686,7 +2685,7 @@ pub unsafe fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffe
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-   let mut outputs: AudioBufferSlice = AudioBufferSlice::new(0);
+   let mut outputs: AudioBufferSlice<f32> = AudioBufferSlice::new(0);
    let mut n = 0;
    let mut z = f.channels;
    if z > channels {z = channels;}
@@ -2736,7 +2735,7 @@ pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut Vorbis, channels:
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-   let mut outputs: AudioBufferSlice = AudioBufferSlice::new(0);
+   let mut outputs: AudioBufferSlice<f32> = AudioBufferSlice::new(0);
    let len : i32 = num_floats / channels;
    let mut n=0;
 //    let mut z = f.channels;
@@ -2783,7 +2782,7 @@ pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-   let mut outputs: AudioBufferSlice = AudioBufferSlice::new(channels as usize);
+   let mut outputs: AudioBufferSlice<f32> = AudioBufferSlice::new(channels as usize);
    let mut n = 0;
 
    while n < len {
@@ -2809,7 +2808,7 @@ pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer
 // samples in the file, returns 0.
 pub fn stb_vorbis_get_samples_short_interleaved(f: &mut Vorbis, channels: i32, mut buffer: &mut [i16], num_shorts: i32 ) -> i32
 {
-   let mut outputs: AudioBufferSlice = AudioBufferSlice::new(0);
+   let mut outputs: AudioBufferSlice<f32> = AudioBufferSlice::new(0);
    let len = num_shorts / channels;
    let mut n = 0;
    let mut buffer_offset = 0;
@@ -3234,7 +3233,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
    *channels = f.channels;
    *samples = len;
    
-   // NOTE(bungcip): change output type to AudioBufferSlice
+   // NOTE(bungcip): change output type to AudioBufferSlice<f32>
    *output = f.outputs.as_ptr();
     return (f.stream as usize - data.as_ptr() as usize) as i32;
 }

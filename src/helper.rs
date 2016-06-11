@@ -9,15 +9,15 @@ use ::std::slice;
 /// just work around so I don't need to add lifetime annotation to ALL function that use
 /// Vorbis struct.
 #[derive(Copy, Clone)]
-pub struct AudioBufferSlice {
+pub struct AudioBufferSlice<T> {
     pub channel_count: usize,
-    buffers: [*const f32; 16],
+    buffers: [*const T; 16],
     sizes: [usize; 16],
 }
 
-impl AudioBufferSlice {
+impl<T> AudioBufferSlice<T> {
     pub fn new(channel_count: usize) -> Self {
-        let buffers = [ptr::null::<f32>(); 16];
+        let buffers = [ptr::null::<T>(); 16];
         let sizes = [0usize; 16];
         
         AudioBufferSlice {
@@ -28,8 +28,8 @@ impl AudioBufferSlice {
     }
     
     // FIXME:(change this to trait From)
-    pub unsafe fn from(value: &Vec<Vec<f32>>) -> Self {
-        let mut buffers: [*const f32; 16] = [ptr::null::<f32>(); 16];
+    pub unsafe fn from(value: &Vec<Vec<T>>) -> Self {
+        let mut buffers: [*const T; 16] = [ptr::null::<T>(); 16];
         let mut sizes: [usize; 16] = [0usize; 16];
         
         let channel_count = value.len();
@@ -47,14 +47,14 @@ impl AudioBufferSlice {
     
     // set content buffer in audio buffer slice, you must ensure
     // that lifetime of content outlive AudioBufferSlice
-    pub unsafe fn set(&mut self, channel_index: usize, values: &[f32]){
+    pub unsafe fn set(&mut self, channel_index: usize, values: &[T]){
         debug_assert!(channel_index < self.channel_count);
         
         self.buffers[channel_index] = values.as_ptr();
         self.sizes[channel_index] = values.len();
     }
     
-    pub fn as_ptr(&self) -> *const *const f32 {
+    pub fn as_ptr(&self) -> *const *const T {
         self.buffers.as_ptr()
     }
     
@@ -62,25 +62,30 @@ impl AudioBufferSlice {
 }
 
 
-impl Index<(usize, usize)> for AudioBufferSlice {
-    type Output = f32;
+impl<T> Index<(usize, usize)> for AudioBufferSlice<T> {
+    type Output = T;
 
-    fn index<'a>(&'a self, _index: (usize, usize)) -> &'a f32 {
+    fn index<'a>(&'a self, _index: (usize, usize)) -> &'a T {
         assert!(_index.0 < self.channel_count);
         assert!(_index.1 < self.sizes[_index.0]);
         
         unsafe {
-            &*self.buffers[_index.0].offset(_index.1 as isize)
+            &*self.buffers.get_unchecked(_index.0).offset(_index.1 as isize)
         }
     }    
 }
 
-impl Index<usize> for AudioBufferSlice {
-    type Output = [f32];
+impl<T> Index<usize> for AudioBufferSlice<T> {
+    type Output = [T];
 
-    fn index<'a>(&'a self, _index: usize) -> &'a [f32] {
+    fn index<'a>(&'a self, _index: usize) -> &'a [T] {
+        assert!(_index < self.channel_count);
+        
         unsafe {
-            slice::from_raw_parts(self.buffers[_index], self.sizes[_index])
+            slice::from_raw_parts(
+                *self.buffers.get_unchecked(_index), 
+                *self.sizes.get_unchecked(_index)
+            )
         }
     }    
 }
