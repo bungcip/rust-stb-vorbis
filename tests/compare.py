@@ -76,9 +76,19 @@ binaries = [
 ]
 
 # compile rust port
+if len(sys.argv) == 2 and sys.argv[1] == 'release':
+    executable_path = "../target/release/examples/{}.exe"
+    cargo = ["cargo", "build", "--release", "--example"]
+else:
+    executable_path = "../target/debug/examples/{}.exe"
+    cargo = ["cargo", "build", "--example"]
+
+
 print("compile stb_vorbis rust example...")
 for bin in binaries:
-    result = subprocess.call(["cargo", "build", "--example", bin])
+    args = list(cargo)
+    args.append(bin)
+    result = subprocess.call(args)
     if result != 0:
         sys.exit()
 
@@ -89,7 +99,7 @@ print("check output file size & hash")
 total_time = 0
 
 for bin in binaries:
-    executable = "../target/debug/examples/{}.exe".format(bin)
+    executable = executable_path.format(bin)
     prefix_output = "[{}]".format(bin)
 
     print("TESTING {}".format(bin))
