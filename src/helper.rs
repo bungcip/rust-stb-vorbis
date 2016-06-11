@@ -1,7 +1,7 @@
 /// Helper Module
 /// 
 use ::std::ptr;
-use ::std::ops::Index;
+use ::std::ops::{Index, IndexMut};
 use ::std::slice;
 
 
@@ -11,13 +11,13 @@ use ::std::slice;
 #[derive(Copy, Clone)]
 pub struct AudioBufferSlice<T> {
     pub channel_count: usize,
-    buffers: [*const T; 16],
+    buffers: [*mut T; 16],
     sizes: [usize; 16],
 }
 
 impl<T> AudioBufferSlice<T> {
     pub fn new(channel_count: usize) -> Self {
-        let buffers = [ptr::null::<T>(); 16];
+        let buffers = [ptr::null_mut::<T>(); 16];
         let sizes = [0usize; 16];
         
         AudioBufferSlice {
@@ -28,15 +28,30 @@ impl<T> AudioBufferSlice<T> {
     }
     
     // FIXME:(change this to trait From)
-    pub unsafe fn from(value: &Vec<Vec<T>>) -> Self {
-        let mut buffers: [*const T; 16] = [ptr::null::<T>(); 16];
+    pub unsafe fn from(value: &mut Vec<Vec<T>>) -> Self {
+        let mut buffers = [ptr::null_mut::<T>(); 16];
         let mut sizes: [usize; 16] = [0usize; 16];
         
         let channel_count = value.len();
         for i in 0 .. value.len() {
-            buffers[i] = value[i].as_ptr();
+            buffers[i] = value[i].as_mut_ptr();
             sizes[i] = value[i].len();
         }
+        
+        AudioBufferSlice {
+            channel_count: channel_count,
+            buffers: buffers,
+            sizes: sizes
+        }
+    }
+
+    pub unsafe fn from_single_channel(value: &mut [T]) -> Self {
+        let mut buffers = [ptr::null_mut::<T>(); 16];
+        let mut sizes: [usize; 16] = [0usize; 16];
+        
+        let channel_count = 1;
+        buffers[0] = value.as_mut_ptr();
+        sizes[0] = value.len();
         
         AudioBufferSlice {
             channel_count: channel_count,
@@ -47,17 +62,21 @@ impl<T> AudioBufferSlice<T> {
     
     // set content buffer in audio buffer slice, you must ensure
     // that lifetime of content outlive AudioBufferSlice
-    pub unsafe fn set(&mut self, channel_index: usize, values: &[T]){
+    pub unsafe fn set(&mut self, channel_index: usize, values: &mut [T]){
         debug_assert!(channel_index < self.channel_count);
         
-        self.buffers[channel_index] = values.as_ptr();
+        self.buffers[channel_index] = values.as_mut_ptr();
         self.sizes[channel_index] = values.len();
     }
     
-    pub fn as_ptr(&self) -> *const *const T {
+    pub fn as_ptr(&self) -> *const *mut T {
         self.buffers.as_ptr()
     }
     
+    /// get length of first channel data, use channel_count if you need to count the number of channel
+    pub fn len(&self) -> usize {
+        self.sizes[0]
+    }
 
 }
 
@@ -85,6 +104,19 @@ impl<T> Index<usize> for AudioBufferSlice<T> {
             slice::from_raw_parts(
                 *self.buffers.get_unchecked(_index), 
                 *self.sizes.get_unchecked(_index)
+            )
+        }
+    }    
+}
+
+impl<T> IndexMut<usize> for AudioBufferSlice<T> {
+    fn index_mut(&mut self, index: usize) -> &mut [T] {
+        assert!(index < self.channel_count);
+        
+        unsafe {
+            slice::from_raw_parts_mut(
+                *self.buffers.get_unchecked_mut(index), 
+                *self.sizes.get_unchecked_mut(index)
             )
         }
     }    

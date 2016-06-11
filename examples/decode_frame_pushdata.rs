@@ -3,12 +3,12 @@ extern crate stb_vorbis;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
-use std::ptr;
+// use std::ptr;
 use std::mem;
 use std::process;
 
 use stb_vorbis::{stb_vorbis_get_info, stb_vorbis_open_pushdata, stb_vorbis_decode_frame_pushdata};
-use stb_vorbis::{Vorbis, VorbisError};
+use stb_vorbis::{Vorbis, VorbisError, AudioBufferSlice};
 
 
 fn show_info(v: &mut Vorbis) {
@@ -32,12 +32,12 @@ fn clamp<T: PartialOrd>(value: T, min: T, max: T) -> T {
     return value;
 }
 
-unsafe fn write_floats(out_file: &mut File, len: i32, left: *const f32, right: *const f32) {
+unsafe fn write_floats(out_file: &mut File, len: i32, left: &[f32], right: &[f32]) {
 
     const SCALE: f32 = 32768.0;
-    for j in 0..len {
-        let x: i16 = clamp((SCALE * *left.offset(j as isize)) as i32, -32768, 32767) as i16;
-        let y: i16 = clamp((SCALE * *right.offset(j as isize)) as i32, -32768, 32767) as i16;
+    for j in 0 .. len as usize {
+        let x: i16 = clamp((SCALE * left[j]) as i32, -32768, 32767) as i16;
+        let y: i16 = clamp((SCALE * right[j]) as i32, -32768, 32767) as i16;
 
         let x: [u8; 2] = mem::transmute(x);
         let y: [u8; 2] = mem::transmute(y);;
@@ -93,7 +93,7 @@ unsafe fn test_decode_frame_pushdata(mut out_file: File, filename: &str) {
     'forever: loop {
         let mut n = 0;
 
-        let mut outputs: *const *const f32 = ptr::null_mut();
+        let mut outputs: AudioBufferSlice<f32> = AudioBufferSlice::new(0);
         let mut num_c: i32 = 0;
         let mut q = 32;
 
@@ -122,11 +122,11 @@ unsafe fn test_decode_frame_pushdata(mut out_file: File, filename: &str) {
         if n == 0 {
             continue;
         } // seek/error recovery
-        let left = *outputs.offset(0);
+        let left = &outputs[0];
         let right = if num_c > 1 {
-            *outputs.offset(1)
+            &outputs[1]
         } else {
-            *outputs.offset(0)
+            &outputs[0]
         };
         write_floats(&mut out_file, n, left, right);
     }
