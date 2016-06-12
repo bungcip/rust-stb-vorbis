@@ -27,7 +27,6 @@ impl<T> AudioBufferSlice<T> {
         }
     }
 
-    // FIXME:(change this to trait From)
     pub unsafe fn from(value: &mut Vec<Vec<T>>) -> Self {
         let mut buffers = [ptr::null_mut::<T>(); 16];
         let mut sizes: [usize; 16] = [0usize; 16];
@@ -60,8 +59,8 @@ impl<T> AudioBufferSlice<T> {
         }
     }
     
-    // set content buffer in audio buffer slice, you must ensure
-    // that lifetime of content outlive AudioBufferSlice
+    /// set content buffer in audio buffer slice, you must ensure
+    /// that lifetime of content outlive AudioBufferSlice
     pub unsafe fn set(&mut self, channel_index: usize, values: &mut [T]){
         debug_assert!(channel_index < self.channel_count);
         
@@ -69,7 +68,8 @@ impl<T> AudioBufferSlice<T> {
         self.sizes[channel_index] = values.len();
     }
     
-    // add new channel data. increase channel_count
+    /// add new channel data. increase channel_count.
+    /// you must ensure that lifetime of content outlive AudioBufferSlice
     pub unsafe fn push_channel(&mut self, values: &mut [T]){
         let channel_index = self.channel_count;
         self.channel_count += 1;

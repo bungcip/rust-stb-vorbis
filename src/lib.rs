@@ -2277,11 +2277,8 @@ fn compute_window(n: i32, window: &mut [f32])
    }
 }
 
-#[allow(unreachable_code, unused_variables)]
 fn compute_samples(mask: i32, output: &mut [i16], data: &AudioBufferSlice<f32>, d_offset: usize, len: i32)
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-   
    // NOTE(bungcip): change len to usize?
    
    const BUFFER_SIZE : usize = 32;
@@ -2377,11 +2374,8 @@ fn compute_stereo_samples(output: &mut [i16], data: &AudioBufferSlice<f32>, d_of
 // stb_vorbis_get_samples_* will start with the specified sample. If you
 // do not need to seek to EXACTLY the target sample when using get_samples_*,
 // you can also use seek_frame().
-#[allow(unreachable_code, unused_variables)]
 pub fn stb_vorbis_seek_frame(f: &mut Vorbis, sample_number: u32) -> bool
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
- 
    if f.push_mode { 
        return error(f, VorbisError::InvalidApiMixing);
    }
@@ -2427,22 +2421,16 @@ pub fn stb_vorbis_seek_frame(f: &mut Vorbis, sample_number: u32) -> bool
 }
 
 // get the last error detected (clears it, too)
-#[allow(unreachable_code, unused_variables)]
 pub fn stb_vorbis_get_error(f: &mut Vorbis) -> VorbisError
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
    let e = f.error;
    f.error = VorbisError::NoError;
    return e;
 }
 
 // this function is equivalent to stb_vorbis_seek(f,0)
-#[allow(unreachable_code, unused_variables)]
 pub fn stb_vorbis_seek_start(f: &mut Vorbis)
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
    if f.push_mode { 
        error(f, VorbisError::InvalidApiMixing); 
        return;
@@ -2458,7 +2446,7 @@ pub fn stb_vorbis_seek_start(f: &mut Vorbis)
 
 // these functions return the total length of the vorbis stream
 #[allow(unreachable_code, unused_variables)]
-pub unsafe fn stb_vorbis_stream_length_in_seconds(f: &mut Vorbis) -> f32
+pub fn stb_vorbis_stream_length_in_seconds(f: &mut Vorbis) -> f32
 {
    panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    return stb_vorbis_stream_length_in_samples(f) as f32 / f.sample_rate as f32;
@@ -2659,7 +2647,6 @@ pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut Vorbis, channels:
    let z = std::cmp::min(f.channels, channels);
    
    while n < len {
-    //   int i,j;
       let mut k = f.channel_buffer_end - f.channel_buffer_start;
       if n+k >= len {k = len - n;}
       for j in 0 .. k  {
@@ -2693,28 +2680,26 @@ pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut Vorbis, channels:
 // to produce 'channels' channels. Returns the number of samples stored per channel;
 // it may be less than requested at the end of the file. If there are no more
 // samples in the file, returns 0.
-#[allow(unreachable_code, unused_variables)]
-pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer: &mut AudioBufferSlice<i16>, len: i32) -> i32
+pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer: &mut AudioBufferSlice<i16>) -> u32
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
    let mut outputs: AudioBufferSlice<f32> = AudioBufferSlice::new(channels as usize);
    let mut n = 0;
+   let len = buffer.len();
 
    while n < len {
-      let mut k = f.channel_buffer_end - f.channel_buffer_start;
+      let mut k = (f.channel_buffer_end - f.channel_buffer_start) as usize;
       if n+k >= len {k = len - n;}
       if k != 0 {
          let channel_buffers_slice = AudioBufferSlice::from(&mut f.channel_buffers);
-         convert_samples_short(channels, buffer, n as usize, &channel_buffers_slice,
-             f.channel_buffer_start as usize, k); 
+         convert_samples_short(channels, buffer, n, &channel_buffers_slice,
+             f.channel_buffer_start as usize, k as i32); 
       }
       n += k;
-      f.channel_buffer_start += k;
+      f.channel_buffer_start += k as i32;
       if n == len{ break;}
       if stb_vorbis_get_frame_float(f, None, Some(&mut outputs)) == 0 {break;}
    }
-   return n;
+   return n as u32;
 }
 
 // gets num_samples samples, not necessarily on a frame boundary--this requires
@@ -2792,11 +2777,8 @@ fn peek_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mut 
    return true;
 }
 
-#[allow(unreachable_code, unused_variables, unused_mut)]
 fn set_file_offset(f: &mut Vorbis, mut loc: u32) -> bool
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
    if f.push_mode == true {return false;}
    f.eof = false;
    if !f.stream.is_null() {
@@ -2858,11 +2840,8 @@ unsafe fn go_to_page_before(f: &mut Vorbis, limit_offset: u32) -> bool
 }
 
 // NOTE(bungcip): change signature to Result
-#[allow(unreachable_code, unused_variables)]
 fn vorbis_find_page(f: &mut Vorbis, end: Option<&mut u32>, last: Option<&mut u32>) -> u32
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
    loop {
       if f.eof == true {return 0;}
       let n : i32 = get8(f) as i32;
@@ -2961,10 +2940,8 @@ fn vorbis_find_page(f: &mut Vorbis, end: Option<&mut u32>, last: Option<&mut u32
 }
 
 #[inline(always)]
-#[allow(unreachable_code, unused_variables)]
 unsafe fn crc32_update(crc: u32, byte: u8) -> u32
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
    return (crc << 8) ^ CRC_TABLE[ (byte as u32 ^ (crc >> 24)) as usize];
 }
 
@@ -3251,12 +3228,9 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: bool) -> bool
 
 const SAMPLE_UNKNOWN : u32 = 0xffffffff;
 
-
 // these functions return the total length of the vorbis stream
-#[allow(unreachable_code, unused_variables)]
 pub fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
     use VorbisError::*;
     
     let restore_offset : u32;
@@ -3349,11 +3323,8 @@ pub fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
 // the function succeeds, current_loc_valid will be true and current_loc will
 // be less than or equal to the provided sample number (the closer the
 // better).
-#[allow(unreachable_code, unused_variables, unused_mut)]
 fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
 {
-  panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-   
    let mut start_seg_with_known_loc : i32;
    let mut end_pos : i32;
    let mut page_start : i32;
@@ -4915,10 +4886,6 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       if c.sparse == true && total >= c.entries >> 2 {
          // convert sparse items to non-sparse!
-        //  if c.entries > f.setup_temp_memory_required as i32 {
-        //     f.setup_temp_memory_required = c.entries as usize;
-        //  }
-
          c.codeword_lengths = _lengths.clone();
          lengths = FORCE_BORROW_MUT!( &mut c.codeword_lengths[..] );
          c.sparse = false;
@@ -5095,7 +5062,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          let mut g : &mut Floor1 = FORCE_BORROW_MUT!( &mut f.floor_config[i].floor1 );
          let mut max_class : i32 = -1; 
          g.partitions = get_bits(f, 5) as u8;
-         for j in 0 .. g.partitions as usize{
+         for j in 0 .. g.partitions as usize {
             g.partition_class_list[j] = get_bits(f, 4) as u8;
             if g.partition_class_list[j] as i32 > max_class {
                max_class = g.partition_class_list[j] as i32;
