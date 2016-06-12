@@ -26,7 +26,7 @@ impl<T> AudioBufferSlice<T> {
             sizes: sizes
         }
     }
-    
+
     // FIXME:(change this to trait From)
     pub unsafe fn from(value: &mut Vec<Vec<T>>) -> Self {
         let mut buffers = [ptr::null_mut::<T>(); 16];
@@ -69,6 +69,14 @@ impl<T> AudioBufferSlice<T> {
         self.sizes[channel_index] = values.len();
     }
     
+    // add new channel data. increase channel_count
+    pub unsafe fn push_channel(&mut self, values: &mut [T]){
+        let channel_index = self.channel_count;
+        self.channel_count += 1;
+
+        self.set(channel_index, values);
+    }
+
     pub fn as_ptr(&self) -> *const *mut T {
         self.buffers.as_ptr()
     }
