@@ -205,42 +205,6 @@ macro_rules! LINE_OP {
 }
 
 
-
-
-
-// normally stb_vorbis uses malloc() to allocate memory at startup,
-// and alloca() to allocate temporary memory during a frame on the
-// stack. (Memory consumption will depend on the amount of setup
-// data in the file and how you set the compile flags for speed
-// vs. size. In my test files the maximal-size usage is ~150KB.)
-//
-// You can modify the wrapper functions in the source (setup_malloc,
-// setup_temp_malloc, temp_malloc) to change this behavior, or you
-// can use a simpler allocation model: you pass in a buffer from
-// which stb_vorbis will allocate _all_ its memory (including the
-// temp memory). "open" may fail with a OutOfMem if you
-// do not pass in enough data; there is no way to determine how
-// much you do need except to succeed (at which point you can
-// query get_info to find the exact amount required. yes I know
-// this is lame).
-//
-// If you pass in a non-NULL buffer of the type below, allocation
-// will occur from it as described above. Otherwise just pass NULL
-// to use malloc()/alloca()
-
-#[derive(Copy, Clone)]
-pub struct VorbisAlloc
-{
-   alloc_buffer: *const u8,
-   alloc_buffer_length_in_bytes: i32,
-}
-
-impl Default for VorbisAlloc {
-    fn default() -> Self {
-        VorbisAlloc { alloc_buffer: std::ptr::null(), alloc_buffer_length_in_bytes: 0 }
-    }
-}
-
 pub type CodeType = f32;
 pub type YTYPE = i16;
 
@@ -453,10 +417,6 @@ pub struct Vorbis
    pub sample_rate: u32,
    pub channels: i32,
 
-   pub setup_memory_required: usize,
-   pub temp_memory_required: usize,
-   pub setup_temp_memory_required: usize,
-
   // input config
    f: Option<BufReader<File>>,
    f_start: u32,
@@ -472,10 +432,6 @@ pub struct Vorbis
 
    p_first: ProbedPage, p_last: ProbedPage,
 
-  // memory management
-   alloc: VorbisAlloc,
-   setup_offset: i32,
-   temp_offset: i32,
 
   // run-time results
    pub eof: bool,
@@ -549,18 +505,8 @@ pub struct Vorbis
 }
 
 impl Vorbis {
-    pub fn new(z: Option<VorbisAlloc>) -> Self {
-        let alloc = match z {
-            None    => VorbisAlloc::default(),
-            Some(mut z) => {
-                z.alloc_buffer_length_in_bytes = (z.alloc_buffer_length_in_bytes+3) & !3;
-                z
-            }
-        };
-        
+    pub fn new() -> Self {
         Vorbis {
-            alloc: alloc,
-            temp_offset: alloc.alloc_buffer_length_in_bytes,
             eof: false,
             error: VorbisError::NoError,
             stream: std::ptr::null_mut(),
@@ -571,9 +517,6 @@ impl Vorbis {
             // zero
             sample_rate: 0,
             channels: 0,
-            setup_memory_required: 0,
-            temp_memory_required: 0,
-            setup_temp_memory_required: 0,
             f_start: 0,
             stream_start: std::ptr::null_mut(),
             stream_end: std::ptr::null_mut(),
@@ -581,7 +524,6 @@ impl Vorbis {
             push_mode: false,
             first_audio_page_offset: 0,
             p_first: ProbedPage::default(), p_last: ProbedPage::default(),
-            setup_offset: 0,
             blocksize: [0; 2],
             blocksize_0: 0, blocksize_1: 0,
             codebook_count: 0,
@@ -635,10 +577,6 @@ pub struct VorbisInfo
 {
    pub sample_rate: u32,
    pub channels: i32,
-
-   pub setup_memory_required: usize,
-   pub setup_temp_memory_required: usize,
-   pub temp_memory_required: usize,
 
    pub max_frame_size: usize,
 }
@@ -733,9 +671,6 @@ fn include_in_sort(c: &Codebook, len: u8) -> bool
    }
    return false;
 }
-
-
-
 
 const  CRC32_POLY  : u32 =  0x04c11db7;   // from spec
 
@@ -1302,10 +1237,9 @@ fn vorbis_pump_first_frame(f: &mut Vorbis)
 // on failure, returns NULL and sets *error. note that stb_vorbis must "own"
 // this stream; if you seek it in between calls to stb_vorbis, it will become
 // confused.
-pub fn stb_vorbis_open_file_section(mut file: File,
-     alloc: Option<VorbisAlloc>, length: u64) -> Result<Vorbis, VorbisError>
+pub fn stb_vorbis_open_file_section(mut file: File, length: u64) -> Result<Vorbis, VorbisError>
 {
-   let mut p = Vorbis::new(alloc);
+   let mut p = Vorbis::new();
    p.f_start = file.seek(SeekFrom::Current(0)).unwrap() as u32; // NOTE(bungcip): change it to i64/u64?
    p.f = Some(BufReader::new(file));
    p.stream_len   = length as u32;
@@ -1327,8 +1261,7 @@ pub fn stb_vorbis_open_file_section(mut file: File,
 // perform stb_vorbis_seek_*() operations on this file, it will assume it
 // owns the _entire_ rest of the file after the start point. Use the next
 // function, stb_vorbis_open_file_section(), to limit it.
-pub fn stb_vorbis_open_file(mut file: File, 
-    alloc: Option<VorbisAlloc>) -> Result<Vorbis, VorbisError>
+pub fn stb_vorbis_open_file(mut file: File) -> Result<Vorbis, VorbisError>
 {
     let start = file.seek(SeekFrom::Current(0)).unwrap();
     let end = file.seek(SeekFrom::End(0)).unwrap();
@@ -1337,21 +1270,20 @@ pub fn stb_vorbis_open_file(mut file: File,
     // seek to start position
     file.seek(SeekFrom::Start(start)).unwrap();
     
-    return stb_vorbis_open_file_section(file, alloc, len);
+    return stb_vorbis_open_file_section(file, len);
 }
 
 
 // create an ogg vorbis decoder from a filename. on failure,
 // returns Result
-pub fn stb_vorbis_open_filename(filename: &Path, alloc: Option<VorbisAlloc>) 
-    -> Result<Vorbis, VorbisError>
+pub fn stb_vorbis_open_filename(filename: &Path)-> Result<Vorbis, VorbisError>
 {    
     let file = match File::open(filename){
         Err(_)   => return Err(VorbisError::FileOpenFailure),
         Ok(file) => file
     };
     
-    return stb_vorbis_open_file(file, alloc);
+    return stb_vorbis_open_file(file);
 }
 
 
@@ -1394,9 +1326,9 @@ fn vorbis_decode_initial(f: &mut Vorbis,
        break;
    }
 
-   if f.alloc.alloc_buffer.is_null() == false {
-      assert!(f.alloc.alloc_buffer_length_in_bytes == f.temp_offset);
-   }
+//    if f.alloc.alloc_buffer.is_null() == false {
+//       assert!(f.alloc.alloc_buffer_length_in_bytes == f.temp_offset);
+//    }
 
    let x = ilog(f.mode_count-1);
    let i : i32 = get_bits(f, x) as i32;
@@ -1555,7 +1487,7 @@ pub fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis,
 pub fn stb_vorbis_decode_filename(filename: &Path, 
     channels: &mut i32, sample_rate: &mut u32, output: &mut Vec<i16>) -> i32
 {
-   let mut v = match stb_vorbis_open_filename(filename, None){
+   let mut v = match stb_vorbis_open_filename(filename){
         Err(_) => return -1,
         Ok(v)  => v
    };
@@ -2554,9 +2486,6 @@ pub fn stb_vorbis_get_info(f: &Vorbis) -> VorbisInfo
    VorbisInfo {
        channels: f.channels,
        sample_rate: f.sample_rate,
-       setup_memory_required: f.setup_memory_required,
-       setup_temp_memory_required: f.setup_temp_memory_required,
-       temp_memory_required: f.temp_memory_required,
        max_frame_size: f.blocksize_1 >> 1
    }
 }
@@ -2587,14 +2516,13 @@ pub fn stb_vorbis_flush_pushdata(f: &mut Vorbis)
 
 // create an ogg vorbis decoder from an ogg vorbis stream in memory (note
 // this must be the entire stream!). on failure, returns NULL and sets *error
-pub unsafe fn stb_vorbis_open_memory(data: &[u8], error: &mut VorbisError, 
-    alloc: Option<VorbisAlloc>) -> Option<Vorbis>
+pub unsafe fn stb_vorbis_open_memory(data: &[u8], error: &mut VorbisError) -> Option<Vorbis>
 {
    if data.len() == 0 {
      return None;       
    } 
    
-   let mut p = Vorbis::new(alloc);
+   let mut p = Vorbis::new();
    
    p.stream_len = data.len() as u32;
    p.stream = data.as_ptr();
@@ -2619,7 +2547,7 @@ pub fn stb_vorbis_decode_memory(mem: &[u8],
      channels: &mut u32, sample_rate: &mut u32, output: &mut Vec<i16>) -> i32
 {
    let mut error = VorbisError::NoError;
-   let mut v : Vorbis = unsafe { match stb_vorbis_open_memory(mem, &mut error, None){
+   let mut v : Vorbis = unsafe { match stb_vorbis_open_memory(mem, &mut error){
        None    => return -1,
        Some(v) => v
    }};
@@ -3099,11 +3027,11 @@ fn get_seek_page_info(f: &mut Vorbis, z: &mut ProbedPage) -> bool
 pub fn stb_vorbis_open_pushdata(
          data: &[u8],                      // the memory available for decoding
          data_used: &mut i32,              // only defined if result is not NULL
-         error: &mut VorbisError, alloc: Option<VorbisAlloc>)
+         error: &mut VorbisError)
          -> Option<Vorbis>
 {
 
-   let mut p = Vorbis::new(alloc);
+   let mut p = Vorbis::new();
    let start_position = data.as_ptr() as usize;
    unsafe {
         p.stream     = data.as_ptr();
@@ -3912,10 +3840,6 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
    }
    // at this point we've decoded all floors
 
-   if f.alloc.alloc_buffer.is_null() == false{
-      assert!(f.alloc.alloc_buffer_length_in_bytes == f.temp_offset);
-   }
-
    // re-enable coupled channels if necessary
    CHECK!(f);
    std::ptr::copy_nonoverlapping(zero_channel.as_ptr(), really_zero_channel.as_mut_ptr(), f.channels as usize);
@@ -3950,9 +3874,6 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
       decode_residue(f, &mut residue_buffers, n2, r as i32, &do_not_decode);
    }
 
-   if f.alloc.alloc_buffer.is_null() == false {
-      assert!(f.alloc.alloc_buffer_length_in_bytes == f.temp_offset);
-   }
    CHECK!(f);
 
 // INVERSE COUPLING
@@ -4080,9 +4001,6 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
       f.current_loc = f.current_loc.wrapping_add(temp_1);
    }
 
-   if f.alloc.alloc_buffer.is_null() == false {
-      assert!(f.alloc.alloc_buffer_length_in_bytes == f.temp_offset);
-   }
    *len = right_end;  // ignore samples after the window goes to 0
    CHECK!(f);
 
@@ -4997,9 +4915,9 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       if c.sparse == true && total >= c.entries >> 2 {
          // convert sparse items to non-sparse!
-         if c.entries > f.setup_temp_memory_required as i32 {
-            f.setup_temp_memory_required = c.entries as usize;
-         }
+        //  if c.entries > f.setup_temp_memory_required as i32 {
+        //     f.setup_temp_memory_required = c.entries as usize;
+        //  }
 
          c.codeword_lengths = _lengths.clone();
          lengths = FORCE_BORROW_MUT!( &mut c.codeword_lengths[..] );
@@ -5031,10 +4949,6 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             c.codeword_lengths.resize(c.sorted_entries as usize, 0);
             c.codewords.resize(c.sorted_entries as usize, 0);
             values.resize(c.sorted_entries as usize, 0);
-         }
-         let size = c.entries as usize + (mem::size_of::<u32>() + mem::size_of::<u32>()) * c.sorted_entries as usize;
-         if size > f.setup_temp_memory_required {
-            f.setup_temp_memory_required = size;
          }
       }
 
@@ -5401,40 +5315,8 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
        f.blocksize[1] = blocksize_1;
    }
 
-   // compute how much temporary memory is needed
-
-   // 1.
-   {
-      let imdct_mem = f.blocksize_1 * mem::size_of::<f32>()  >> 1;
-      let mut max_part_read : usize = 0;
-      for i in 0 .. f.residue_count as usize {
-         let r : &Residue = FORCE_BORROW!( &f.residue_config[i] );
-         let n_read = (r.end - r.begin) as usize;
-         let part_read = n_read / r.part_size as usize;
-         if part_read > max_part_read{
-            max_part_read = part_read;
-         }
-      }
-      let classify_mem = f.channels as usize * (
-          mem::size_of::<*mut u8>()  + 
-          max_part_read * mem::size_of::<*mut u8>() );
-
-      f.temp_memory_required = classify_mem;
-      if imdct_mem > f.temp_memory_required{
-         f.temp_memory_required = imdct_mem;
-      }
-   }
 
    f.first_decode = true;
-
-   if f.alloc.alloc_buffer.is_null() == false {
-      assert!(f.temp_offset == f.alloc.alloc_buffer_length_in_bytes);
-      // check if there's enough temp memory so we don't error later
-      if f.setup_offset as u32 + mem::size_of::<Vorbis>() as u32 + f.temp_memory_required as u32 > f.temp_offset as u32{
-         return error(f, OutOfMem);
-      }
-   }
-
    f.first_audio_page_offset = stb_vorbis_get_file_offset(f);
    return true;
 }

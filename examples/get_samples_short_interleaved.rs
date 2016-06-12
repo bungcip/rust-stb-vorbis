@@ -13,19 +13,13 @@ use stb_vorbis::{Vorbis/*, VorbisError*/};
 
 fn show_info(v: &mut Vorbis) {
     let info = stb_vorbis_get_info(v);
-    println!("{} channels, {} samples/sec",
-             info.channels,
-             info.sample_rate);
-    println!("Predicted memory needed: {} ({} + {})",
-             info.setup_memory_required + info.temp_memory_required,
-             info.setup_memory_required,
-             info.temp_memory_required);
+    println!("{} channels, {} samples/sec", info.channels, info.sample_rate);
 }
 
 
 fn test_get_samples_short_interleaved(mut out_file: File, filename: &str) {
     let filename = Path::new(filename);
-    let v = stb_vorbis_open_filename(&filename, None);
+    let v = stb_vorbis_open_filename(&filename);
     let mut v = match v {
         Err(why) => {
             println!("Couldn't open {}. Error: {:?}'", filename.display(), why);

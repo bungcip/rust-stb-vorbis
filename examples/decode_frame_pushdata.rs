@@ -13,13 +13,7 @@ use stb_vorbis::{Vorbis, VorbisError, AudioBufferSlice};
 
 fn show_info(v: &mut Vorbis) {
     let info = stb_vorbis_get_info(v);
-    println!("{} channels, {} samples/sec",
-             info.channels,
-             info.sample_rate);
-    println!("Predicted memory needed: {} ({} + {})",
-             info.setup_memory_required + info.temp_memory_required,
-             info.setup_memory_required,
-             info.temp_memory_required);
+    println!("{} channels, {} samples/sec", info.channels, info.sample_rate);
 }
 
 
@@ -70,7 +64,7 @@ unsafe fn test_decode_frame_pushdata(mut out_file: File, filename: &str) {
     let mut v;
     let mut error = VorbisError::NoError;
     'retry: loop {
-        v = stb_vorbis_open_pushdata(&buffer[0 .. length], &mut used, &mut error, None);
+        v = stb_vorbis_open_pushdata(&buffer[0 .. length], &mut used, &mut error);
         if v.is_none() {
             if error == VorbisError::NeedMoreData {
                 length += 1;
