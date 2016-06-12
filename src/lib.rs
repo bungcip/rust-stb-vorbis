@@ -795,15 +795,15 @@ fn float32_unpack(x: u32) -> f32
 // vorbis allows a huffman table with non-sorted lengths. This
 // requires a more sophisticated construction, since symbols in
 // order do not map to huffman codes "in order".
-fn add_entry(c: &mut Codebook, huff_code: u32, symbol: u32, count: i32, len: u8, values: &mut [u32])
+fn add_entry(c: &mut Codebook, huff_code: u32, symbol: usize, count: i32, len: u8, values: &mut [u32])
 {
    if c.sparse == false {
-      c.codewords[symbol as usize] = huff_code;
+      c.codewords[symbol] = huff_code;
    } else {
       let count = count as usize;
       c.codewords[count] = huff_code;
       c.codeword_lengths[count] = len;
-      values[count] = symbol;
+      values[count] = symbol as u32;
    }
 }
 
@@ -811,28 +811,31 @@ fn add_entry(c: &mut Codebook, huff_code: u32, symbol: u32, count: i32, len: u8,
 
 fn compute_codewords(c: &mut Codebook, len: &mut [u8], values: &mut [u32]) -> bool
 {
-   let n = len.len() as u32;
+   let n = len.len();
     
    // find the first entry
    let mut k = 0;
    while k < n {
-       if len[k as usize] < NO_CODE {
+       if len[k] < NO_CODE {
            break;
        }
        k += 1;
    }
    
-   if k == n { assert!(c.sorted_entries == 0); return true; }
+   if k == n { 
+       assert!(c.sorted_entries == 0); 
+       return true;
+   }
    
    // add to the list
-   let mut m=0;
-   add_entry(c, 0, k, m, len[k as usize], values);
+   let mut m = 0;
+   add_entry(c, 0, k, m, len[k], values);
    m += 1;
    
    // add all available leaves
    let mut available: [u32; 32] = [0; 32];
    let mut i = 1;
-   while i <= len[k as usize] {
+   while i <= len[k] {
       available[i as usize] = 1u32 << (32-i);
       i += 1;
    }
@@ -856,7 +859,9 @@ fn compute_codewords(c: &mut Codebook, len: &mut [u8], values: &mut [u32]) -> bo
       while z > 0 && available[z as usize]  == 0{
           z -= 1;
       }
-      if z == 0 { return false; }
+      if z == 0 { 
+          return false;
+      }
       res = available[z as usize];
       assert!(z < 32); // NOTE(z is u8 so negative is impossible)
       available[z as usize] = 0;
@@ -2294,7 +2299,6 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
                let val : f32 = CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
                if outputs[c_inter as usize].len() > 0 {
                    outputs[c_inter as usize][p_inter as usize] += val;
-                //   *outputs[c_inter as usize].offset(p_inter as isize) += val;
                }
                c_inter += 1;
                if c_inter == ch {
@@ -2308,7 +2312,6 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
                let val : f32 = CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
                if outputs[c_inter as usize].len() > 0 {
                    outputs[c_inter as usize][p_inter as usize] += val;
-                //   *outputs[c_inter as usize].offset(p_inter as isize) += val;
                }
                c_inter += 1;
                if c_inter == ch { 
@@ -2671,8 +2674,9 @@ pub unsafe fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffe
 
    let mut outputs: AudioBufferSlice<f32> = AudioBufferSlice::new(0);
    let mut n = 0;
-   let mut z = f.channels;
-   if z > channels {z = channels;}
+//    let mut z = f.channels;
+//    if z > channels {z = channels;}
+   let z = std::cmp::min(f.channels, channels);
    while n < num_samples {
       let mut k = f.channel_buffer_end - f.channel_buffer_start;
       if n + k >= num_samples { k = num_samples - n; }
@@ -4086,14 +4090,13 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
 }
 
 
-// NOTE(bungcip): remove ch? already exist in residue_buffers
 unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<f32>, n: i32, rn: i32, do_not_decode: &[bool])
 {
    let ch = residue_buffers.channel_count as i32;
    let r: &Residue = FORCE_BORROW!( &f.residue_config[rn as usize] );
    let rtype : i32 = f.residue_types[rn as usize] as i32;
    let c : i32 = r.classbook as i32;
-   let classwords : i32 = f.codebooks[c as usize].dimensions;
+   let classwords = f.codebooks[c as usize].dimensions as usize;
    let n_read : i32 = (r.end - r.begin) as i32;
    let part_read : i32 = n_read / r.part_size as i32;
    
@@ -4132,7 +4135,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
 
       for pass in 0 .. 8 {
          let mut pcount = 0;
-         let mut class_set: i32 = 0;
+         let mut class_set = 0;
          if residue_buffers.channel_count == 2 {
             while pcount < part_read {
                let z : i32 = r.begin as i32 + (pcount*r.part_size as i32);
@@ -4148,13 +4151,13 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                   } 
                   
                   // NOTE(bungcip): remove .clone() !!!
-                  part_classdata[0][class_set as usize] = r.classdata[q as usize].clone();
+                  part_classdata[0][class_set] = r.classdata[q as usize].clone();
                }
                
                let mut i = 0;
                while i < classwords && pcount < part_read {
                   let mut z : i32 = r.begin as i32 + (pcount*r.part_size as i32);
-                  let c : i32 = part_classdata[0][class_set as usize][i as usize] as i32;
+                  let c : i32 = part_classdata[0][class_set][i] as i32;
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                     let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
@@ -4253,8 +4256,8 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
    CHECK!(f);
 
    for pass in 0 .. 8 {
-      let mut pcount : i32 = 0;
-      let mut class_set : i32 = 0;
+      let mut pcount = 0;
+      let mut class_set = 0;
       while pcount < part_read {
          if pass == 0 {
             for j in 0 .. residue_buffers.channel_count as usize {
@@ -4301,7 +4304,6 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
     } // loop done
 //   done:
    CHECK!(f);
-//    temp_alloc_restore!(f,temp_alloc_point);
 }
 
 // the following were split out into separate functions while optimizing;
@@ -4856,7 +4858,6 @@ unsafe fn inverse_mdct(buffer: &mut [f32], n: i32, f: &mut Vorbis, blocktype: i3
 pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 {
    let mut header : [u8; 6] = [0; 6];
-   let mut max_submaps = 0;
    let mut longest_floorlist = 0;
    use VorbisError::*;
 
@@ -5301,6 +5302,7 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       }
    }
 
+   let mut max_submaps = 0;
    f.mapping_count = get_bits(f,6) as i32 +1;
    f.mapping.resize(f.mapping_count as usize, Mapping::default());
    for i in 0 .. f.mapping_count as usize {
