@@ -835,7 +835,7 @@ fn ilog(n: i32) -> i32
     // 2 compares if n < 16, 3 compares otherwise (4 if signed or n > 1<<29)
     let result = if n < (1 << 14) {
         if n < (1 << 4) {
-            0 + LOG2_4[n]
+            LOG2_4[n]
         } else if n < (1 << 9) {
             5 + LOG2_4[n >> 5]
         } else {
@@ -1326,10 +1326,6 @@ fn vorbis_decode_initial(f: &mut Vorbis,
        break;
    }
 
-//    if f.alloc.alloc_buffer.is_null() == false {
-//       assert!(f.alloc.alloc_buffer_length_in_bytes == f.temp_offset);
-//    }
-
    let x = ilog(f.mode_count-1);
    let i : i32 = get_bits(f, x) as i32;
    if i == EOP {return false;}
@@ -1613,7 +1609,7 @@ fn convert_samples_short(buf_c: i32, buffer: &mut AudioBufferSlice<i16>, b_offse
       while i < limit {
          let mut buffer_slice = &mut buffer[i][b_offset ..]; 
          let data_slice = &data[i][data_offset ..];
-         copy_samples(&mut buffer_slice, &data_slice, samples as usize);
+         copy_samples(&mut buffer_slice, data_slice, samples as usize);
          i += 1;
       }
       
@@ -2042,11 +2038,9 @@ fn codebook_decode_start(f: &mut Vorbis, c: &Codebook) -> i32
    } else {
       DECODE_VQ!(z,f,c);
       if c.sparse == true {assert!(z < c.sorted_entries);}
-      if z < 0 {  // check for EOP
-         if f.bytes_in_seg == 0 {
-            if f.last_seg == true {
-               return z;
-            }
+      if z < 0 && f.bytes_in_seg == 0 { // check for EOP
+         if f.last_seg == true {
+            return z;
          }
          error(f,  VorbisError::InvalidStream);
       }
@@ -2109,7 +2103,7 @@ fn codebook_decode_scalar_raw(f: &mut Vorbis, c: &Codebook) -> i32
    // cases to use binary search: sorted_codewords && !c.codewords
    //                             sorted_codewords && c.entries > 8
    let case = if c.entries > 8 {
-       c.sorted_codewords.len() > 0
+       !c.sorted_codewords.is_empty()
    }else{
        c.codewords.is_empty()
    };
@@ -3153,10 +3147,8 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: bool) -> bool
          s += 1;
       }
       // either this continues, or it ends it...
-      if end_page {
-         if s < f.segment_count-1 {
-            return error(f, VorbisError::InvalidStream);
-         }
+      if end_page && s < f.segment_count-1 {
+         return error(f, VorbisError::InvalidStream);
       }
       if s == f.segment_count {
          s = -1; // set 'crosses page' flag
@@ -4799,21 +4791,19 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
    // third packet!
    if start_packet(f) == false                            {return false;} 
 
-   if f.push_mode {
-      if is_whole_packet_present(f, true) == false {
-         // convert error in ogg header to write type
-         if f.error == InvalidStream {
+   if f.push_mode && is_whole_packet_present(f, true) == false {
+        // convert error in ogg header to write type
+        if f.error == InvalidStream {
             f.error = InvalidSetup;
-         }
-         return false;
-      }
+        }
+        return false;
    }
 
    crc32_init(); // always init it, to avoid multithread race conditions
 
    if get8_packet(f) != PACKET_SETUP as i32       {return error(f, InvalidSetup);}
-   for i in 0usize .. 6 {
-       header[i] = get8_packet(f) as u8;
+   for item in header.iter_mut().take(6){
+       *item = get8_packet(f) as u8;
    }
    if vorbis_validate(&header) == false                    {return error(f, InvalidSetup);}
 
@@ -4840,14 +4830,13 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       if c.dimensions == 0 && c.entries != 0    {return error(f, InvalidSetup);}
 
       let mut _lengths: Vec<u8> = Vec::new(); // NOTE(bungcip): just temporary
-      let mut lengths: &mut [u8];
-      if c.sparse == true {
+      let mut lengths: &mut [u8] = if c.sparse == true {
           _lengths.resize(c.entries as usize, 0);
-          lengths = FORCE_BORROW_MUT!( &mut _lengths[..] );
+          FORCE_BORROW_MUT!( &mut _lengths[..] )
       }else{
           c.codeword_lengths.resize(c.entries as usize, 0);
-          lengths = FORCE_BORROW_MUT!( &mut c.codeword_lengths[..] );
-      }
+          FORCE_BORROW_MUT!( &mut c.codeword_lengths[..] )
+      };
 
       let mut total = 0;
       if is_ordered  {
@@ -4865,17 +4854,17 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             current_length += 1;
          }
       } else {
-         for j in 0 .. c.entries as usize {
+         for item in lengths.iter_mut().take(c.entries as usize){
             let present = if c.sparse == true { get_bits(f,1) } else { 1 };
             
             if present != 0 {
-               lengths[j] = ( get_bits(f, 5) + 1) as u8;
+               *item = ( get_bits(f, 5) + 1) as u8;
                total += 1;
-               if lengths[j] == 32 {
+               if *item == 32 {
                   return error(f, InvalidSetup);
                }
             } else {
-               lengths[j] = NO_CODE;
+               *item = NO_CODE;
             }
          }
       }
@@ -4893,9 +4882,8 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          sorted_count = total;
       } else {
          sorted_count = 0;
-         for j in 0 .. c.entries as usize {
-            if lengths[j] > STB_FAST_HUFFMAN_LENGTH as u8 && 
-                lengths[j] != NO_CODE {
+         for &item in lengths.iter().take(c.entries as usize){
+            if item > STB_FAST_HUFFMAN_LENGTH as u8 && item != NO_CODE {
                sorted_count += 1;
             }
          }
@@ -4906,18 +4894,16 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       CHECK!(f);
       if c.sparse == false {
-          c.codewords.resize(c.entries as usize, 0);
-      } else {
-         if c.sorted_entries != 0 {
-            c.codeword_lengths.resize(c.sorted_entries as usize, 0);
-            c.codewords.resize(c.sorted_entries as usize, 0);
-            values.resize(c.sorted_entries as usize, 0);
-         }
+         c.codewords.resize(c.entries as usize, 0);
+      } else if c.sorted_entries != 0 {
+         c.codeword_lengths.resize(c.sorted_entries as usize, 0);
+         c.codewords.resize(c.sorted_entries as usize, 0);
+         values.resize(c.sorted_entries as usize, 0);
       }
 
-        if compute_codewords(c, lengths, &mut values) == false {
+      if compute_codewords(c, lengths, &mut values) == false {
         return error(f, InvalidSetup);
-        }
+      }
 
       if c.sorted_entries != 0 {
          // allocate an extra slot for sentinels
@@ -5005,9 +4991,9 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
             let mut last = 0.0;
             CHECK!(f);
             c.multiplicands.resize(c.lookup_values as usize, 0.0);
-            for j in 0 .. c.lookup_values as usize {
+            for (j, item) in c.multiplicands.iter_mut().enumerate().take(c.lookup_values as usize){
                let val : f32 = mults[j] as f32 * c.delta_value + c.minimum_value + last;
-               c.multiplicands[j] = val;
+               *item = val;
                if c.sequence_p != 0 {
                   last = val;
                }
@@ -5101,9 +5087,10 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
          // NOTE(bungcip): using rust sort instead of libc qsort
          p.sort();
          
-         for j in 0 .. g.values as usize {
-            g.sorted_order[j] = p[j].y as u8;
+         for (j, item) in p.iter().enumerate().take(g.values as usize){
+            g.sorted_order[j] = item.y as u8;
          }
+
          // precompute the neighbors
          for j in 2 .. g.values as usize {
             let mut low = 0;
@@ -5140,18 +5127,18 @@ pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
       if r.classbook as i32 >= f.codebook_count {
           return error(f, InvalidSetup);
       }
-      for j in 0 .. r.classifications as usize {
+      for item in residue_cascade.iter_mut().take(r.classifications as usize){
          let mut high_bits: u8 = 0;
          let low_bits: u8 = get_bits(f,3) as u8;
          if get_bits(f,1) != 0 {
             high_bits = get_bits(f,5) as u8;
          }
-         residue_cascade[j] = high_bits*8 + low_bits;
+         *item = high_bits*8 + low_bits;
       }
       r.residue_books.resize(r.classifications as usize, [0; 8]);
-      for j in 0 .. r.classifications as usize {
+      for (j, item) in residue_cascade.iter_mut().enumerate().take(r.classifications as usize){
          for k in 0usize .. 8 {
-            if (residue_cascade[j] & (1 << k)) != 0 {
+            if (*item & (1 << k)) != 0 {
                r.residue_books[j][k] = get_bits(f, 8) as i16;
                if r.residue_books[j][k] as i32 >= f.codebook_count {
                    return error(f, InvalidSetup);
