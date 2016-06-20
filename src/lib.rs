@@ -2583,15 +2583,11 @@ pub fn stb_vorbis_decode_memory(mem: &[u8],
 // buffering so you have to supply the buffers. DOES NOT APPLY THE COERCION RULES.
 // Returns the number of samples stored per channel; it may be less than requested
 // at the end of the file. If there are no more samples in the file, returns 0.
-#[allow(unreachable_code, unused_variables)]
-pub unsafe fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffer: *mut *mut f32, num_samples: i32 ) -> i32
+pub fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffer: &mut AudioBufferSlice<f32>) -> i32
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
    let mut outputs: AudioBufferSlice<f32> = AudioBufferSlice::new(0);
    let mut n = 0;
-//    let mut z = f.channels;
-//    if z > channels {z = channels;}
+   let num_samples = buffer.len() as i32;
    let z = std::cmp::min(f.channels, channels);
    while n < num_samples {
       let mut k = f.channel_buffer_end - f.channel_buffer_start;
@@ -2599,22 +2595,26 @@ pub unsafe fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffe
       if k != 0 {
           let mut i = 0;
           while i < z {
-            // memcpy(buffer[i]+n, f.channel_buffers[i]+f.channel_buffer_start, sizeof(float)*k);
-            std::ptr::copy_nonoverlapping(
-                f.channel_buffers[i as usize].as_ptr().offset(f.channel_buffer_start as isize),
-                (*buffer.offset(i as isize)).offset(n as isize),
-                k as usize
-            );
+              unsafe {
+                std::ptr::copy_nonoverlapping(
+                    f.channel_buffers[i as usize].as_ptr().offset(f.channel_buffer_start as isize),
+                    buffer[i as usize].as_mut_ptr().offset(n as isize),
+                    // (*buffer.offset(i as isize)).offset(n as isize),
+                    k as usize
+                );
+              }
             i += 1;
           }
           
           while i < channels {
-            // memset(buffer[i]+n, 0, sizeof(float) * k);
-            std::ptr::write_bytes(
-                (*buffer.offset(i as isize)).offset(n as isize),
-                0,
-                k as usize
-            );        
+              unsafe{
+                std::ptr::write_bytes(
+                    buffer[i as usize].as_mut_ptr().offset(n as isize),
+                    // (*buffer.offset(i as isize)).offset(n as isize),
+                    0,
+                    k as usize
+                );        
+              }
             i += 1;
           }          
       }
@@ -2634,32 +2634,28 @@ pub unsafe fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffe
 // buffering so you have to supply the buffers. DOES NOT APPLY THE COERCION RULES.
 // Returns the number of samples stored per channel; it may be less than requested
 // at the end of the file. If there are no more samples in the file, returns 0.
-#[allow(unreachable_code, unused_variables)]
-pub unsafe fn stb_vorbis_get_samples_float_interleaved(f: &mut Vorbis, channels: i32 , mut buffer: *mut f32, num_floats: i32 ) -> i32 
+pub fn stb_vorbis_get_samples_float_interleaved(f: &mut Vorbis, channels: i32 , mut buffer: &mut [f32]) -> i32 
 {
-   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
-
    let mut outputs: AudioBufferSlice<f32> = AudioBufferSlice::new(0);
-   let len : i32 = num_floats / channels;
+   let len : i32 = buffer.len() as i32 / channels;
    let mut n=0;
-//    let mut z = f.channels;
-//    if z > channels {z = channels;}
    let z = std::cmp::min(f.channels, channels);
    
+   let mut buffer_index = 0;
    while n < len {
       let mut k = f.channel_buffer_end - f.channel_buffer_start;
       if n+k >= len {k = len - n;}
       for j in 0 .. k  {
           let mut i = 0;
           while i < z {
-            *buffer = f.channel_buffers[i as usize][ (f.channel_buffer_start+j) as usize];
-            buffer = buffer.offset(1);
-              i += 1;
+            buffer[buffer_index] = f.channel_buffers[i as usize][ (f.channel_buffer_start+j) as usize];
+            buffer_index += 1;
+            i += 1;
           }
           
           while i < channels {
-            *buffer = 0.0;
-            buffer = buffer.offset(1);
+            buffer[buffer_index] = 0.0;
+            buffer_index += 1;
               i += 1;
           }
       }

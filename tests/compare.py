@@ -67,12 +67,14 @@ expected_errors = {
 #    print("  run {}".format(o))
 #    subprocess.call(["vorvis-sample.exe", "1", "ogg/{}.ogg".format(o), "c_output/[decode_filename]_{}.out".format(o)])
 #    subprocess.call(["vorvis-sample.exe", "5", "ogg/{}.ogg".format(o), "c_output/[decode_frame_pushdata]_{}.out".format(o)])
-#   subprocess.call(["vorvis-sample.exe", "3", "ogg/{}.ogg".format(o), "c_output/[get_samples_short_interleaved]_{}.out".format(o)])
+#    subprocess.call(["vorvis-sample.exe", "3", "ogg/{}.ogg".format(o), "c_output/[get_samples_short_interleaved]_{}.out".format(o)])
+#   subprocess.call(["vorvis-sample.exe", "6", "ogg/{}.ogg".format(o), "c_output/[get_samples_float_interleaved]_{}.out".format(o)])
 
 binaries = [
    "decode_filename",
    "decode_frame_pushdata",
-   "get_samples_short_interleaved"
+   "get_samples_short_interleaved",
+   "get_samples_float_interleaved",
 ]
 
 # compile rust port
