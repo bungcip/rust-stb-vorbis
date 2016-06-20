@@ -5033,17 +5033,19 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
                g.values += 1;
             }
          }
+
          // precompute the sorting
-         let mut p : Vec<Point> = Vec::with_capacity(31*8+2);
-         for j in 0 .. g.values as usize {
-             p.push(Point{ x: g.xlist[j], y: j as u16});
-         }
-         
-         // NOTE(bungcip): using rust sort instead of libc qsort
-         p.sort();
-         
-         for (j, item) in p.iter().enumerate().take(g.values as usize){
-            g.sorted_order[j] = item.y as u8;
+         {
+            let mut points : Vec<Point> = Vec::with_capacity(31*8+2);
+            for (j, item) in g.xlist.iter().enumerate().take(g.values as usize) {
+                points.push(Point{ x: *item, y: j as u16});
+            }
+            
+            points.sort();
+            
+            for (j, item) in points.iter().enumerate() {
+                g.sorted_order[j] = item.y as u8;
+            }
          }
 
          // precompute the neighbors
@@ -5108,15 +5110,12 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
       // NOTE(bungcip): remove resize?
       r.classdata.resize(f.codebooks[r.classbook as usize].entries as usize, Vec::new());
       for j in 0 .. f.codebooks[r.classbook as usize].entries as usize {
-         let classwords = f.codebooks[r.classbook as usize].dimensions;
-         r.classdata[j].resize(classwords as usize, 0);
-         
          let mut temp = j as i32;
-         let mut k = classwords-1;
-         while k >= 0 {
-            r.classdata[j][k as usize] = (temp % r.classifications as i32) as u8;
+         let classwords_size = f.codebooks[r.classbook as usize].dimensions;
+         r.classdata[j].resize(classwords_size as usize, 0);
+         for item in r.classdata[j].iter_mut().rev() {
+            *item = (temp % r.classifications as i32) as u8;
             temp /= r.classifications as i32;
-            k -= 1;
          }
       }
    }
