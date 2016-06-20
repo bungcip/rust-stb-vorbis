@@ -1471,7 +1471,7 @@ pub fn stb_vorbis_get_frame_short_interleaved(f: &mut Vorbis,
       if len * channel_count as usize > num_shorts {
         len = num_shorts / channel_count as usize;  
       } 
-      convert_channels_short_interleaved(channel_count, buffer, &output, 0, len);
+      convert_channels_short_interleaved(channel_count, buffer, &output, len);
    }
    return len as i32;
 }
@@ -1576,22 +1576,23 @@ pub fn stb_vorbis_get_frame_float(f: &mut Vorbis,
 
 pub fn stb_vorbis_get_frame_short(f: &mut Vorbis, num_c: i32, mut sample_buffer: &mut AudioBufferSlice<i16>) -> i32
 {
+  // NOTE(bungcip): change return value to u32 or usize?
+
    let mut output: AudioBufferSlice<f32> = AudioBufferSlice::new(f.channels as usize);
-   let len = stb_vorbis_get_frame_float(f, None, Some(&mut output));
-   let len = std::cmp::min(len, sample_buffer.len() as i32);
+   let len = stb_vorbis_get_frame_float(f, None, Some(&mut output)) as usize;
+   let len = std::cmp::min(len, sample_buffer.len());
    
    if len != 0 {
-        convert_samples_short(num_c, &mut sample_buffer, 0, &output, 0, len);
+        convert_samples_short(num_c, &mut sample_buffer, &output, len);
    }
-   return len;
+   return len as i32;
 }
 
 
-fn convert_samples_short(buf_c: i32, buffer: &mut AudioBufferSlice<i16>, b_offset: usize, data: &AudioBufferSlice<f32>, data_offset: usize, samples: i32)
+fn convert_samples_short(buf_c: i32, buffer: &mut AudioBufferSlice<i16>, data: &AudioBufferSlice<f32>, samples: usize)
 {
-    // NOTE(bungcip): change samples to usize?
    let buf_c = buf_c as usize;
-   if buf_c != data.channel_count && buf_c <= 2 && data.channel_count <= 6 {
+   if buf_c != data.channel_count() && buf_c <= 2 && data.channel_count() <= 6 {
       static CHANNEL_SELECTOR : [[i8;2]; 3] = [
           [0, 0],
           [PLAYBACK_MONO, PLAYBACK_MONO],
@@ -1599,25 +1600,25 @@ fn convert_samples_short(buf_c: i32, buffer: &mut AudioBufferSlice<i16>, b_offse
       ];
       
       for i in 0 .. buf_c {
-         compute_samples(CHANNEL_SELECTOR[buf_c][i] as i32, &mut buffer[i][b_offset ..], 
-            data, data_offset, samples as i32);
+         compute_samples(CHANNEL_SELECTOR[buf_c][i] as i32, &mut buffer[i], 
+            data, samples);
       }
    } else {
-      let limit = std::cmp::min(buf_c, data.channel_count);
+      let limit = std::cmp::min(buf_c, data.channel_count());
       
       let mut i = 0;
       while i < limit {
-         let mut buffer_slice = &mut buffer[i][b_offset ..]; 
-         let data_slice = &data[i][data_offset ..];
-         copy_samples(&mut buffer_slice, data_slice, samples as usize);
+         let mut buffer_slice = &mut buffer[i]; 
+         let data_slice = &data[i];
+         copy_samples(&mut buffer_slice, data_slice, samples);
          i += 1;
       }
       
       while i < buf_c {
           unsafe {
             std::ptr::write_bytes(
-                (&mut buffer[i][b_offset ..]).as_mut_ptr(),
-                0, samples as usize);
+                (&mut buffer[i]).as_mut_ptr(),
+                0, samples);
           }
           i += 1;
       }
@@ -1625,21 +1626,20 @@ fn convert_samples_short(buf_c: i32, buffer: &mut AudioBufferSlice<i16>, b_offse
 }
 
 
-fn convert_channels_short_interleaved(buf_c: u32, buffer: &mut [i16], data: &AudioBufferSlice<f32>, d_offset: i32, len: usize)
+fn convert_channels_short_interleaved(buf_c: u32, buffer: &mut [i16], data: &AudioBufferSlice<f32>, len: usize)
 {
-   if buf_c != data.channel_count as u32 && buf_c <= 2 && data.channel_count <= 6 {
+   if buf_c != data.channel_count() as u32 && buf_c <= 2 && data.channel_count() <= 6 {
        assert!(buf_c == 2);
        for _ in 0 .. buf_c {
-         compute_stereo_samples(buffer, data, d_offset, len as i32);
+         compute_stereo_samples(buffer, data, len);
        }
    } else {
-       let d_offset = d_offset as usize;
-       let limit = std::cmp::min(buf_c as usize, data.channel_count) as usize;
+       let limit = std::cmp::min(buf_c as usize, data.channel_count()) as usize;
        let mut buffer_index = 0;
        for j in 0 .. len as usize {
            let mut i = 0;
            while i < limit {
-               let f : f32 = data[i][ (d_offset+j) as usize ];
+               let f : f32 = data[i][ j as usize ];
                let mut v : i32 = unsafe { FAST_SCALED_FLOAT_TO_INT!(f, 15) };
                if ( (v + 32768) as u32) > 65535 {
                    v = if v < 0 {  -32768 } else { 32767 };
@@ -2187,7 +2187,7 @@ fn codebook_decode_step(f: &mut Vorbis, c: &Codebook, output: &mut [f32], len: i
 unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outputs: &mut AudioBufferSlice<f32>, 
     c_inter_p: &mut i32, p_inter_p: &mut i32, len: i32, mut total_decode: i32) -> bool
 {
-   let ch = outputs.channel_count as i32;
+   let ch = outputs.channel_count() as i32;
    let mut c_inter = *c_inter_p;
    let mut p_inter = *p_inter_p;
    let mut effective = c.dimensions;
@@ -2271,10 +2271,8 @@ fn compute_window(n: i32, window: &mut [f32])
    }
 }
 
-fn compute_samples(mask: i32, output: &mut [i16], data: &AudioBufferSlice<f32>, d_offset: usize, len: i32)
+fn compute_samples(mask: i32, output: &mut [i16], data: &AudioBufferSlice<f32>, len: usize)
 {
-   // NOTE(bungcip): change len to usize?
-   
    const BUFFER_SIZE : usize = 32;
    let mut buffer: [f32; BUFFER_SIZE];
    let mut n = BUFFER_SIZE;
@@ -2287,10 +2285,10 @@ fn compute_samples(mask: i32, output: &mut [i16], data: &AudioBufferSlice<f32>, 
       if o + n > len {
           n = len - o;
       }
-      for j in 0 .. data.channel_count {
-         if (CHANNEL_POSITION[data.channel_count][j] as i32 & mask) != 0 {
+      for j in 0 .. data.channel_count() {
+         if (CHANNEL_POSITION[data.channel_count()][j] as i32 & mask) != 0 {
             for i in 0 .. n {
-               buffer[i] += data[j][d_offset+o+i];
+               buffer[i] += data[j][o+i];
             }
          }
       }
@@ -2307,15 +2305,9 @@ fn compute_samples(mask: i32, output: &mut [i16], data: &AudioBufferSlice<f32>, 
    }
 }
 
-fn compute_stereo_samples(output: &mut [i16], data: &AudioBufferSlice<f32>, d_offset: i32, len: i32)
+fn compute_stereo_samples(output: &mut [i16], data: &AudioBufferSlice<f32>, len: usize)
 {
-    // NOTE(bungcip): remove d_offset?
-    //                change len to usize?
-    
    const BUFFER_SIZE : usize = 32;
-   
-   let d_offset = d_offset as usize;
-   let len = len as usize;
    
    let mut n = BUFFER_SIZE >> 1;
    let mut buffer: [f32; BUFFER_SIZE];
@@ -2329,20 +2321,20 @@ fn compute_stereo_samples(output: &mut [i16], data: &AudioBufferSlice<f32>, d_of
       if o + n > len {
           n = len - o;
       }
-      for j in 0 .. data.channel_count {
-         let m = CHANNEL_POSITION[data.channel_count][j] & (PLAYBACK_LEFT | PLAYBACK_RIGHT);
+      for j in 0 .. data.channel_count() {
+         let m = CHANNEL_POSITION[data.channel_count()][j] & (PLAYBACK_LEFT | PLAYBACK_RIGHT);
          if m == (PLAYBACK_LEFT | PLAYBACK_RIGHT) {
             for i in 0 .. n as usize {
-               buffer[ (i*2+0) ] += data[j][d_offset + o + i];
-               buffer[ (i*2+1) ] += data[j][d_offset + o + i];
+               buffer[ (i*2+0) ] += data[j][o + i];
+               buffer[ (i*2+1) ] += data[j][o + i];
             }
          } else if m == PLAYBACK_LEFT {
             for i in 0 .. n as usize {
-               buffer[ (i*2+0) ] += data[j][d_offset + o + i];
+               buffer[ (i*2+0) ] += data[j][o + i];
             }
          } else if m == PLAYBACK_RIGHT {
             for i in 0 .. n as usize {
-               buffer[ (i*2+1) ] += data[j][d_offset + o + i];
+               buffer[ (i*2+1) ] += data[j][o + i];
             }
          }
       }
@@ -2593,7 +2585,6 @@ pub fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffer: &mut
                 std::ptr::copy_nonoverlapping(
                     f.channel_buffers[i as usize].as_ptr().offset(f.channel_buffer_start as isize),
                     buffer[i as usize].as_mut_ptr().offset(n as isize),
-                    // (*buffer.offset(i as isize)).offset(n as isize),
                     k as usize
                 );
               }
@@ -2604,7 +2595,6 @@ pub fn stb_vorbis_get_samples_float(f: &mut Vorbis, channels: i32 , buffer: &mut
               unsafe{
                 std::ptr::write_bytes(
                     buffer[i as usize].as_mut_ptr().offset(n as isize),
-                    // (*buffer.offset(i as isize)).offset(n as isize),
                     0,
                     k as usize
                 );        
@@ -2681,8 +2671,9 @@ pub unsafe fn stb_vorbis_get_samples_short(f: &mut Vorbis, channels: i32, buffer
       if n+k >= len {k = len - n;}
       if k != 0 {
          let channel_buffers_slice = AudioBufferSlice::from(&mut f.channel_buffers);
-         convert_samples_short(channels, buffer, n, &channel_buffers_slice,
-             f.channel_buffer_start as usize, k as i32); 
+         let channel_buffers_slice = channel_buffers_slice.range_from(f.channel_buffer_start as usize);
+         let mut buffer = buffer.range_from(n as usize);
+         convert_samples_short(channels, &mut buffer, &channel_buffers_slice, k); 
       }
       n += k;
       f.channel_buffer_start += k as i32;
@@ -2715,11 +2706,12 @@ pub fn stb_vorbis_get_samples_short_interleaved(f: &mut Vorbis, channel_count: u
       if k != 0 {
           // NOTE(bungcip): create type AudioBuffer too
          let audio_buffer_slice = unsafe { AudioBufferSlice::from(&mut f.channel_buffers) };
+         let audio_buffer_slice = audio_buffer_slice.range_from(f.channel_buffer_start as usize);
           
          convert_channels_short_interleaved(
              channel_count, &mut buffer[buffer_offset ..], 
              &audio_buffer_slice, 
-             f.channel_buffer_start, k);
+             k);
       }
       buffer_offset += k * channel_count as usize;
       n += k as usize;
@@ -3969,7 +3961,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
 
 unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<f32>, n: i32, rn: i32, do_not_decode: &[bool])
 {
-   let ch = residue_buffers.channel_count as i32;
+   let ch = residue_buffers.channel_count() as i32;
    let r: &Residue = FORCE_BORROW!( &f.residue_config[rn as usize] );
    let rtype : i32 = f.residue_types[rn as usize] as i32;
    let c : i32 = r.classbook as i32;
@@ -3987,7 +3979,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
 
    CHECK!(f);
 
-   for i in 0 .. residue_buffers.channel_count {
+   for i in 0 .. residue_buffers.channel_count() {
       if do_not_decode[i] == false {
           std::ptr::write_bytes(residue_buffers[i].as_mut_ptr(), 0, n as usize);
       }
@@ -3996,16 +3988,16 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
    // note(bungcip): simulate goto
    'done: loop {
 
-   if rtype == 2 && residue_buffers.channel_count != 1 {
+   if rtype == 2 && residue_buffers.channel_count() != 1 {
        let mut j = 0;
-       while j < residue_buffers.channel_count {
+       while j < residue_buffers.channel_count() {
          if do_not_decode[j as usize] == false {
             break;
          }
          j += 1;
        }
        
-      if j == residue_buffers.channel_count {
+      if j == residue_buffers.channel_count() {
         //  goto done;
         break 'done;
       }
@@ -4013,7 +4005,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
       for pass in 0 .. 8 {
          let mut pcount = 0;
          let mut class_set = 0;
-         if residue_buffers.channel_count == 2 {
+         if residue_buffers.channel_count() == 2 {
             while pcount < part_read {
                let z : i32 = r.begin as i32 + (pcount*r.part_size as i32);
                let mut c_inter : i32 = z & 1;
@@ -4052,7 +4044,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                }
                class_set += 1;
             }
-         } else if residue_buffers.channel_count == 1 {
+         } else if residue_buffers.channel_count() == 1 {
             while pcount < part_read {
                let z : i32 = r.begin as i32 + pcount as i32 * r.part_size as i32;
                let mut c_inter : i32 = 0;
@@ -4137,7 +4129,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
       let mut class_set = 0;
       while pcount < part_read {
          if pass == 0 {
-            for j in 0 .. residue_buffers.channel_count as usize {
+            for j in 0 .. residue_buffers.channel_count() as usize {
                if do_not_decode[j] == false {
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize]);
                   let mut temp;
@@ -4154,7 +4146,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
          }
             let mut i = 0;
             while i < classwords && pcount < part_read {
-            for j in 0 .. residue_buffers.channel_count as usize {
+            for j in 0 .. residue_buffers.channel_count() {
                if do_not_decode[j] == false {
                   let c : i32 = part_classdata[j][class_set as usize][i as usize] as i32;
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
@@ -4732,7 +4724,7 @@ unsafe fn inverse_mdct(buffer: &mut [f32], n: i32, f: &mut Vorbis, blocktype: i3
 
 }
 
-pub unsafe fn start_decoder(f: &mut Vorbis) -> bool
+unsafe fn start_decoder(f: &mut Vorbis) -> bool
 {
    let mut header : [u8; 6] = [0; 6];
    let mut longest_floorlist = 0;

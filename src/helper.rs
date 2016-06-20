@@ -4,15 +4,15 @@ use ::std::ptr;
 use ::std::ops::{Index, IndexMut};
 use ::std::slice;
 
-
 /// this basically slice but for vorbis audio buffer and not owned.
 /// just work around so I don't need to add lifetime annotation to ALL function that use
 /// Vorbis struct.
 #[derive(Copy, Clone)]
 pub struct AudioBufferSlice<T> {
-    pub channel_count: usize,
+    channel_count: usize,
     buffers: [*mut T; 16],
     sizes: [usize; 16],
+    offset: isize,
 }
 
 impl<T> AudioBufferSlice<T> {
@@ -23,7 +23,8 @@ impl<T> AudioBufferSlice<T> {
         AudioBufferSlice {
             channel_count: channel_count,
             buffers: buffers,
-            sizes: sizes
+            sizes: sizes,
+            offset: 0
         }
     }
 
@@ -40,7 +41,8 @@ impl<T> AudioBufferSlice<T> {
         AudioBufferSlice {
             channel_count: channel_count,
             buffers: buffers,
-            sizes: sizes
+            sizes: sizes,
+            offset: 0
         }
     }
 
@@ -55,7 +57,8 @@ impl<T> AudioBufferSlice<T> {
         AudioBufferSlice {
             channel_count: channel_count,
             buffers: buffers,
-            sizes: sizes
+            sizes: sizes,
+            offset: 0
         }
     }
     
@@ -81,9 +84,23 @@ impl<T> AudioBufferSlice<T> {
         self.buffers.as_ptr()
     }
     
+    pub fn range_from(&self, start: usize) -> Self {
+        let instance = AudioBufferSlice {
+            channel_count: self.channel_count,
+            buffers: self.buffers,
+            sizes: self.sizes,
+            offset: start as isize
+        };
+        instance
+    }
+
     /// get length of first channel data, use channel_count if you need to count the number of channel
     pub fn len(&self) -> usize {
         self.sizes[0]
+    }
+
+    pub fn channel_count(&self) -> usize {
+        self.channel_count
     }
 
 }
@@ -97,7 +114,9 @@ impl<T> Index<(usize, usize)> for AudioBufferSlice<T> {
         assert!(_index.1 < self.sizes[_index.0]);
         
         unsafe {
-            &*self.buffers.get_unchecked(_index.0).offset(_index.1 as isize)
+            &*self.buffers.get_unchecked(_index.0)
+                .offset(self.offset)
+                .offset(_index.1 as isize)
         }
     }    
 }
@@ -105,13 +124,13 @@ impl<T> Index<(usize, usize)> for AudioBufferSlice<T> {
 impl<T> Index<usize> for AudioBufferSlice<T> {
     type Output = [T];
 
-    fn index<'a>(&'a self, _index: usize) -> &'a [T] {
-        assert!(_index < self.channel_count);
+    fn index<'a>(&'a self, index: usize) -> &'a [T] {
+        assert!(index < self.channel_count);
         
         unsafe {
             slice::from_raw_parts(
-                *self.buffers.get_unchecked(_index), 
-                *self.sizes.get_unchecked(_index)
+                self.buffers.get_unchecked(index).offset(self.offset), 
+                *self.sizes.get_unchecked(index) - self.offset as usize
             )
         }
     }    
@@ -123,8 +142,8 @@ impl<T> IndexMut<usize> for AudioBufferSlice<T> {
         
         unsafe {
             slice::from_raw_parts_mut(
-                *self.buffers.get_unchecked_mut(index), 
-                *self.sizes.get_unchecked_mut(index)
+                self.buffers.get_unchecked(index).offset(self.offset), 
+                *self.sizes.get_unchecked_mut(index) - self.offset as usize
             )
         }
     }    
