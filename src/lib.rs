@@ -1,3 +1,6 @@
+#![deny(single_match, box_vec)]
+#![allow(bool_comparison, needless_return, transmute_ptr_to_ref, inline_always)]
+
 /**
  * Rust Stb Vorbis
  * 

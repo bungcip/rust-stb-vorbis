@@ -9,3 +9,7 @@ keywords = ["audio", "ogg", "vorbis", "decoder"]
 
 [dependencies]
 smallvec = "0.1.8"
+clippy = {version = "*", optional = true}
+
+[features]
+default = ["clippy"]
