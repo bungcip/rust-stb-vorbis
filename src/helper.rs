@@ -85,13 +85,12 @@ impl<T> AudioBufferSlice<T> {
     }
     
     pub fn range_from(&self, start: usize) -> Self {
-        let instance = AudioBufferSlice {
+        AudioBufferSlice {
             channel_count: self.channel_count,
             buffers: self.buffers,
             sizes: self.sizes,
             offset: start as isize
-        };
-        instance
+        }
     }
 
     /// get length of first channel data, use channel_count if you need to count the number of channel
@@ -109,7 +108,7 @@ impl<T> AudioBufferSlice<T> {
 impl<T> Index<(usize, usize)> for AudioBufferSlice<T> {
     type Output = T;
 
-    fn index<'a>(&'a self, _index: (usize, usize)) -> &'a T {
+    fn index(&self, _index: (usize, usize)) -> &T {
         assert!(_index.0 < self.channel_count);
         assert!(_index.1 < self.sizes[_index.0]);
         
@@ -124,7 +123,7 @@ impl<T> Index<(usize, usize)> for AudioBufferSlice<T> {
 impl<T> Index<usize> for AudioBufferSlice<T> {
     type Output = [T];
 
-    fn index<'a>(&'a self, index: usize) -> &'a [T] {
+    fn index(&self, index: usize) -> &[T] {
         assert!(index < self.channel_count);
         
         unsafe {

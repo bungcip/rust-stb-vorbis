@@ -4253,13 +4253,13 @@ unsafe fn imdct_step3_inner_s_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32, 
    let a_off = a_off as isize;
    
    let a0 = *a.offset(0);
-   let a1 = *a.offset(0+1);
-   let a2 = *a.offset(0+a_off);
-   let a3 = *a.offset(0+a_off+1);
-   let a4 = *a.offset(0+a_off*2+0);
-   let a5 = *a.offset(0+a_off*2+1);
-   let a6 = *a.offset(0+a_off*3+0);
-   let a7 = *a.offset(0+a_off*3+1);
+   let a1 = *a.offset(1);
+   let a2 = *a.offset(a_off);
+   let a3 = *a.offset(a_off+1);
+   let a4 = *a.offset(a_off*2);
+   let a5 = *a.offset(a_off*2+1);
+   let a6 = *a.offset(a_off*3);
+   let a7 = *a.offset(a_off*3+1);
 
     let mut k00: f32;
     let mut k11: f32;
@@ -4308,37 +4308,34 @@ unsafe fn imdct_step3_inner_s_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32, 
 unsafe fn imdct_step3_inner_s_loop_ld654(n: i32, e: *mut f32, i_off: i32, a: *mut f32, base_n: i32)
 {
    let a_off = base_n >> 3;
-   let a2 = *a.offset( 0 + a_off as isize);
+   let a2 = *a.offset( a_off as isize);
    let mut z = e.offset(i_off as isize);
    let base = z.offset(- (16 * n) as isize);
 
    while z > base {
-      let mut k00 : f32;
-      let mut k11 : f32;
-
-      k00   = *z.offset(-0) - *z.offset(-8);
-      k11   = *z.offset(-1) - *z.offset(-9);
+      let k00   = *z.offset(-0) - *z.offset(-8);
+      let k11   = *z.offset(-1) - *z.offset(-9);
       *z.offset(-0) = *z.offset(-0) + *z.offset(-8);
       *z.offset(-1) = *z.offset(-1) + *z.offset(-9);
       *z.offset(-8) =  k00;
       *z.offset(-9) =  k11 ;
 
-      k00    = *z.offset(-2) - *z.offset(-10);
-      k11    = *z.offset(-3) - *z.offset(-11);
+      let k00    = *z.offset(-2) - *z.offset(-10);
+      let k11    = *z.offset(-3) - *z.offset(-11);
       *z.offset(-2) = *z.offset(-2) + *z.offset(-10);
       *z.offset(-3) = *z.offset(-3) + *z.offset(-11);
       *z.offset(-10) = (k00+k11) * a2;
       *z.offset(-11) = (k11-k00) * a2;
 
-      k00    = *z.offset(-12) - *z.offset(-4);  // reverse to avoid a unary negation
-      k11    = *z.offset(-5) - *z.offset(-13);
+      let k00    = *z.offset(-12) - *z.offset(-4);  // reverse to avoid a unary negation
+      let k11    = *z.offset(-5) - *z.offset(-13);
       *z.offset(-4) = *z.offset(-4) + *z.offset(-12);
       *z.offset(-5) = *z.offset(-5) + *z.offset(-13);
       *z.offset(-12) = k11;
       *z.offset(-13) = k00;
 
-      k00    = *z.offset(-14) - *z.offset(-6);  // reverse to avoid a unary negation
-      k11    = *z.offset(-7) - *z.offset(-15);
+      let k00    = *z.offset(-14) - *z.offset(-6);  // reverse to avoid a unary negation
+      let k11    = *z.offset(-7) - *z.offset(-15);
       *z.offset(-6) = *z.offset(-6) + *z.offset(-14);
       *z.offset(-7) = *z.offset(-7) + *z.offset(-15);
       *z.offset(-14) = (k00+k11) * a2;
@@ -4501,11 +4498,11 @@ unsafe fn inverse_mdct(buffer: &mut [f32], n: i32, f: &mut Vorbis, blocktype: i3
 
    // this is iteration 0 of step 3
    imdct_step3_iter0_loop(n >> 4, u, n2-1-n4*0, -(n >> 3), a);
-   imdct_step3_iter0_loop(n >> 4, u, n2-1-n4*1, -(n >> 3), a);
+   imdct_step3_iter0_loop(n >> 4, u, n2-1-n4, -(n >> 3), a);
 
    // this is iteration 1 of step 3
    imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*0, -(n >> 4), a, 16);
-   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*1, -(n >> 4), a, 16);
+   imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8, -(n >> 4), a, 16);
    imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*2, -(n >> 4), a, 16);
    imdct_step3_inner_r_loop(n >> 5, u, n2-1 - n8*3, -(n >> 4), a, 16);
 
@@ -4561,14 +4558,14 @@ unsafe fn inverse_mdct(buffer: &mut [f32], n: i32, f: &mut Vorbis, blocktype: i3
       let mut bitrev = f.bit_reverse[blocktype as usize].iter();
 
       while d0 >= v {
-         let k4 = bitrev.next().unwrap();
-         *d1.offset(3) = *u.offset((k4+0) as isize);
+         let k4 = *bitrev.next().unwrap();
+         *d1.offset(3) = *u.offset((k4) as isize);
          *d1.offset(2) = *u.offset((k4+1) as isize);
          *d0.offset(3) = *u.offset((k4+2) as isize);
          *d0.offset(2) = *u.offset((k4+3) as isize);
 
-         let k4 = bitrev.next().unwrap();
-         *d1.offset(1) = *u.offset((k4+0) as isize);
+         let k4 = *bitrev.next().unwrap();
+         *d1.offset(1) = *u.offset((k4) as isize);
          *d1.offset(0) = *u.offset((k4+1) as isize);
          *d0.offset(1) = *u.offset((k4+2) as isize);
          *d0.offset(0) = *u.offset((k4+3) as isize);
