@@ -1957,26 +1957,6 @@ fn residue_decode(f: &mut Vorbis, book: &Codebook, target: &mut [f32], mut offse
    return true;
 }
 
-// CODEBOOK_ELEMENT_FAST is an optimization for the CODEBOOK_FLOATS case
-// where we avoid one addition
-macro_rules! CODEBOOK_ELEMENT {
-    ($c: expr, $off: expr) => {
-        $c.multiplicands[$off as usize]
-    }
-}
-
-macro_rules! CODEBOOK_ELEMENT_FAST {
-    ($c: expr, $off: expr) => {
-        $c.multiplicands[$off as usize]
-    }
-}
-
-macro_rules! CODEBOOK_ELEMENT_BASE {
-    ($c: expr) => {
-        0.0
-    }
-}
-
 
 fn codebook_decode(f: &mut Vorbis, c: &Codebook, output: &mut [f32], len: i32 ) -> bool
 {
@@ -1989,42 +1969,30 @@ fn codebook_decode(f: &mut Vorbis, c: &Codebook, output: &mut [f32], len: i32 ) 
 
    z *= c.dimensions;
    if c.sequence_p != 0 {
-      let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
+      let mut last : f32 = 0.0;
       for i in 0 .. len  {
-         let val : f32 = CODEBOOK_ELEMENT_FAST!(c, z+i) + last;
+         let val : f32 = c.multiplicands[(z+i) as usize] + last;
          output[i as usize] += val;
          last = val + c.minimum_value;
       }
    } else {
-      let last : f32 = CODEBOOK_ELEMENT_BASE!(c);
+      let last : f32 = 0.0;
       for i in 0 .. len  {
-         output[i as usize] += CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
+         output[i as usize] += c.multiplicands[(z+i) as usize] + last;
       }
    }
 
    return true;
 }
 
-macro_rules! DECODE {
-    ($var: expr, $f: expr, $c: expr) => {
-        DECODE_RAW!($var, $f, $c);
-        if $c.sparse == true {
-            $var = $c.sorted_values[$var as usize];
-        }
-    }
-}
 
-
-macro_rules! DECODE_RAW {
-    ($var: expr, $f: expr, $c: expr) => {
-        $var = codebook_decode_scalar($f, $c);
+#[inline(always)]
+fn decode_raw(f: &mut Vorbis, codebook: &Codebook) -> i32 {
+    let mut value = codebook_decode_scalar(f, codebook);
+    if codebook.sparse == true {
+        value = codebook.sorted_values[value as usize];
     }
-}
-
-macro_rules! DECODE_VQ {
-    ($var: expr, $f: expr, $c: expr) => {
-        DECODE_RAW!($var, $f, $c)
-    }
+    value
 }
 
 
@@ -2036,7 +2004,7 @@ fn codebook_decode_start(f: &mut Vorbis, c: &Codebook) -> i32
    if c.lookup_type == 0 {
       error(f, VorbisError::InvalidStream);
    } else {
-      DECODE_VQ!(z,f,c);
+      z = codebook_decode_scalar(f, c);
       if c.sparse == true {assert!(z < c.sorted_entries);}
       if z < 0 && f.bytes_in_seg == 0 { // check for EOP
          if f.last_seg == true {
@@ -2165,7 +2133,7 @@ fn codebook_decode_scalar_raw(f: &mut Vorbis, c: &Codebook) -> i32
 fn codebook_decode_step(f: &mut Vorbis, c: &Codebook, output: &mut [f32], len: i32 , step: i32 ) -> bool
 {
    let mut z = codebook_decode_start(f,c);
-   let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
+   let mut last : f32 = 0.0;
    if z < 0 {
        return false;
    }
@@ -2174,7 +2142,7 @@ fn codebook_decode_step(f: &mut Vorbis, c: &Codebook, output: &mut [f32], len: i
 
    z *= c.dimensions;
    for i in 0 .. len  {
-      let val : f32 = CODEBOOK_ELEMENT_FAST!(c, z+i) + last;
+      let val : f32 = c.multiplicands[(z+i) as usize] + last;
       output[ (i*step) as usize] += val;
       if c.sequence_p != 0 {
           last = val;
@@ -2198,8 +2166,8 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
      return error(f, VorbisError::InvalidStream);
    } 
    while total_decode > 0 {
-      let mut last : f32 = CODEBOOK_ELEMENT_BASE!(c);
-      DECODE_VQ!(z,f,c);
+      let mut last : f32 = 0.0;
+      z = codebook_decode_scalar(f, c);
       assert!(c.sparse == false || z < c.sorted_entries);
       if z < 0 {
          if f.bytes_in_seg == 0{
@@ -2222,7 +2190,7 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
          z *= c.dimensions;
          if c.sequence_p != 0 {
             for i in 0 .. effective {
-               let val : f32 = CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
+               let val : f32 = c.multiplicands[(z+i) as usize] + last;
                if outputs[c_inter as usize].len() > 0 {
                    outputs[c_inter as usize][p_inter as usize] += val;
                }
@@ -2235,7 +2203,7 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
             }
          } else {
             for i in 0 .. effective {
-               let val : f32 = CODEBOOK_ELEMENT_FAST!(c,z+i) + last;
+               let val : f32 = c.multiplicands[(z+i) as usize] + last;
                if outputs[c_inter as usize].len() > 0 {
                    outputs[c_inter as usize][p_inter as usize] += val;
                }
@@ -3705,15 +3673,14 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
                let mut cval = 0;
                if cbits != 0 {
                   let c: &mut Codebook = FORCE_BORROW_MUT!( &mut f.codebooks[ g.class_masterbooks[pclass] as usize]);
-                  DECODE!(cval,f,c);
+                  cval = decode_raw(f, c);
                }
                for _ in 0 .. cdim {
                   let book = g.subclass_books[pclass][ (cval & csub) as usize];
                   cval = cval >> cbits;
                   if book >= 0 {
-                     let mut temp : i32;
                      let c: &mut Codebook = FORCE_BORROW_MUT!( &mut f.codebooks[book as usize] );
-                     DECODE!(temp,f,c);
+                     let temp : i32 = decode_raw(f, c);
                      final_y[offset] = temp as i16;
                   } else {
                      final_y[offset] = 0;
@@ -4012,8 +3979,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                let mut p_inter : i32 = z>>1;
                if pass == 0 {
                   let c: &Codebook = FORCE_BORROW!(&f.codebooks[r.classbook as usize]);
-                  let mut q : i32;
-                  DECODE!(q,f,c);
+                  let q = decode_raw(f,c);
                   if q == EOP {
                     // goto done;
                     break 'done;  
@@ -4051,8 +4017,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                let mut p_inter : i32 = z as i32;
                if pass == 0 {
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize] );
-                  let mut q;
-                  DECODE!(q,f,c);
+                  let q = decode_raw(f,c);
                   if q == EOP{
                     // goto done;
                     break 'done; 
@@ -4087,8 +4052,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                let mut p_inter : i32 = z / ch;
                if pass == 0 {
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize] );
-                  let mut q;
-                  DECODE!(q,f,c);
+                  let q = decode_raw(f,c);
                   if q == EOP{
                     // goto done;
                     break 'done;  
@@ -4132,8 +4096,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
             for j in 0 .. residue_buffers.channel_count() as usize {
                if do_not_decode[j] == false {
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize]);
-                  let mut temp;
-                  DECODE!(temp,f,c);
+                  let temp = decode_raw(f,c);
                   if temp == EOP {
                     //   goto done;
                     break 'done;
