@@ -4,7 +4,7 @@
  * Rust Stb Vorbis
  * 
  * Ogg vorbis audio decoder in pure rust.
- * This is ported from stb_vorbis (http://nothings.org/stb_vorbis) 
+ * This is ported from `stb_vorbis` (http://nothings.org/stb_vorbis) 
  * v1.09 by Sean Barrett
  *
  * MIT License
@@ -956,21 +956,27 @@ fn compute_twiddle_factors(n: i32, a: &mut [f32], b: &mut [f32], c: &mut [f32])
 }
 
 
-fn neighbors(x: &[u16], n: usize, plow: &mut i32, phigh: &mut i32)
+fn neighbors(x: &[u16], n: usize) -> (i32, i32)
 {
     let mut low : i32 = -1;
     let mut high : i32 = 65536;
-    
-    for i in 0 .. n {
-        if (x[i] as i32) > low && (x[i] as i32) < (x[n] as i32) { 
-            *plow = i as i32;
-            low = x[i] as i32; 
+    let last = x[n];
+
+    let mut plow = 0;
+    let mut phigh = 0;
+
+    for (i, &item) in x.iter().enumerate().take(n) {
+        if (item as i32) > low && item < last { 
+            plow = i;
+            low = item as i32; 
         }
-        if (x[i] as i32) < high && (x[i] as i32) > (x[n] as i32) { 
-            *phigh = i as i32; 
-            high = x[i] as i32;
+        if (item as i32) < high && item > last { 
+            phigh = i; 
+            high = item as i32;
         }
     }
+
+    return (plow as i32, phigh as i32);
 }
 
 
@@ -1067,12 +1073,8 @@ const INVALID_BITS : i32 = -1;
 
 fn get8_packet_raw(f: &mut Vorbis) -> i32
 {
-    if f.bytes_in_seg == 0 {
-        if f.last_seg == true {
-            return EOP;
-        }else if next_segment(f) == 0 {
-            return EOP;
-        }
+    if f.bytes_in_seg == 0 && (f.last_seg == true || next_segment(f) == 0){
+        return EOP;
     }
     
     assert!(f.bytes_in_seg > 0);
@@ -1882,28 +1884,27 @@ fn do_floor(f: &mut Vorbis, map: &Mapping, i: usize, n: usize , target: &mut [f3
 #[inline(always)]
 fn draw_line(output: &mut [f32], x0: i32, y0: i32, mut x1: i32, y1: i32, n: i32)
 {
-    use std::i32;
+   use std::i32;
     
    let dy = y1 - y0;
    let adx = x1 - x0;
    let mut ady = i32::abs(dy);
-   let base : i32;
    let mut x: i32 = x0;
    let mut y: i32 = y0;
    let mut err = 0;
-   let sy;
 
-   base = dy / adx;
-   if dy < 0 {
-      sy = base - 1;
-   }   else{
-      sy = base+1;
-   }
-
+   let base : i32 = dy / adx;
+   let sy = if dy < 0 {
+      base - 1
+   } else {
+      base + 1
+   };
 
    ady -= i32::abs(base) * adx;
    
-   if x1 > n {x1 = n;}
+//    if x1 > n {x1 = n;}
+   x1 = std::cmp::min(x1, n);
+
    if x < x1 {
       LINE_OP!(output[x as usize], INVERSE_DB_TABLE[y as usize]);
       
@@ -1930,8 +1931,6 @@ fn residue_decode(f: &mut Vorbis, book: &Codebook, target: &mut [f32], mut offse
    if rtype == 0 {
       let step = n / book.dimensions;
       for k in 0 .. step {
-            // let mut target_slice = std::slice::from_raw_parts_mut(
-            //     target.offset((offset+k) as isize), (n-offset-k) as usize);
             // NOTE(bungcip): simplify this!
             let mut target_slice = &mut target[ (offset+k) as usize .. ( (offset+k) + (n-offset-k) ) as usize ];
             if codebook_decode_step(f, book, &mut target_slice, n-offset-k, step) == false {
@@ -1943,9 +1942,6 @@ fn residue_decode(f: &mut Vorbis, book: &Codebook, target: &mut [f32], mut offse
        while k < n {
             // NOTE(bungcip): simplify this!
             let mut target_slice = &mut target[ offset as usize .. (offset+n-k) as usize];
-            // let mut target_slice = std::slice::from_raw_parts_mut(
-            //     target.offset(offset as isize), (n-k) as usize);
-                
             if codebook_decode(f, book, &mut target_slice, n-k) == false {
                 return false;
             }
@@ -2168,10 +2164,8 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
       z = codebook_decode_scalar(f, c);
       assert!(c.sparse == false || z < c.sorted_entries);
       if z < 0 {
-         if f.bytes_in_seg == 0{
-            if f.last_seg == true {
-              return false;
-            } 
+         if f.bytes_in_seg == 0 && f.last_seg == true {
+            return false;
          }
          return error(f, VorbisError::InvalidStream);
       }
@@ -2243,7 +2237,7 @@ fn compute_samples(mask: i32, output: &mut [i16], data: &AudioBufferSlice<f32>, 
    let mut buffer: [f32; BUFFER_SIZE];
    let mut n = BUFFER_SIZE;
    let mut o : usize = 0;
-   let len = len as usize;
+//    let len = len as usize;
    
    while o < len {
       buffer = [0.0; BUFFER_SIZE];
@@ -2286,12 +2280,12 @@ fn compute_stereo_samples(output: &mut [i16], data: &AudioBufferSlice<f32>, len:
          let m = CHANNEL_POSITION[data.channel_count()][j] & (PLAYBACK_LEFT | PLAYBACK_RIGHT);
          if m == (PLAYBACK_LEFT | PLAYBACK_RIGHT) {
             for i in 0 .. n as usize {
-               buffer[ (i*2+0) ] += data[j][o + i];
+               buffer[ (i*2) ] += data[j][o + i];
                buffer[ (i*2+1) ] += data[j][o + i];
             }
          } else if m == PLAYBACK_LEFT {
             for i in 0 .. n as usize {
-               buffer[ (i*2+0) ] += data[j][o + i];
+               buffer[ (i*2) ] += data[j][o + i];
             }
          } else if m == PLAYBACK_RIGHT {
             for i in 0 .. n as usize {
@@ -2302,12 +2296,12 @@ fn compute_stereo_samples(output: &mut [i16], data: &AudioBufferSlice<f32>, len:
       
       
       for i in 0 .. n << 1 {
-         let mut v : i32 = unsafe { FAST_SCALED_FLOAT_TO_INT!(buffer[i],15) };
-         if (v + 32768) as u32 > 65535 {
-            v = if v < 0 {-32768} else {32767};
-         }
+        //  let mut v : i32 = unsafe { FAST_SCALED_FLOAT_TO_INT!(buffer[i],15) };
+        //  if (v + 32768) as u32 > 65535 {
+        //     v = if v < 0 {-32768} else {32767};
+        //  }
          
-         output[ (o2+i) as usize ] = v as i16;
+         output[ (o2+i) as usize ] = convert_to_i16(buffer[i]);
       }
        
        o += BUFFER_SIZE >> 1;
@@ -2762,12 +2756,11 @@ unsafe fn go_to_page_before(f: &mut Vorbis, limit_offset: u32) -> bool
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    // now we want to seek back 64K from the limit
-   let previous_safe : u32;
-   if limit_offset >= 65536 && limit_offset-65536 >= f.first_audio_page_offset {
-      previous_safe = limit_offset - 65536;
+   let previous_safe : u32 = if limit_offset >= 65536 && limit_offset-65536 >= f.first_audio_page_offset {
+      limit_offset - 65536
    } else {
-      previous_safe = f.first_audio_page_offset;
-   }
+      f.first_audio_page_offset
+   };
 
    set_file_offset(f, previous_safe);
 
@@ -3042,8 +3035,7 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
          *samples = 0;
          return (f.stream as usize - data.as_ptr() as usize) as i32;
       }
-      if error == VorbisError::ContinuedPacketFlagInvalid {
-         if f.previous_length == 0 {
+      if error == VorbisError::ContinuedPacketFlagInvalid && f.previous_length == 0 {
             // we may be resynching, in which case it's ok to hit one
             // of these; just discard the packet
             f.error = VorbisError::NoError;
@@ -3052,7 +3044,6 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
             }
             *samples = 0;
             return (f.stream as usize - data.as_ptr() as usize) as i32;
-         }
       }
       // if we get an error while parsing, what to do?
       // well, it DEFINITELY won't work to continue from where we are!
@@ -3122,17 +3113,13 @@ unsafe fn is_whole_packet_present(f: &mut Vorbis, end_page: bool) -> bool
       }
       if *p.offset(4) != 0                             {return error(f, VorbisError::InvalidStream);}
       if first  { // the first segment must NOT have 'continued_packet', later ones MUST
-         if f.previous_length != 0 {
-            if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET) != 0  {
-                return error(f, VorbisError::InvalidStream);
-            }
+         if f.previous_length != 0 && ( (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET) != 0 ){
+            return error(f, VorbisError::InvalidStream);
          }
          // if no previous length, we're resynching, so we can come in on a continued-packet,
          // which we'll just drop
-      } else {
-        if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET) == 0 {
-             return error(f, VorbisError::InvalidStream);
-        }
+      } else if (*p.offset(5) & PAGEFLAG_CONTINUED_PACKET) == 0 {
+         return error(f, VorbisError::InvalidStream);
       }
       let n = *p.offset(26) as i32; // segment counts
       let q = p.offset(27);  // q points to segment table
@@ -3540,7 +3527,7 @@ unsafe fn vorbis_search_for_page_pushdata(f: &mut Vorbis, data: &[u8]) -> i32
             f.current_loc = f.scan[i].sample_loc; // set the current sample location
                                     // to the amount we'd have decoded had we decoded this page
             f.current_loc_valid = true; 
-            f.current_loc != !0;
+            f.current_loc = !0;
             return data_len as i32;
          }
          // delete entry
@@ -3663,14 +3650,16 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
                let cdim = g.class_dimensions[pclass];
                let cbits = g.class_subclasses[pclass];
                let csub = (1 << cbits)-1;
-               let mut cval = 0;
-               if cbits != 0 {
+               let mut cval = if cbits != 0 {
                   let c: &mut Codebook = FORCE_BORROW_MUT!( &mut f.codebooks[ g.class_masterbooks[pclass] as usize]);
-                  cval = decode_raw(f, c);
-               }
+                  decode_raw(f, c)
+               }else{
+                   0
+               };
+
                for _ in 0 .. cdim {
                   let book = g.subclass_books[pclass][ (cval & csub) as usize];
-                  cval = cval >> cbits;
+                  cval >>= cbits;
                   if book >= 0 {
                      let c: &mut Codebook = FORCE_BORROW_MUT!( &mut f.codebooks[book as usize] );
                      let temp : i32 = decode_raw(f, c);
@@ -3678,7 +3667,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
                   } else {
                      final_y[offset] = 0;
                   }
-                    offset += 1;
+                  offset += 1;
                }
             }
 
@@ -3704,12 +3693,12 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
                let val = final_y[j];
                let highroom = range - pred;
                let lowroom = pred;
-               let room;
-               if highroom < lowroom {
-                  room = highroom * 2;
-               }else{
-                  room = lowroom * 2;
-               }
+               let room = if highroom < lowroom {
+                  highroom * 2
+               } else {
+                  lowroom * 2
+               };
+
                if val != 0 {
                   step2_flag[low] = 1;
                   step2_flag[high] = 1;
@@ -3721,12 +3710,10 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
                      } else {
                         final_y[j] = (pred as i16 - val + highroom as i16 - 1) as i16;
                      }
+                  } else if (val & 1) != 0 {
+                    final_y[j] = pred as i16 - ((val+1)>>1);
                   } else {
-                     if (val & 1) != 0 {
-                        final_y[j] = pred as i16 - ((val+1)>>1);
-                     } else {
-                        final_y[j] = pred as i16+ (val>>1);
-                     }
+                    final_y[j] = pred as i16+ (val>>1);
                   }
                } else {
                   step2_flag[j] = 0;
@@ -3807,14 +3794,12 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
                a2 = *m.offset(j);
                m2 = *m.offset(j) + *a.offset(j);
             }
-         } else {
-            if *a.offset(j) > 0.0 {
+         } else if *a.offset(j) > 0.0 {
                m2 = *m.offset(j);
                a2 = *m.offset(j) + *a.offset(j);
-            } else {
-               a2 = *m.offset(j);
-               m2 = *m.offset(j) - *a.offset(j);
-            }
+         } else {
+            a2 = *m.offset(j);
+            m2 = *m.offset(j) - *a.offset(j);
          }
          *m.offset(j) = m2;
          *a.offset(j) = a2;
@@ -5040,11 +5025,9 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
          // precompute the neighbors
          for j in 2 .. g.values as usize {
-            let mut low = 0;
-            let mut hi = 0;
-            neighbors(&g.xlist, j, &mut low, &mut hi);
+            let (low, high) = neighbors(&g.xlist, j);
             g.neighbors[j][0] = low as u8;
-            g.neighbors[j][1] = hi as u8;
+            g.neighbors[j][1] = high as u8;
          }
 
          if g.values > longest_floorlist{
