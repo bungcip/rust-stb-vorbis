@@ -63,8 +63,6 @@ const PAGEFLAG_FIRST_PAGE       : u8 =   2;
 const PAGEFLAG_LAST_PAGE        : u8 =   4;
 
 
-
-
 static mut CRC_TABLE: [u32; 256] = [0; 256];
 
 
@@ -138,7 +136,7 @@ static INVERSE_DB_TABLE: [f32; 256] =
 ];
 
 const PLAYBACK_MONO  : i8 =   1;
-const PLAYBACK_LEFT  : i8=   2;
+const PLAYBACK_LEFT  : i8 =   2;
 const PLAYBACK_RIGHT : i8 =   4;
 
 const CP_L : i8 = (PLAYBACK_LEFT  | PLAYBACK_MONO);
@@ -790,7 +788,7 @@ fn compute_codewords(c: &mut Codebook, len: &mut [u8], values: &mut [u32]) -> bo
    // and I use 0 in available[] to mean 'empty')
    for i in k + 1 .. n {
       let res : u32;
-      let mut z = len[i as usize];
+      let mut z = len[i];
       if z == NO_CODE {
           continue;
       }
@@ -809,15 +807,15 @@ fn compute_codewords(c: &mut Codebook, len: &mut [u8], values: &mut [u32]) -> bo
       res = available[z as usize];
       assert!(z < 32); // NOTE(z is u8 so negative is impossible)
       available[z as usize] = 0;
-      add_entry(c, bit_reverse(res), i, m, len[i as usize], values);
+      add_entry(c, bit_reverse(res), i, m, len[i], values);
       m += 1;
       
       // propogate availability up the tree
-      if z != len[i as usize] {
+      if z != len[i] {
         //  assert!(len[i as usize] >= 0 && len[i as usize] < 32);
-         assert!(len[i as usize] < 32); // NOTE (len[x] is already unsigned)
+         assert!(len[i] < 32); // NOTE (len[x] is already unsigned)
          
-         let mut y = len[i as usize];
+         let mut y = len[i];
          while y > z {
             assert!(available[y as usize] == 0);
             available[y as usize] = res + (1 << (32-y));
@@ -1433,7 +1431,8 @@ fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -> i32
    }
 
    // truncate a short frame
-   let right = if len < right { len } else { right };
+   let right = std::cmp::min(len, right);
+//    let right = if len < right { len } else { right };
 
    f.samples_output += (right-left) as u32;
 
@@ -2296,11 +2295,6 @@ fn compute_stereo_samples(output: &mut [i16], data: &AudioBufferSlice<f32>, len:
       
       
       for i in 0 .. n << 1 {
-        //  let mut v : i32 = unsafe { FAST_SCALED_FLOAT_TO_INT!(buffer[i],15) };
-        //  if (v + 32768) as u32 > 65535 {
-        //     v = if v < 0 {-32768} else {32767};
-        //  }
-         
          output[ (o2+i) as usize ] = convert_to_i16(buffer[i]);
       }
        
@@ -2764,8 +2758,8 @@ unsafe fn go_to_page_before(f: &mut Vorbis, limit_offset: u32) -> bool
 
    set_file_offset(f, previous_safe);
 
-   let mut end: u32 = 0;
-   while vorbis_find_page(f, Some(&mut end), None) != 0 {
+//    let mut end: u32 = 0;
+   while let Some((end, _)) = vorbis_find_page(f) {
       if end >= limit_offset && stb_vorbis_get_file_offset(f) < limit_offset {
          return true;          
       }
@@ -2775,20 +2769,24 @@ unsafe fn go_to_page_before(f: &mut Vorbis, limit_offset: u32) -> bool
    return false;
 }
 
-// NOTE(bungcip): change signature to Result
-fn vorbis_find_page(f: &mut Vorbis, end: Option<&mut u32>, last: Option<&mut u32>) -> u32
+/// return end & last if page exist
+fn vorbis_find_page(f: &mut Vorbis) -> Option<(u32, u32)>
 {
    loop {
-      if f.eof == true {return 0;}
+      if f.eof == true {
+          return None;
+      }
+
       let n : i32 = get8(f) as i32;
-      if n == 0x4f { // page header candidate
+      if n != 0x4f { // page header candidate
+        continue;
+      }
+
          let retry_loc = stb_vorbis_get_file_offset(f);
          
-         'invalid : loop {
-        //  int i;
          // check if we're off the end of a file_section stream
-         if retry_loc - 25 > f.stream_len{
-            return 0;
+         if retry_loc - 25 > f.stream_len {
+            return None;
          }
          // check the rest of the header
          let mut i = 1;
@@ -2796,9 +2794,11 @@ fn vorbis_find_page(f: &mut Vorbis, end: Option<&mut u32>, last: Option<&mut u32
             if get8(f) != OGG_PAGE_HEADER[i]{
                break;
             }
-             i += 1;
+            i += 1;
          }
-         if f.eof == true {return 0;}
+         if f.eof == true {          
+            return None;
+         }
          if i == 4 {
             let mut header: [u8; 27] = [0; 27];
             let mut i : usize = 0;
@@ -2811,11 +2811,14 @@ fn vorbis_find_page(f: &mut Vorbis, end: Option<&mut u32>, last: Option<&mut u32
                i += 1;
             }
             
-            if f.eof == true {return 0;}
+            if f.eof == true {          
+                return None;
+            }
             
             if header[4] != 0 {
-                // goto invalid;
-                break 'invalid;
+                // not a valid page, so rewind and look for next one
+                set_file_offset(f, retry_loc);
+                continue;
             }
             let goal : u32 = header[22] as u32 + 
                 ((header[23] as u32) << 8) + 
@@ -2825,22 +2828,33 @@ fn vorbis_find_page(f: &mut Vorbis, end: Option<&mut u32>, last: Option<&mut u32
             i = 22;
             while i < 26 {
                header[i] = 0;
-                i += 1;
+               i += 1;
             }
-            let mut crc = 0;
-            for i in 0usize .. 27 {
-               crc = unsafe { crc32_update(crc, header[i]) };
-            }
-            let mut len = 0;
-            for _ in 0 .. header[26] {
-               let s = get8(f) as i32;
-               crc = unsafe { crc32_update(crc, s as u8) };
-               len += s;
-            }
-            if len != 0 && f.eof == true {return 0;}
-            for _ in 0 .. len {
-               crc = unsafe { crc32_update(crc, get8(f)) };
-            }
+
+
+            let crc = {
+                let mut crc = 0;
+
+                for &item in header.iter().take(27) {
+                    crc = unsafe { crc32_update(crc, item) };
+                }
+
+                let mut len = 0;
+                for _ in 0 .. header[26] {
+                    let s = get8(f) as i32;
+                    crc = unsafe { crc32_update(crc, s as u8) };
+                    len += s;
+                }
+                if len != 0 && f.eof == true {
+                    return None;
+                }
+                for _ in 0 .. len {
+                    crc = unsafe { crc32_update(crc, get8(f)) };
+                }
+
+                crc
+            };
+
             // finished parsing probable page
             if crc == goal as u32 {
                // we could now check that it's either got the last
@@ -2851,27 +2865,17 @@ fn vorbis_find_page(f: &mut Vorbis, end: Option<&mut u32>, last: Option<&mut u32
                // might decrease the chance of an invalid decode by
                // another 2^32, not worth it since it would hose those
                // invalid-but-useful files?
-               if let Some(end) = end {
-                  *end = stb_vorbis_get_file_offset(f);
-               }
-               if let Some(last) = last {
-                  if (header[5] & 0x04) != 0 {
-                     *last = 1;
-                  }else{
-                     *last = 0;
-                  }
-               }
+
+               let end : u32 = stb_vorbis_get_file_offset(f);
+               let last : u32 = if (header[5] & 0x04) != 0 {
+                  1
+               } else {
+                  0
+               };
                set_file_offset(f, retry_loc-1);
-               return 1;
+               return Some((end, last));
             }
          }
-         
-         break;
-         }// loop 
-        // invalid:
-         // not a valid page, so rewind and look for next one
-         set_file_offset(f, retry_loc);
-      }
    }
 }
 
@@ -3163,12 +3167,11 @@ pub fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
     
     let restore_offset : u32;
     let previous_safe :u32;
-    let mut end: u32 = 0;
+    let mut end: u32;
     let mut last_page_loc :u32;
 
    if f.push_mode { return error(f, InvalidApiMixing) as u32; }
    if f.total_samples == 0 {
-      let mut last : u32 = 0;
       let mut lo : u32;
       let hi : u32;
       let mut header: [u8; 6] = [0; 6];
@@ -3189,13 +3192,20 @@ pub fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
       // previous_safe is now our candidate 'earliest known place that seeking
       // to will lead to the final page'
 
-      if vorbis_find_page(f, Some(&mut end), Some(&mut last)) == 0 {
-         // if we can't find a page, we're hosed!
-         f.error = CantFindLastPage;
-         f.total_samples = 0xffffffff;
-        //  goto done;
-        break 'done;
-      }
+      let mut last : u32;
+      match vorbis_find_page(f) {
+          Some((end_, last_)) => {
+            end = end_;
+            last = last_;
+          },
+          None => {
+            // if we can't find a page, we're hosed!
+            f.error = CantFindLastPage;
+            f.total_samples = 0xffffffff;
+            //  goto done;
+            break 'done;
+          }
+      };
 
       // check if there are more pages
       last_page_loc = stb_vorbis_get_file_offset(f);
@@ -3205,11 +3215,17 @@ pub fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
       // explicitly checking the length of the section
       while last == 0 {
          set_file_offset(f, end);
-         if vorbis_find_page(f, Some(&mut end), Some(&mut last)) == 0 {
-            // the last page we found didn't have the 'last page' flag
-            // set. whoops!
-            break;
-         }
+         match vorbis_find_page(f){
+             Some((end_, last_)) => {
+                 end = end_;
+                 last = last_;
+             },
+             None => {
+                // the last page we found didn't have the 'last page' flag
+                // set. whoops!
+                break;
+             }
+         };
          // NOTE(bungcip): not used?
         //  previous_safe = last_page_loc+1;
 
@@ -3336,7 +3352,7 @@ fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
             set_file_offset(f, left.page_end + (delta / 2) - 32768);
          }
 
-         if vorbis_find_page(f, None, None) == 0 {
+         if vorbis_find_page(f) == None {
             break 'error;
         }
       }
@@ -3778,9 +3794,9 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
    let mut i : i32 = map.coupling_steps as i32 - 1; 
    while i >= 0 {
       let n2 = n >> 1;
-      let ref c = map.chan[i as usize];
-      let mut m : &mut Vec<f32> = FORCE_BORROW_MUT!( &mut f.channel_buffers[c.magnitude as usize] );
-      let mut a : &mut Vec<f32> = FORCE_BORROW_MUT!( &mut f.channel_buffers[c.angle  as usize] );
+      let MappingChannel{magnitude, angle, ..} = map.chan[i as usize];
+      let mut m : &mut Vec<f32> = FORCE_BORROW_MUT!( &mut f.channel_buffers[magnitude as usize] );
+      let mut a : &mut Vec<f32> = FORCE_BORROW_MUT!( &mut f.channel_buffers[angle  as usize] );
       for j in 0 .. n2 as usize {
          let a2 : f32;
          let m2 : f32;
