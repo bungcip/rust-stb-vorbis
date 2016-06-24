@@ -12,6 +12,8 @@
  * 2016
  */
 
+extern crate smallvec;
+
 use std::mem;
 use std::io::prelude::*;
 use std::io::BufReader;
@@ -19,6 +21,7 @@ use std::io::SeekFrom;
 use std::fs::File;
 use std::path::Path;
 
+use smallvec::SmallVec;
 
 mod helper;
 pub use helper::*;
@@ -449,8 +452,7 @@ pub struct Vorbis
    residue_config: Vec<Residue>,
    mapping_count: i32,
    mapping: Vec<Mapping>,
-   mode_count: i32,
-   mode_config: [Mode; 64],  // varies
+   mode_config: SmallVec<[Mode; 64]>,  // varies
 
    total_samples: u32,
 
@@ -530,8 +532,7 @@ impl Vorbis {
             residue_config: Vec::new(),
             mapping_count: 0,
             mapping: Vec::new(),
-            mode_count: 0,
-            mode_config: [Mode::default(); 64],  // varies
+            mode_config: SmallVec::new(), // varies
             total_samples: 0,
             channel_buffers: Vec::with_capacity(STB_VORBIS_MAX_CHANNELS as usize),
             outputs        : AudioBufferSlice::new(STB_VORBIS_MAX_CHANNELS as usize),
@@ -1323,10 +1324,12 @@ fn vorbis_decode_initial(f: &mut Vorbis,
        break;
    }
 
-   let x = ilog(f.mode_count-1);
+
+   let mode_count = f.mode_config.len() as i32;
+   let x = ilog(mode_count-1);
    let i : i32 = get_bits(f, x) as i32;
    if i == EOP {return false;}
-   if i >= f.mode_count {return false;}
+   if i >= mode_count {return false;}
    
    *mode = i;
 
@@ -1847,7 +1850,7 @@ fn do_floor(f: &mut Vorbis, map: &Mapping, i: usize, n: usize , target: &mut [f3
                     let hy : i32 = final_y[j] as i32 * g.floor1_multiplier as i32;
                     let hx : i32 = g.xlist[j] as i32;
                     if lx != hx {
-                    draw_line(target, lx,ly, hx, hy, n2 as i32);
+                        draw_line(target, lx,ly, hx, hy, n2 as i32);
                     }
                     CHECK!(f);
                     lx = hx;
@@ -1890,7 +1893,6 @@ fn draw_line(output: &mut [f32], x0: i32, y0: i32, mut x1: i32, y1: i32, n: i32)
 
    ady -= i32::abs(base) * adx;
    
-//    if x1 > n {x1 = n;}
    x1 = std::cmp::min(x1, n);
 
    if x < x1 {
@@ -1914,6 +1916,7 @@ fn draw_line(output: &mut [f32], x0: i32, y0: i32, mut x1: i32, y1: i32, n: i32)
 }
 
 
+// NOTE(bungcip): reduce parameter count
 fn residue_decode(f: &mut Vorbis, book: &Codebook, target: &mut [f32], mut offset: i32, n: i32, rtype: i32) -> bool
 {
    if rtype == 0 {
@@ -2678,7 +2681,7 @@ fn peek_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mut 
    }
 
    // either 1 or 2 bytes were read, figure out which so we can rewind
-   let mut bits_read = 1 + ilog(f.mode_count-1);
+   let mut bits_read = 1 + ilog(f.mode_config.len() as i32 - 1);
    if f.mode_config[*mode as usize].blockflag != 0 {
       bits_read += 2;
    }
@@ -2747,7 +2750,6 @@ unsafe fn go_to_page_before(f: &mut Vorbis, limit_offset: u32) -> bool
 
    set_file_offset(f, previous_safe);
 
-//    let mut end: u32 = 0;
    while let Some((end, _)) = vorbis_find_page(f) {
       if end >= limit_offset && stb_vorbis_get_file_offset(f) < limit_offset {
          return true;          
@@ -4975,24 +4977,22 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
                 g.partitions = get_bits(f, 5) as u8;
                 for j in 0 .. g.partitions as usize {
                     g.partition_class_list[j] = get_bits(f, 4) as u8;
-                    if g.partition_class_list[j] as i32 > max_class {
-                    max_class = g.partition_class_list[j] as i32;
-                    }
+                    max_class = std::cmp::max(max_class, g.partition_class_list[j] as i32);
                 }
                 for j in 0 .. (max_class + 1) as usize {
                     g.class_dimensions[j] = get_bits(f, 3) as u8 + 1;
                     g.class_subclasses[j] = get_bits(f, 2) as u8;
                     if g.class_subclasses[j] != 0 {
-                    g.class_masterbooks[j] = get_bits(f, 8) as u8;
-                    if g.class_masterbooks[j] >= f.codebook_count as u8 {
-                        return error(f, InvalidSetup);
-                    }
+                        g.class_masterbooks[j] = get_bits(f, 8) as u8;
+                        if g.class_masterbooks[j] >= f.codebook_count as u8 {
+                            return error(f, InvalidSetup);
+                        }
                     }
                     for k in 0 ..  (1 << g.class_subclasses[j]) as usize {
-                    g.subclass_books[j][k] = get_bits(f,8) as i16 -1;
-                    if g.subclass_books[j][k] >= f.codebook_count as i16 {
-                        return error(f, InvalidSetup);
-                    }
+                        g.subclass_books[j][k] = get_bits(f,8) as i16 -1;
+                        if g.subclass_books[j][k] >= f.codebook_count as i16 {
+                            return error(f, InvalidSetup);
+                        }
                     }
                 }
                 g.floor1_multiplier = (get_bits(f,2) +1) as u8;
@@ -5003,8 +5003,8 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
                 for j in 0 .. g.partitions as usize {
                     let c = g.partition_class_list[j] as usize;
                     for _ in 0 .. g.class_dimensions[c] {
-                    g.xlist[g.values as usize] = get_bits(f, g.rangebits as i32) as u16;
-                    g.values += 1;
+                        g.xlist[g.values as usize] = get_bits(f, g.rangebits as i32) as u16;
+                        g.values += 1;
                     }
                 }
 
@@ -5130,7 +5130,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
             if m.chan[k].angle     as i32 >= f.channels        {return error(f, InvalidSetup);}
             if m.chan[k].magnitude == m.chan[k].angle   {return error(f, InvalidSetup);}
          }
-      } else{
+      } else {
          m.coupling_steps = 0;
       }
 
@@ -5162,16 +5162,21 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
    }
 
    // Modes
-   f.mode_count = get_bits(f, 6) as i32 + 1;
-   for i in 0 .. f.mode_count as usize {
-      let m: &mut Mode = FORCE_BORROW_MUT!(&mut f.mode_config[i]);
+   let mode_count = get_bits(f, 6) as i32 + 1;
+   f.mode_config.reserve(mode_count as usize);
+   for _ in 0 .. mode_count as usize {
+      let mut m: Mode = Mode::default();
+      
       m.blockflag = get_bits(f,1) as u8;
       m.windowtype = get_bits(f,16) as u16;
       m.transformtype = get_bits(f,16) as u16;
       m.mapping = get_bits(f,8) as u8;
+
       if m.windowtype != 0                 {return error(f, InvalidSetup);}
       if m.transformtype != 0              {return error(f, InvalidSetup);}
       if m.mapping as i32 >= f.mapping_count     {return error(f, InvalidSetup);}
+
+      f.mode_config.push(m);
    }
 
    flush_packet(f);

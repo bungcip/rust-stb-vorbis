@@ -7,3 +7,5 @@ exclude = ["tests/*"]
 license = "MIT"
 keywords = ["audio", "ogg", "vorbis", "decoder"]
 
+[dependencies]
+smallvec = "0.1.8"
