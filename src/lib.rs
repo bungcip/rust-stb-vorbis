@@ -3934,9 +3934,6 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
       }
    }
    
-   // note(bungcip): simulate goto
-   'done: loop {
-
    if rtype == 2 && residue_buffers.channel_count() != 1 {
        let mut j = 0;
        while j < residue_buffers.channel_count() {
@@ -3947,8 +3944,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
        }
        
       if j == residue_buffers.channel_count() {
-        //  goto done;
-        break 'done;
+          return;
       }
 
       for pass in 0 .. 8 {
@@ -3963,8 +3959,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                   let c: &Codebook = FORCE_BORROW!(&f.codebooks[r.classbook as usize]);
                   let q = decode_raw(f,c);
                   if q == EOP {
-                    // goto done;
-                    break 'done;  
+                    return;
                   } 
                   
                   // NOTE(bungcip): remove .clone() !!!
@@ -3980,8 +3975,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                     let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
                      // saves 1%
                      if codebook_decode_deinterleave_repeat(f, book, residue_buffers, &mut c_inter, &mut p_inter, n, r.part_size as i32) == false {
-                        // goto done;
-                        break 'done;
+                         return;
                      }
                   } else {
                      z += r.part_size as i32;
@@ -4001,8 +3995,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize] );
                   let q = decode_raw(f,c);
                   if q == EOP{
-                    // goto done;
-                    break 'done; 
+                      return;
                   } 
                   // NOTE: remove .clone() !!!
                   part_classdata[0][class_set as usize] = r.classdata[q as usize].clone();
@@ -4015,8 +4008,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                   if b >= 0 {
                      let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
                      if codebook_decode_deinterleave_repeat(f, book, residue_buffers, &mut c_inter, &mut p_inter, n, r.part_size as i32) == false {
-                        // goto done;
-                        break 'done;
+                         return;
                      }
                   } else {
                      z += r.part_size as i32;
@@ -4036,8 +4028,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize] );
                   let q = decode_raw(f,c);
                   if q == EOP{
-                    // goto done;
-                    break 'done;  
+                      return;
                   } 
                   
                   // NOTE(bungcip): remove .clone() !!
@@ -4049,24 +4040,23 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                   let c : i32 = part_classdata[0][class_set as usize][i as usize] as i32;
                   let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
-                      let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
+                     let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
                      if codebook_decode_deinterleave_repeat(f, book, residue_buffers, &mut c_inter, &mut p_inter, n, r.part_size as i32) == false {
-                        // goto done;
-                        break 'done;
+                         return;
                      }
                   } else {
                      z += r.part_size as i32;
                      c_inter = z % ch;
                      p_inter = z / ch;
                   }
-                    i += 1; pcount += 1;
+                  i += 1; pcount += 1;
                }
                class_set += 1;
             }
          }
       }
-    //   goto done;
-    break 'done;
+
+      return;
    }
    CHECK!(f);
 
@@ -4080,8 +4070,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize]);
                   let temp = decode_raw(f,c);
                   if temp == EOP {
-                    //   goto done;
-                    break 'done;
+                      return;
                   }
                   
                   // NOTE(bungcip): remove .clone() !!!
@@ -4101,8 +4090,7 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                       let n : i32 = r.part_size as i32;
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
                       if residue_decode(f, book, &mut target, offset, n, rtype) == false {
-                        // goto done;
-                        break 'done;
+                          return;
                       }
                   }
 
@@ -4114,9 +4102,6 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
       }
    }
 
-    break;
-    } // loop done
-//   done:
    CHECK!(f);
 }
 
@@ -4169,21 +4154,20 @@ unsafe fn imdct_step3_iter0_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32 , m
       ee0 = ee0.offset(-8);
       ee2 = ee2.offset(-8);
 
-        i -= 1;
+      i -= 1;
    }
 }
 
 
 unsafe fn imdct_step3_inner_r_loop(lim: i32, e: *mut f32, d0: i32 , k_off: i32 , mut a: *mut f32, k1: i32)
 {
-   let mut i : i32;
    let mut k00_20 : f32; 
    let mut k01_21 : f32;
 
    let mut e0 = e.offset(d0 as isize);
    let mut e2 = e0.offset(k_off as isize);
 
-   i = lim >> 2;
+   let mut i = lim >> 2;
    while i > 0 {
       k00_20 = *e0.offset(-0) - *e2.offset(-0);
       k01_21 = *e0.offset(-1) - *e2.offset(-1);
@@ -4224,7 +4208,7 @@ unsafe fn imdct_step3_inner_r_loop(lim: i32, e: *mut f32, d0: i32 , k_off: i32 ,
 
       a = a.offset(k1 as isize);
     
-        i -= 1;
+      i -= 1;
    }
 }
 
