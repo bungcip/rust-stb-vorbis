@@ -326,19 +326,11 @@ impl Clone for Floor1 {
     }
 }
 
-// union Floor, still need repr(C) because we transmute it to either Floor0/Floor1
-#[repr(C)]
 #[derive(Copy, Clone)]
-pub struct Floor
+pub enum Floor
 {
-//    floor0: Floor0,
-   floor1: Floor1,
-}
-
-impl Default for Floor {
-    fn default() -> Self {
-        unsafe { mem::zeroed() }
-    }
+    Type0(Floor0),
+    Type1(Floor1),
 }
 
 #[derive(Clone)]
@@ -451,8 +443,6 @@ pub struct Vorbis
    blocksize_0: usize, blocksize_1: usize,
    codebook_count: i32,
    codebooks: Vec<Codebook>,
-   floor_count: i32,
-   floor_types: [u16; 64], // varies
    floor_config: Vec<Floor>,
    residue_count: i32,
    residue_types: [u16; 64], // varies
@@ -534,8 +524,6 @@ impl Vorbis {
             blocksize: [0; 2],
             blocksize_0: 0, blocksize_1: 0,
             codebook_count: 0,
-            floor_count: 0,
-            floor_types: [0; 64], // varies
             floor_config: Vec::new(),
             residue_count: 0,
             residue_types: [0; 64], // varies
@@ -1847,36 +1835,37 @@ fn do_floor(f: &mut Vorbis, map: &Mapping, i: usize, n: usize , target: &mut [f3
    let s = s.mux as usize;
    let floor = map.submap_floor[s] as usize;
    
-   if f.floor_types[floor] == 0 {
-      return error(f, VorbisError::InvalidStream);
-   } else {
-      let g : &Floor1 = unsafe { FORCE_BORROW!( &f.floor_config[floor].floor1 ) };
-      let mut lx = 0;
-      let mut ly = final_y[0] as i32 * g.floor1_multiplier as i32;
-      for q in 1 .. g.values as usize {
-         let j = g.sorted_order[q] as usize;
-         if final_y[j] >= 0
-         {
-            let hy : i32 = final_y[j] as i32 * g.floor1_multiplier as i32;
-            let hx : i32 = g.xlist[j] as i32;
-            if lx != hx {
-               draw_line(target, lx,ly, hx, hy, n2 as i32);
+   match f.floor_config[floor] {
+       Floor::Type0(_) => return error(f, VorbisError::InvalidStream),
+       Floor::Type1(g) => {
+            let mut lx = 0;
+            let mut ly = final_y[0] as i32 * g.floor1_multiplier as i32;
+            for q in 1 .. g.values as usize {
+                let j = g.sorted_order[q] as usize;
+                if final_y[j] >= 0
+                {
+                    let hy : i32 = final_y[j] as i32 * g.floor1_multiplier as i32;
+                    let hx : i32 = g.xlist[j] as i32;
+                    if lx != hx {
+                    draw_line(target, lx,ly, hx, hy, n2 as i32);
+                    }
+                    CHECK!(f);
+                    lx = hx;
+                    ly = hy;
+                }
             }
-            CHECK!(f);
-            lx = hx;
-            ly = hy;
-         }
-      }
-      
-      let lx = lx as usize;
-      if lx < n2 {
-         // optimization of: draw_line(target, lx,ly, n,ly, n2);
-         for j in lx .. n2 {
-            LINE_OP!(target[j], INVERSE_DB_TABLE[ly as usize]);
-         }
-         CHECK!(f);
-      }
+            
+            let lx = lx as usize;
+            if lx < n2 {
+                // optimization of: draw_line(target, lx,ly, n,ly, n2);
+                for j in lx .. n2 {
+                    LINE_OP!(target[j], INVERSE_DB_TABLE[ly as usize]);
+                }
+                CHECK!(f);
+            }
+       }
    }
+
    return true;
 }
 
@@ -3650,11 +3639,15 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
       let s: i32 = map.chan[i].mux as i32;
       zero_channel[i] = false;
       let floor : i32 = map.submap_floor[s as usize] as i32;
-      if f.floor_types[floor as usize] == 0 {
-         return error(f, InvalidStream);
-      } else {
-          let g : &Floor1 = FORCE_BORROW!( &f.floor_config[floor as usize].floor1);
-         if get_bits(f, 1) != 0 {
+
+      match f.floor_config[floor as usize] {
+          Floor::Type0(_) => return error(f, InvalidStream),
+          Floor::Type1(g) => {
+            if get_bits(f, 1) == 0 {
+                zero_channel[i as usize] = true;
+                continue;
+            }
+
             static RANGE_LIST: [i32; 4] = [ 256, 128, 86, 64 ];
             let range = RANGE_LIST[ (g.floor1_multiplier-1) as usize];
             let mut offset = 2;
@@ -3662,29 +3655,29 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
             final_y[0] = get_bits(f, ilog(range)-1) as i16;
             final_y[1] = get_bits(f, ilog(range)-1) as i16;
             for j in 0 .. g.partitions as usize {
-               let pclass = g.partition_class_list[j] as usize;
-               let cdim = g.class_dimensions[pclass];
-               let cbits = g.class_subclasses[pclass];
-               let csub = (1 << cbits)-1;
-               let mut cval = if cbits != 0 {
-                  let c: &mut Codebook = FORCE_BORROW_MUT!( &mut f.codebooks[ g.class_masterbooks[pclass] as usize]);
-                  decode_raw(f, c)
-               }else{
-                   0
-               };
+                let pclass = g.partition_class_list[j] as usize;
+                let cdim = g.class_dimensions[pclass];
+                let cbits = g.class_subclasses[pclass];
+                let csub = (1 << cbits)-1;
+                let mut cval = if cbits != 0 {
+                    let c: &mut Codebook = FORCE_BORROW_MUT!( &mut f.codebooks[ g.class_masterbooks[pclass] as usize]);
+                    decode_raw(f, c)
+                }else{
+                    0
+                };
 
-               for _ in 0 .. cdim {
-                  let book = g.subclass_books[pclass][ (cval & csub) as usize];
-                  cval >>= cbits;
-                  if book >= 0 {
-                     let c: &mut Codebook = FORCE_BORROW_MUT!( &mut f.codebooks[book as usize] );
-                     let temp : i32 = decode_raw(f, c);
-                     final_y[offset] = temp as i16;
-                  } else {
-                     final_y[offset] = 0;
-                  }
-                  offset += 1;
-               }
+                for _ in 0 .. cdim {
+                    let book = g.subclass_books[pclass][ (cval & csub) as usize];
+                    cval >>= cbits;
+                    if book >= 0 {
+                        let c: &mut Codebook = FORCE_BORROW_MUT!( &mut f.codebooks[book as usize] );
+                        let temp : i32 = decode_raw(f, c);
+                        final_y[offset] = temp as i16;
+                    } else {
+                        final_y[offset] = 0;
+                    }
+                    offset += 1;
+                }
             }
 
             if f.valid_bits == INVALID_BITS {
@@ -3697,59 +3690,53 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
             step2_flag[0] = 1; 
             step2_flag[1] = 1;
             for j in 2 .. g.values as usize {
-               let low = g.neighbors[j][0] as usize;
-               let high = g.neighbors[j][1] as usize;
-               let pred = predict_point(
-                   g.xlist[j] as i32, 
-                   g.xlist[low] as i32,
-                   g.xlist[high] as i32, 
-                   final_y[low] as i32, 
-                   final_y[high] as i32
-               );
-               let val = final_y[j];
-               let highroom = range - pred;
-               let lowroom = pred;
-               let room = if highroom < lowroom {
-                  highroom * 2
-               } else {
-                  lowroom * 2
-               };
+                let low = g.neighbors[j][0] as usize;
+                let high = g.neighbors[j][1] as usize;
+                let pred = predict_point(
+                    g.xlist[j] as i32, 
+                    g.xlist[low] as i32,
+                    g.xlist[high] as i32, 
+                    final_y[low] as i32, 
+                    final_y[high] as i32
+                );
+                let val = final_y[j];
+                let highroom = range - pred;
+                let lowroom = pred;
+                let room = if highroom < lowroom {
+                    highroom * 2
+                } else {
+                    lowroom * 2
+                };
 
-               if val != 0 {
-                  step2_flag[low] = 1;
-                  step2_flag[high] = 1;
-                  step2_flag[j] = 1;
-                  
-                  if val >= room as i16 {
-                     if highroom > lowroom {
-                        final_y[j] = (val - lowroom as i16 + pred as i16) as i16;
-                     } else {
-                        final_y[j] = (pred as i16 - val + highroom as i16 - 1) as i16;
-                     }
-                  } else if (val & 1) != 0 {
-                    final_y[j] = pred as i16 - ((val+1)>>1);
-                  } else {
-                    final_y[j] = pred as i16+ (val>>1);
-                  }
-               } else {
-                  step2_flag[j] = 0;
-                  final_y[j] = pred as i16;
-               }
+                if val != 0 {
+                    step2_flag[low] = 1;
+                    step2_flag[high] = 1;
+                    step2_flag[j] = 1;
+                    
+                    if val >= room as i16 {
+                        if highroom > lowroom {
+                            final_y[j] = (val - lowroom as i16 + pred as i16) as i16;
+                        } else {
+                            final_y[j] = (pred as i16 - val + highroom as i16 - 1) as i16;
+                        }
+                    } else if (val & 1) != 0 {
+                        final_y[j] = pred as i16 - ((val+1)>>1);
+                    } else {
+                        final_y[j] = pred as i16+ (val>>1);
+                    }
+                } else {
+                    step2_flag[j] = 0;
+                    final_y[j] = pred as i16;
+                }
             }
 
             // defer final floor computation until _after_ residue
             for j in 0 .. g.values as usize {
-               if step2_flag[j] == 0 {
-                  final_y[j] = -1;
-               }
+                if step2_flag[j] == 0 {
+                    final_y[j] = -1;
+                }
             }
-         } else {
-//            error:
-            zero_channel[i as usize] = true;
-         }
-         // So we just defer everything else to later
-
-         // at this point we've decoded the floor into buffer
+          }
       }
    }
    // at this point we've decoded all floors
@@ -4963,91 +4950,95 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
    }
 
    // Floors
-   f.floor_count = (get_bits(f, 6)+1) as i32;
-   f.floor_config.resize(f.floor_count as usize, Floor::default());
-   // NOTE(bungcip): no need to resize? just push...
-   for i in 0 .. f.floor_count as usize {
-      f.floor_types[i] = get_bits(f, 16) as u16;
-      if f.floor_types[i] > 1 {
-          return error(f, InvalidSetup);
-      }
-      if f.floor_types[i] == 0 {
-      // NOTE(bungcip): using transmute because rust don't have support for union yet.. 
-      //                transmute floor0 to floor1
-         let g: &mut Floor0 = mem::transmute(&mut f.floor_config[i].floor1);
-         g.order = get_bits(f,8) as u8;
-         g.rate = get_bits(f,16) as u16;
-         g.bark_map_size = get_bits(f,16) as u16;
-         g.amplitude_bits = get_bits(f,6) as u8;
-         g.amplitude_offset = get_bits(f,8) as u8;
-         g.number_of_books = (get_bits(f,4) + 1) as u8;
-         for j in 0 .. g.number_of_books as usize {
-            g.book_list[j] = get_bits(f,8) as u8;
-         }
-         return error(f, FeatureNotSupported);
-      } else {
-         let mut g : &mut Floor1 = FORCE_BORROW_MUT!( &mut f.floor_config[i].floor1 );
-         let mut max_class : i32 = -1; 
-         g.partitions = get_bits(f, 5) as u8;
-         for j in 0 .. g.partitions as usize {
-            g.partition_class_list[j] = get_bits(f, 4) as u8;
-            if g.partition_class_list[j] as i32 > max_class {
-               max_class = g.partition_class_list[j] as i32;
-            }
-         }
-         for j in 0 .. (max_class + 1) as usize {
-            g.class_dimensions[j] = get_bits(f, 3) as u8 + 1;
-            g.class_subclasses[j] = get_bits(f, 2) as u8;
-            if g.class_subclasses[j] != 0 {
-               g.class_masterbooks[j] = get_bits(f, 8) as u8;
-               if g.class_masterbooks[j] >= f.codebook_count as u8 {
-                   return error(f, InvalidSetup);
-               }
-            }
-            for k in 0 ..  (1 << g.class_subclasses[j]) as usize {
-               g.subclass_books[j][k] = get_bits(f,8) as i16 -1;
-               if g.subclass_books[j][k] >= f.codebook_count as i16 {
-                   return error(f, InvalidSetup);
-               }
-            }
-         }
-         g.floor1_multiplier = (get_bits(f,2) +1) as u8;
-         g.rangebits = get_bits(f,4) as u8;
-         g.xlist[0] = 0;
-         g.xlist[1] = 1 << g.rangebits;
-         g.values = 2;
-         for j in 0 .. g.partitions as usize {
-            let c = g.partition_class_list[j] as usize;
-            for _ in 0 .. g.class_dimensions[c] {
-               g.xlist[g.values as usize] = get_bits(f, g.rangebits as i32) as u16;
-               g.values += 1;
-            }
-         }
+   let floor_count = get_bits(f, 6) + 1;
+   f.floor_config.reserve(floor_count as usize);
+   for _ in 0 .. floor_count {
+      match get_bits(f, 16){
+          0 => {
+                let mut g: Floor0 = mem::zeroed();
+                g.order = get_bits(f,8) as u8;
+                g.rate = get_bits(f,16) as u16;
+                g.bark_map_size = get_bits(f,16) as u16;
+                g.amplitude_bits = get_bits(f,6) as u8;
+                g.amplitude_offset = get_bits(f,8) as u8;
+                g.number_of_books = (get_bits(f,4) + 1) as u8;
+                for j in 0 .. g.number_of_books as usize {
+                    g.book_list[j] = get_bits(f,8) as u8;
+                }
 
-         // precompute the sorting
-         {
-            let mut points : Vec<Point> = Vec::with_capacity(31*8+2);
-            for (j, item) in g.xlist.iter().enumerate().take(g.values as usize) {
-                points.push(Point{ x: *item, y: j as u16});
-            }
-            
-            points.sort();
-            
-            for (j, item) in points.iter().enumerate() {
-                g.sorted_order[j] = item.y as u8;
-            }
-         }
+                f.floor_config.push(Floor::Type0(g));
+                return error(f, FeatureNotSupported);
+          },
+          1 => {
+                let mut g : Floor1 = mem::zeroed();
+                let mut max_class : i32 = -1; 
+                g.partitions = get_bits(f, 5) as u8;
+                for j in 0 .. g.partitions as usize {
+                    g.partition_class_list[j] = get_bits(f, 4) as u8;
+                    if g.partition_class_list[j] as i32 > max_class {
+                    max_class = g.partition_class_list[j] as i32;
+                    }
+                }
+                for j in 0 .. (max_class + 1) as usize {
+                    g.class_dimensions[j] = get_bits(f, 3) as u8 + 1;
+                    g.class_subclasses[j] = get_bits(f, 2) as u8;
+                    if g.class_subclasses[j] != 0 {
+                    g.class_masterbooks[j] = get_bits(f, 8) as u8;
+                    if g.class_masterbooks[j] >= f.codebook_count as u8 {
+                        return error(f, InvalidSetup);
+                    }
+                    }
+                    for k in 0 ..  (1 << g.class_subclasses[j]) as usize {
+                    g.subclass_books[j][k] = get_bits(f,8) as i16 -1;
+                    if g.subclass_books[j][k] >= f.codebook_count as i16 {
+                        return error(f, InvalidSetup);
+                    }
+                    }
+                }
+                g.floor1_multiplier = (get_bits(f,2) +1) as u8;
+                g.rangebits = get_bits(f,4) as u8;
+                g.xlist[0] = 0;
+                g.xlist[1] = 1 << g.rangebits;
+                g.values = 2;
+                for j in 0 .. g.partitions as usize {
+                    let c = g.partition_class_list[j] as usize;
+                    for _ in 0 .. g.class_dimensions[c] {
+                    g.xlist[g.values as usize] = get_bits(f, g.rangebits as i32) as u16;
+                    g.values += 1;
+                    }
+                }
 
-         // precompute the neighbors
-         for j in 2 .. g.values as usize {
-            let (low, high) = neighbors(&g.xlist, j);
-            g.neighbors[j][0] = low as u8;
-            g.neighbors[j][1] = high as u8;
-         }
+                // precompute the sorting
+                {
+                    let mut points : Vec<Point> = Vec::with_capacity(31*8+2);
+                    for (j, item) in g.xlist.iter().enumerate().take(g.values as usize) {
+                        points.push(Point{ x: *item, y: j as u16});
+                    }
+                    
+                    points.sort();
+                    
+                    for (j, item) in points.iter().enumerate() {
+                        g.sorted_order[j] = item.y as u8;
+                    }
+                }
 
-         if g.values > longest_floorlist{
-            longest_floorlist = g.values;
-         }
+                // precompute the neighbors
+                for j in 2 .. g.values as usize {
+                    let (low, high) = neighbors(&g.xlist, j);
+                    g.neighbors[j][0] = low as u8;
+                    g.neighbors[j][1] = high as u8;
+                }
+
+                if g.values > longest_floorlist{
+                    longest_floorlist = g.values;
+                }
+
+                // push to floor_config
+                f.floor_config.push(Floor::Type1(g));
+          },
+          _ => {
+              return error(f, InvalidSetup);
+          }
       }
    }
 
@@ -5165,7 +5156,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          get_bits(f,8); // discard
          m.submap_floor[j] = get_bits(f,8) as u8;
          m.submap_residue[j] = get_bits(f,8) as u8;
-         if m.submap_floor[j] as i32 >= f.floor_count      {return error(f, InvalidSetup);}
+         if m.submap_floor[j] as u32 >= floor_count      {return error(f, InvalidSetup);}
          if m.submap_residue[j] as i32 >= f.residue_count  {return error(f, InvalidSetup);}
       }
    }
