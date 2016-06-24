@@ -3779,32 +3779,31 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
    while i >= 0 {
       let n2 = n >> 1;
       let ref c = map.chan[i as usize];
-      let m : *mut f32 = f.channel_buffers[c.magnitude as usize].as_mut_ptr();
-      let a : *mut f32 = f.channel_buffers[c.angle  as usize].as_mut_ptr();
-      for j in 0 .. n2 {
+      let mut m : &mut Vec<f32> = FORCE_BORROW_MUT!( &mut f.channel_buffers[c.magnitude as usize] );
+      let mut a : &mut Vec<f32> = FORCE_BORROW_MUT!( &mut f.channel_buffers[c.angle  as usize] );
+      for j in 0 .. n2 as usize {
          let a2 : f32;
          let m2 : f32;
          
-         let j = j as isize;
-         if *m.offset(j) > 0.0 {
-            if *a.offset(j) > 0.0 {
-               m2 = *m.offset(j);
-               a2 = *m.offset(j) - *a.offset(j);
+         if m[j] > 0.0 {
+            if a[j] > 0.0 {
+               m2 = m[j];
+               a2 = m[j] - a[j];
             } else {
-               a2 = *m.offset(j);
-               m2 = *m.offset(j) + *a.offset(j);
+               a2 = m[j];
+               m2 = m[j] + a[j];
             }
-         } else if *a.offset(j) > 0.0 {
-               m2 = *m.offset(j);
-               a2 = *m.offset(j) + *a.offset(j);
+         } else if a[j] > 0.0 {
+            m2 = m[j];
+            a2 = m[j] + a[j];
          } else {
-            a2 = *m.offset(j);
-            m2 = *m.offset(j) - *a.offset(j);
+            a2 = m[j];
+            m2 = m[j] - a[j];
          }
-         *m.offset(j) = m2;
-         *a.offset(j) = a2;
+         m[j] = m2;
+         a[j] = a2;
       }
-    i -= 1;
+      i -= 1;
    }
    CHECK!(f);
 
