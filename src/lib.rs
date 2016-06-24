@@ -1197,33 +1197,40 @@ fn next_segment(f: &mut Vorbis) -> i32
    return len as i32;
 }
 
-fn vorbis_decode_packet(f: &mut Vorbis, len: &mut i32, p_left: &mut i32, p_right: &mut i32) -> bool
+fn vorbis_decode_packet(f: &mut Vorbis) -> Option<(i32, i32, i32)>
 {
     let mut mode_index = 0;
     let mut left_end = 0;
     let mut right_end = 0;
     
-    if vorbis_decode_initial(f, p_left, &mut left_end, p_right, &mut right_end, &mut mode_index) ==  false {
-        return false;
+    let mut len : i32 =  0;
+    let mut p_left : i32 = 0;
+    let mut p_right : i32 = 0;
+
+    // NOTE(bungcip): reduce argument count?
+    if vorbis_decode_initial(f, &mut p_left, &mut left_end, &mut p_right, &mut right_end, &mut mode_index) ==  false {
+        return None;
     }
     
     unsafe {
         let mode : &Mode = FORCE_BORROW!( &f.mode_config[mode_index as usize] );
-        return vorbis_decode_packet_rest(
-            f, len, mode, 
-            *p_left, left_end, *p_right, right_end, p_left
+        let result = vorbis_decode_packet_rest(
+            f, &mut len, mode, 
+            p_left, left_end, p_right, right_end, &mut p_left
         );
+
+        if result {
+            return Some((len, p_left, p_right));
+        }else{
+            return None;
+        }
     }
 }
 
 
 fn vorbis_pump_first_frame(f: &mut Vorbis)
 {
-    let mut len = 0;
-    let mut right = 0;
-    let mut left = 0;
-    
-    if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == true {
+    if let Some((len, left, right)) = vorbis_decode_packet(f) {
         vorbis_finish_frame(f, len, left, right);
     }
 }
@@ -1544,15 +1551,14 @@ pub fn stb_vorbis_get_frame_float(f: &mut Vorbis,
        return 0;
    } 
 
-    let mut len = 0;
-    let mut left = 0;
-    let mut right = 0;
-    
-   if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == false {
-      f.channel_buffer_start = 0;
-      f.channel_buffer_end = 0;
-      return 0;
-   }
+    let (len, left, right) = match vorbis_decode_packet(f) {
+        Some(result) => result,
+        None => {
+            f.channel_buffer_start = 0;
+            f.channel_buffer_end = 0;
+            return 0;
+        }
+    };
 
    let len = vorbis_finish_frame(f, len, left, right);
    for i in 0 .. f.channels as usize {
@@ -3015,39 +3021,39 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
       return 0;
    }
 
-   let mut len : i32 = 0;
-   let mut left: i32 = 0;
-   let mut right: i32 = 0;
-   if vorbis_decode_packet(f, &mut len, &mut left, &mut right) == false {
-      // save the actual error we encountered
-      let error = f.error;
-      if error == VorbisError::BadPacketType {
-         // flush and resynch
-         f.error = VorbisError::NoError;
-         while get8_packet(f) != EOP{
-            if f.eof == true {break;}
-         }
-         *samples = 0;
-         return (f.stream as usize - data.as_ptr() as usize) as i32;
-      }
-      if error == VorbisError::ContinuedPacketFlagInvalid && f.previous_length == 0 {
-            // we may be resynching, in which case it's ok to hit one
-            // of these; just discard the packet
+   let (len, left, right) = match vorbis_decode_packet(f) {
+      Some(result) => result,
+      None => {
+        // save the actual error we encountered
+        let error = f.error;
+        if error == VorbisError::BadPacketType {
+            // flush and resynch
             f.error = VorbisError::NoError;
             while get8_packet(f) != EOP{
                 if f.eof == true {break;}
             }
             *samples = 0;
             return (f.stream as usize - data.as_ptr() as usize) as i32;
+        }
+        if error == VorbisError::ContinuedPacketFlagInvalid && f.previous_length == 0 {
+                // we may be resynching, in which case it's ok to hit one
+                // of these; just discard the packet
+                f.error = VorbisError::NoError;
+                while get8_packet(f) != EOP{
+                    if f.eof == true {break;}
+                }
+                *samples = 0;
+                return (f.stream as usize - data.as_ptr() as usize) as i32;
+        }
+        // if we get an error while parsing, what to do?
+        // well, it DEFINITELY won't work to continue from where we are!
+        stb_vorbis_flush_pushdata(f);
+        // restore the error that actually made us bail
+        f.error = error;
+        *samples = 0;
+        return 1;
       }
-      // if we get an error while parsing, what to do?
-      // well, it DEFINITELY won't work to continue from where we are!
-      stb_vorbis_flush_pushdata(f);
-      // restore the error that actually made us bail
-      f.error = error;
-      *samples = 0;
-      return 1;
-   }
+   };
 
    // success!
    let len = vorbis_finish_frame(f, len, left, right);
@@ -4870,15 +4876,18 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          if c.lookup_type == 1 {
             let sparse = c.sparse;
             // pre-expand the lookup1-style multiplicands, to avoid a divide in the inner loop
-            if sparse {
-               if c.sorted_entries == 0 { 
-                //    goto skip;
-                break 'skip;
+            let multiplicands_count = if sparse {
+                if c.sorted_entries == 0 { 
+                    //    goto skip;
+                    break 'skip;
                 }
-               c.multiplicands.resize( (c.sorted_entries * c.dimensions) as usize, 0.0);
-            } else{
-               c.multiplicands.resize( (c.entries * c.dimensions) as usize, 0.0);
-            }
+                c.sorted_entries * c.dimensions
+            }else{
+                c.entries * c.dimensions
+            } as usize;
+
+            c.multiplicands.resize(multiplicands_count, 0.0);
+
             
             len = if sparse  { c.sorted_entries } else {c.entries};
             let mut last : f32 = 0.0;
@@ -4890,7 +4899,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
                 //   let mut val: f32 = *mults.offset(off as isize) as f32; // NOTE(bungcip) : maybe bugs?
                   let val = mults[off as usize] as f32 * c.delta_value + c.minimum_value + last;
                   c.multiplicands[ (j * c.dimensions + k) as usize] = val;
-                  if c.sequence_p !=0 {
+                  if c.sequence_p != 0 {
                      last = val;
                   }
                   if k + 1 < c.dimensions {
@@ -4903,9 +4912,8 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
                }
             }
             c.lookup_type = 2;
-         }
-         else
-         {
+
+         } else {
             let mut last = 0.0;
             CHECK!(f);
             c.multiplicands.resize(c.lookup_values as usize, 0.0);
