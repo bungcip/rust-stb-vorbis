@@ -185,6 +185,15 @@ macro_rules! FAST_SCALED_FLOAT_TO_INT {
     }}
 }
 
+fn convert_to_i16(value: f32) -> i16 {
+    let mut v : i32 = unsafe { FAST_SCALED_FLOAT_TO_INT!(value, 15) };
+    if (v + 32768) as u32 > 65535{
+        v = if v < 0 { -32768 } else { 32767 };
+    }
+
+    v as i16
+}
+
 macro_rules! CHECK {
     ($f: expr) => {
         // assert!( $f.channel_buffers[1].is_null() == false );
@@ -1639,13 +1648,7 @@ fn convert_channels_short_interleaved(buf_c: u32, buffer: &mut [i16], data: &Aud
        for j in 0 .. len as usize {
            let mut i = 0;
            while i < limit {
-               let f : f32 = data[i][ j as usize ];
-               let mut v : i32 = unsafe { FAST_SCALED_FLOAT_TO_INT!(f, 15) };
-               if ( (v + 32768) as u32) > 65535 {
-                   v = if v < 0 {  -32768 } else { 32767 };
-               }
-               
-               buffer[buffer_index] = v as i16;
+               buffer[buffer_index] = convert_to_i16(data[i][ j as usize ]);
                buffer_index += 1;
                
                i += 1;
@@ -1664,11 +1667,7 @@ fn convert_channels_short_interleaved(buf_c: u32, buffer: &mut [i16], data: &Aud
 fn copy_samples(dest: &mut [i16], src: &[f32], len: usize)
 {
    for i in 0 .. len  {
-      let mut v : i32 = unsafe { FAST_SCALED_FLOAT_TO_INT!(src[i], 15) };
-      if ((v + 32768) as u32) > 65535 {
-         v = if v < 0 { -32768 } else { 32767 };
-      }
-      dest[i] = v as i16;
+      dest[i] = convert_to_i16(src[i]);
    }
 }
 
@@ -2133,14 +2132,13 @@ fn codebook_decode_scalar_raw(f: &mut Vorbis, c: &Codebook) -> i32
 fn codebook_decode_step(f: &mut Vorbis, c: &Codebook, output: &mut [f32], len: i32 , step: i32 ) -> bool
 {
    let mut z = codebook_decode_start(f,c);
-   let mut last : f32 = 0.0;
    if z < 0 {
        return false;
    }
    
-   let len = std::cmp::min(len, c.dimensions); 
-
    z *= c.dimensions;
+   let mut last : f32 = 0.0;
+   let len = std::cmp::min(len, c.dimensions); 
    for i in 0 .. len  {
       let val : f32 = c.multiplicands[(z+i) as usize] + last;
       output[ (i*step) as usize] += val;
@@ -2261,12 +2259,7 @@ fn compute_samples(mask: i32, output: &mut [i16], data: &AudioBufferSlice<f32>, 
          }
       }
       for i in 0 .. n  {
-         let mut v : i32 = unsafe { FAST_SCALED_FLOAT_TO_INT!(buffer[i], 15) };
-         if (v + 32768) as u32 > 65535{
-            v = if v < 0 { -32768 } else { 32767 };
-         }
-
-         output[ (o+i) as usize] = v as i16;
+         output[ (o+i) as usize] = convert_to_i16(buffer[i]);
       }
        
        o += BUFFER_SIZE;
