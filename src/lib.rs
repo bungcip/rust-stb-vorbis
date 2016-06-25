@@ -444,7 +444,6 @@ pub struct Vorbis
   // header info
    blocksize: [usize; 2],
    blocksize_0: usize, blocksize_1: usize,
-   codebook_count: i32,
    codebooks: Vec<Codebook>,
    floor_config: Vec<Floor>,
    residue_count: i32,
@@ -525,7 +524,6 @@ impl Vorbis {
             p_first: ProbedPage::default(), p_last: ProbedPage::default(),
             blocksize: [0; 2],
             blocksize_0: 0, blocksize_1: 0,
-            codebook_count: 0,
             floor_config: Vec::new(),
             residue_count: 0,
             residue_types: [0; 64], // varies
@@ -874,8 +872,8 @@ fn compute_bitreverse(n: i32, rev: &mut [u16])
    let ld = ilog(n) - 1; // ilog is off-by-one from normal definitions
    let n8 = n >> 3;
    
-   for i in 0 .. n8 {
-       rev[i as usize] = ((bit_reverse(i as u32) >> (32-ld+3)) << 2) as u16;
+   for (i, item) in rev.iter_mut().enumerate().take(n8 as usize) {
+       *item = ((bit_reverse(i as u32) >> (32-ld+3)) << 2) as u16;
    }
 }
 
@@ -1216,7 +1214,7 @@ fn vorbis_decode_packet(f: &mut Vorbis) -> Option<(i32, i32, i32)>
         let mode : &Mode = FORCE_BORROW!( &f.mode_config[mode_index as usize] );
         let result = vorbis_decode_packet_rest(
             f, &mut len, mode, 
-            p_left, left_end, p_right, right_end, &mut p_left
+            p_left, p_right, right_end, &mut p_left
         );
 
         if result {
@@ -2192,8 +2190,8 @@ unsafe fn codebook_decode_deinterleave_repeat(f: &mut Vorbis, c: &Codebook, outp
             }
          } else {
             for i in 0 .. effective {
-               let val : f32 = c.multiplicands[(z+i) as usize] + last;
                if outputs[c_inter as usize].len() > 0 {
+                   let val = c.multiplicands[(z+i) as usize] + last;
                    outputs[c_inter as usize][p_inter as usize] += val;
                }
                c_inter += 1;
@@ -2234,7 +2232,6 @@ fn compute_samples(mask: i32, output: &mut [i16], data: &AudioBufferSlice<f32>, 
    let mut buffer: [f32; BUFFER_SIZE];
    let mut n = BUFFER_SIZE;
    let mut o : usize = 0;
-//    let len = len as usize;
    
    while o < len {
       buffer = [0.0; BUFFER_SIZE];
@@ -3626,7 +3623,7 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: &mut [u8], values: &
 
 // NOTE(bungcip): reduce parameter count?
 unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, 
-    mut left_start: i32, _: i32, right_start: i32, right_end: i32, p_left: &mut i32) -> bool
+    mut left_start: i32, right_start: i32, right_end: i32, p_left: &mut i32) -> bool
 {
 // WINDOWING
 
@@ -4272,7 +4269,7 @@ unsafe fn imdct_step3_inner_s_loop(n: i32, e: *mut f32, i_off: i32, k_off: i32, 
       ee0 = ee0.offset(-k0 as isize);
       ee2 = ee2.offset(-k0 as isize);
 
-        i -= 1;
+      i -= 1;
    }
 }
 
@@ -4734,11 +4731,11 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
    // codebooks
    let mut y : u8;
 
-   f.codebook_count = (get_bits(f,8) + 1) as i32;
-   f.codebooks.resize(f.codebook_count as usize, Codebook::default());
-   // NOTE(bungcip): no need to resize f.codebooks? just push...
-   for i in 0 .. f.codebook_count {
-      let mut c : &mut Codebook= FORCE_BORROW_MUT!( &mut f.codebooks[i as usize] );
+   let codebook_count = (get_bits(f,8) + 1) as i32;
+   f.codebooks.reserve(codebook_count as usize);
+   'codebook: for _ in 0 .. codebook_count {
+      let mut c : Codebook = Codebook::default();
+
       CHECK!(f);
       x = get_bits(f, 8) as u8; if x != 0x42            {return error(f, InvalidSetup);}
       x = get_bits(f, 8) as u8; if x != 0x43            {return error(f, InvalidSetup);}
@@ -4769,11 +4766,13 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          while current_entry < c.entries {
             let limit : i32 = c.entries - current_entry;
             let n : i32 = get_bits(f, ilog(limit)) as i32;
-            if current_entry + n > c.entries as i32 { return error(f, InvalidSetup); }
-            std::ptr::write_bytes(
-                lengths[current_entry as usize ..].as_mut_ptr(), 
-                current_length as u8, 
-                n as usize);
+            if current_entry + n > c.entries as i32 { 
+                return error(f, InvalidSetup);
+            }
+
+            let mut lengths_slice = &mut lengths[current_entry as usize .. (current_entry + n) as usize];
+            std::ptr::write_bytes(lengths_slice.as_mut_ptr(), current_length as u8, n as usize);
+
             current_entry += n;
             current_length += 1;
          }
@@ -4825,7 +4824,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          values.resize(c.sorted_entries as usize, 0);
       }
 
-      if compute_codewords(c, lengths, &mut values) == false {
+      if compute_codewords(&mut c, lengths, &mut values) == false {
         return error(f, InvalidSetup);
       }
 
@@ -4834,7 +4833,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          c.sorted_codewords.resize( (c.sorted_entries+1) as usize, 0);
          c.sorted_values.resize(c.sorted_entries as usize, 0);
          
-         compute_sorted_huffman(c, &mut lengths, &values);
+         compute_sorted_huffman(&mut c, &mut lengths, &values);
       }
 
       if c.sparse == true {
@@ -4842,7 +4841,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          c.codewords.clear();
       }
 
-      compute_accelerated_huffman(c);
+      compute_accelerated_huffman(&mut c);
 
       CHECK!(f);
       c.lookup_type = get_bits(f, 4) as u8;
@@ -4854,11 +4853,12 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          c.delta_value = float32_unpack(get_bits(f, 32));
          c.value_bits = ( get_bits(f, 4)+1 ) as u8;
          c.sequence_p = ( get_bits(f,1) ) as u8;
-         if c.lookup_type == 1 {
-            c.lookup_values = lookup1_values(c.entries, c.dimensions) as u32;
+         c.lookup_values =  if c.lookup_type == 1 {
+            lookup1_values(c.entries, c.dimensions) as u32
          } else {
-            c.lookup_values = c.entries as u32 * c.dimensions as u32;
-         }
+            c.entries as u32 * c.dimensions as u32
+         };
+
          if c.lookup_values == 0 {
              return error(f, InvalidSetup);
          }
@@ -4872,14 +4872,12 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
             mults.push(q as u16);
          }
          
-         'skip: loop {
          if c.lookup_type == 1 {
             let sparse = c.sparse;
             // pre-expand the lookup1-style multiplicands, to avoid a divide in the inner loop
             let multiplicands_count = if sparse {
                 if c.sorted_entries == 0 { 
-                    //    goto skip;
-                    break 'skip;
+                    continue 'codebook;
                 }
                 c.sorted_entries * c.dimensions
             }else{
@@ -4925,15 +4923,13 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
                }
             }
          }
-         
-         // NOTE(bungcip): maybe we can remove loop-break now?
-         break;
-         } // loop 'skip
-//         skip:;
          CHECK!(f);
       }
       CHECK!(f);
-   }
+
+      // push codebook
+      f.codebooks.push(c);
+   } // end of codebook handling
 
    // time domain transfers (notused)
 
@@ -4976,13 +4972,13 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
                     g.class_subclasses[j] = get_bits(f, 2) as u8;
                     if g.class_subclasses[j] != 0 {
                         g.class_masterbooks[j] = get_bits(f, 8) as u8;
-                        if g.class_masterbooks[j] >= f.codebook_count as u8 {
+                        if g.class_masterbooks[j] >= codebook_count as u8 {
                             return error(f, InvalidSetup);
                         }
                     }
                     for k in 0 ..  (1 << g.class_subclasses[j]) as usize {
                         g.subclass_books[j][k] = get_bits(f,8) as i16 -1;
-                        if g.subclass_books[j][k] >= f.codebook_count as i16 {
+                        if g.subclass_books[j][k] >= codebook_count as i16 {
                             return error(f, InvalidSetup);
                         }
                     }
@@ -5052,7 +5048,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
       r.part_size = get_bits(f,24)+1;
       r.classifications = get_bits(f,6) as u8 + 1;
       r.classbook = get_bits(f,8) as u8;
-      if r.classbook as i32 >= f.codebook_count {
+      if r.classbook as i32 >= codebook_count {
           return error(f, InvalidSetup);
       }
       for item in residue_cascade.iter_mut().take(r.classifications as usize){
@@ -5068,7 +5064,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          for k in 0usize .. 8 {
             if (*item & (1 << k)) != 0 {
                r.residue_books[j][k] = get_bits(f, 8) as i16;
-               if r.residue_books[j][k] as i32 >= f.codebook_count {
+               if r.residue_books[j][k] as i32 >= codebook_count {
                    return error(f, InvalidSetup);
                 }
             } else {
