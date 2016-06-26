@@ -545,6 +545,11 @@ impl Vorbis {
     }
 }
 
+impl Default for Vorbis {
+    fn default() -> Vorbis {
+        Vorbis::new()
+    }
+}
 
 #[derive(Copy, Clone)]
 pub struct VorbisInfo
@@ -3769,10 +3774,9 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
    CHECK!(f);
 
 // INVERSE COUPLING
-   let mut i : i32 = map.coupling_steps as i32 - 1; 
-   while i >= 0 {
+   for &map_chan in map.chan[.. map.coupling_steps as usize].iter().rev() {
       let n2 = n >> 1;
-      let MappingChannel{magnitude, angle, ..} = map.chan[i as usize];
+      let MappingChannel{magnitude, angle, ..} = map_chan;
       let mut m : &mut Vec<f32> = FORCE_BORROW_MUT!( &mut f.channel_buffers[magnitude as usize] );
       let mut a : &mut Vec<f32> = FORCE_BORROW_MUT!( &mut f.channel_buffers[angle  as usize] );
       for j in 0 .. n2 as usize {
@@ -3797,7 +3801,6 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
          m[j] = m2;
          a[j] = a2;
       }
-      i -= 1;
    }
    CHECK!(f);
 
@@ -3912,9 +3915,9 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
    // NOTE(bungcip): optimize?
    let mut part_classdata = Vec::with_capacity(f.channels as usize);
    for _ in 0 .. f.channels {
-       let mut temp_1: Vec<Vec<u8>> = Vec::with_capacity(part_read as usize);
-       temp_1.resize(part_read as usize, Vec::new());
-       part_classdata.push( temp_1 );
+       let mut temp: Vec<Vec<u8>> = Vec::with_capacity(part_read as usize);
+       temp.resize(part_read as usize, Vec::new());
+       part_classdata.push(temp);
    }
 
    CHECK!(f);
@@ -3943,9 +3946,9 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
          let mut class_set = 0;
          if residue_buffers.channel_count() == 2 {
             while pcount < part_read {
-               let z : i32 = r.begin as i32 + (pcount*r.part_size as i32);
-               let mut c_inter : i32 = z & 1;
-               let mut p_inter : i32 = z>>1;
+               let z = r.begin as i32 + (pcount*r.part_size as i32);
+               let mut c_inter = z & 1;
+               let mut p_inter = z >> 1;
                if pass == 0 {
                   let c: &Codebook = FORCE_BORROW!(&f.codebooks[r.classbook as usize]);
                   let q = decode_raw(f,c);
@@ -3959,9 +3962,9 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                
                let mut i = 0;
                while i < classwords && pcount < part_read {
-                  let mut z : i32 = r.begin as i32 + (pcount*r.part_size as i32);
-                  let c : i32 = part_classdata[0][class_set][i] as i32;
-                  let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
+                  let mut z  = r.begin as i32 + (pcount*r.part_size as i32);
+                  let c = part_classdata[0][class_set][i] as i32;
+                  let b = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                     let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
                      // saves 1%
@@ -3979,9 +3982,9 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
             }
          } else if residue_buffers.channel_count() == 1 {
             while pcount < part_read {
-               let z : i32 = r.begin as i32 + pcount as i32 * r.part_size as i32;
-               let mut c_inter : i32 = 0;
-               let mut p_inter : i32 = z as i32;
+               let z = r.begin as i32 + pcount as i32 * r.part_size as i32;
+               let mut c_inter = 0;
+               let mut p_inter = z as i32;
                if pass == 0 {
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize] );
                   let q = decode_raw(f,c);
@@ -3993,9 +3996,9 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                }
                let mut i = 0;
                while i < classwords && pcount < part_read {
-                  let mut z : i32 = r.begin as i32 + pcount*r.part_size as i32;
-                  let c : i32 = part_classdata[0][class_set as usize][i as usize] as i32;
-                  let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
+                  let mut z = r.begin as i32 + pcount*r.part_size as i32;
+                  let c = part_classdata[0][class_set as usize][i as usize] as i32;
+                  let b = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                      let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
                      if codebook_decode_deinterleave_repeat(f, book, residue_buffers, &mut c_inter, &mut p_inter, n, r.part_size as i32) == false {
@@ -4069,16 +4072,17 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                }
             }
          }
-            let mut i = 0;
-            while i < classwords && pcount < part_read {
+
+         let mut i = 0;
+         while i < classwords && pcount < part_read {
             for j in 0 .. residue_buffers.channel_count() {
                if do_not_decode[j] == false {
-                  let c : i32 = part_classdata[j][class_set as usize][i as usize] as i32;
-                  let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
+                  let c = part_classdata[j][class_set as usize][i as usize] as i32;
+                  let b = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                       let mut target = &mut residue_buffers[j];
-                      let offset : i32 =  r.begin as i32 + pcount*r.part_size as i32;
-                      let n : i32 = r.part_size as i32;
+                      let offset =  r.begin as i32 + pcount*r.part_size as i32;
+                      let n = r.part_size as i32;
                       let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
                       if residue_decode(f, book, &mut target, offset, n, rtype) == false {
                           return;
@@ -4903,8 +4907,8 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
             let mut last = 0.0;
             CHECK!(f);
             c.multiplicands.reserve(c.lookup_values as usize);
-            for j in 0 .. c.lookup_values as usize {
-               let val : f32 = mults[j] as f32 * c.delta_value + c.minimum_value + last;
+            for j in mults {
+               let val : f32 = j as f32 * c.delta_value + c.minimum_value + last;
                c.multiplicands.push(val);
                if c.sequence_p != 0 {
                   last = val;
@@ -5044,11 +5048,12 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       let mut residue_cascade: SmallVec<[u8; 64]> = SmallVec::new();
       for _ in 0 .. r.classifications {
-         let low_bits: u8 = get_bits(f, 3) as u8;
-         let mut high_bits: u8 = 0;
-         if get_bits(f, 1) != 0 {
-            high_bits = get_bits(f, 5) as u8;
-         }
+         let low_bits = get_bits(f, 3) as u8;
+         let high_bits = if get_bits(f, 1) != 0 {
+            get_bits(f, 5) as u8
+         }else {
+             0
+         };
          let item = high_bits * 8 + low_bits;
          residue_cascade.push(item);
       }
@@ -5111,7 +5116,6 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
             // satify borrow checker
             let ilog_result = ilog(f.channels-1);
             m.chan[k].magnitude = get_bits(f, ilog_result) as u8;
-            let ilog_result = ilog(f.channels-1);
             m.chan[k].angle = get_bits(f, ilog_result) as u8;
             if m.chan[k].magnitude as i32 >= f.channels        {return error(f, InvalidSetup);}
             if m.chan[k].angle     as i32 >= f.channels        {return error(f, InvalidSetup);}
