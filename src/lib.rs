@@ -1834,16 +1834,18 @@ fn predict_point(x: i32, x0: i32 , x1: i32 , y0: i32 , y1: i32 ) -> i32
    return if dy < 0  {y0 - off} else {y0 + off};
 }
 
-fn do_floor(f: &mut Vorbis, map: &Mapping, i: usize, n: usize , target: &mut [f32], final_y: &[YTYPE]) -> bool
+// NOTE(bungcip): reduce parameter count
+fn do_floor(floor_config: &[Floor], map: &Mapping, i: usize, n: usize, target: &mut [f32], final_y: &[YTYPE]) -> Result<(), VorbisError>
 {
    let n2 = n >> 1;
 
-   let s : &MappingChannel = unsafe { FORCE_BORROW!( &map.chan[i] ) };
-   let s = s.mux as usize;
-   let floor = map.submap_floor[s] as usize;
+   let floor = {
+       let s = map.chan[i].mux as usize;
+       map.submap_floor[s] as usize
+   };
    
-   match f.floor_config[floor] {
-       Floor::Type0(_) => return error(f, VorbisError::InvalidStream),
+   match floor_config[floor] {
+       Floor::Type0(_) => return Err(VorbisError::InvalidStream),
        Floor::Type1(g) => {
             let mut lx = 0;
             let mut ly = final_y[0] as i32 * g.floor1_multiplier as i32;
@@ -1873,7 +1875,7 @@ fn do_floor(f: &mut Vorbis, map: &Mapping, i: usize, n: usize , target: &mut [f3
        }
    }
 
-   return true;
+   return Ok(());
 }
 
 #[inline(always)]
@@ -1898,7 +1900,6 @@ fn draw_line(output: &mut [f32], x0: i32, y0: i32, mut x1: i32, y1: i32, n: i32)
    ady -= i32::abs(base) * adx;
    
    x1 = std::cmp::min(x1, n);
-
    if x < x1 {
       LINE_OP!(output[x as usize], INVERSE_DB_TABLE[y as usize]);
       
@@ -3820,9 +3821,11 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
       if really_zero_channel[i] {
           std::ptr::write_bytes(f.channel_buffers[i].as_mut_ptr(), 0, n2 as usize);
       } else {
-          let cb : &mut [f32] = FORCE_BORROW!( f.channel_buffers[i].as_mut_slice() );
-          let fy : &[YTYPE] = FORCE_BORROW!( f.final_y[i].as_slice() ); 
-          do_floor(f, map, i, n as usize, cb, fy);
+          let n = n as usize;
+          let result = do_floor(&f.floor_config, map, i, n, &mut f.channel_buffers[i], &f.final_y[i]);
+          if let Err(why) = result {
+              return error(f, why);
+          }
       }
    }
 
