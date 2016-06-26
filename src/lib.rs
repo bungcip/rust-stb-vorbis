@@ -188,7 +188,7 @@ macro_rules! FAST_SCALED_FLOAT_TO_INT {
 
 fn convert_to_i16(value: f32) -> i16 {
     let mut v : i32 = unsafe { FAST_SCALED_FLOAT_TO_INT!(value, 15) };
-    if (v + 32768) as u32 > 65535{
+    if (v + 32768) as u32 > 65535 {
         v = if v < 0 { -32768 } else { 32767 };
     }
 
@@ -200,20 +200,6 @@ macro_rules! CHECK {
         // assert!( $f.channel_buffers[1].is_null() == false );
     }
 }
-
-// @OPTIMIZE: if you want to replace this bresenham line-drawing routine,
-// note that you must produce bit-identical output to decode correctly;
-// this specific sequence of operations is specified in the spec (it's
-// drawing integer-quantized frequency-space lines that the encoder
-// expects to be exactly the same)
-//     ... also, isn't the whole point of Bresenham's algorithm to NOT
-// have to divide in the setup? sigh
-macro_rules! LINE_OP {
-    ($a: expr, $b: expr) => {
-        $a *= $b
-    }
-}
-
 
 pub type CodeType = f32;
 pub type YTYPE = i16;
@@ -1086,13 +1072,11 @@ fn flush_packet(f: &mut Vorbis)
 
 fn get_bits(f: &mut Vorbis, n: i32) -> u32
 {
-   let mut z : u32;
-
    if f.valid_bits < 0 {return 0;}
    if f.valid_bits < n {
       if n > 24 {
          // the accumulator technique below would not work correctly in this case
-         z = get_bits(f, 24);
+         let mut z = get_bits(f, 24);
          z += get_bits(f, n-24) << 24;
          return z;
       }
@@ -1107,8 +1091,12 @@ fn get_bits(f: &mut Vorbis, n: i32) -> u32
          f.valid_bits += 8;
       }
    }
-   if f.valid_bits < 0 {return 0;}
-   z = f.acc & ((1 << n)-1);
+
+   if f.valid_bits < 0 {
+       return 0;
+   }
+
+   let z = f.acc & ((1 << n)-1);
    f.acc >>= n;
    f.valid_bits -= n;
    return z;
@@ -1867,7 +1855,7 @@ fn do_floor(floor_config: &[Floor], map: &Mapping, i: usize, n: usize, target: &
             if lx < n2 {
                 // optimization of: draw_line(target, lx,ly, n,ly, n2);
                 for j in lx .. n2 {
-                    LINE_OP!(target[j], INVERSE_DB_TABLE[ly as usize]);
+                    target[j] *= INVERSE_DB_TABLE[ly as usize];
                 }
                 CHECK!(f);
             }
@@ -1900,8 +1888,8 @@ fn draw_line(output: &mut [f32], x0: i32, y0: i32, mut x1: i32, y1: i32, n: i32)
    
    x1 = std::cmp::min(x1, n);
    if x < x1 {
-      LINE_OP!(output[x as usize], INVERSE_DB_TABLE[y as usize]);
-      
+      output[x as usize] *= INVERSE_DB_TABLE[y as usize];
+
       x += 1;
       while x < x1 {
          err += ady;
@@ -1912,7 +1900,7 @@ fn draw_line(output: &mut [f32], x0: i32, y0: i32, mut x1: i32, y1: i32, n: i32)
          } else{
             y += base;
          }
-         LINE_OP!(output[x as usize], INVERSE_DB_TABLE[y as usize]);
+         output[x as usize] *= INVERSE_DB_TABLE[y as usize];
          
          x += 1;
       }      
@@ -4026,9 +4014,9 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
             }
          } else {
             while pcount < part_read {
-               let z : i32 = r.begin as i32 + pcount as i32 * r.part_size as i32;
-               let mut c_inter : i32 = z % ch;
-               let mut p_inter : i32 = z / ch;
+               let z = r.begin as i32 + pcount as i32 * r.part_size as i32;
+               let mut c_inter = z % ch;
+               let mut p_inter = z / ch;
                if pass == 0 {
                   let c : &Codebook = FORCE_BORROW!( &f.codebooks[r.classbook as usize] );
                   let q = decode_raw(f,c);
@@ -4041,9 +4029,9 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
                }
                let mut i = 0;
                while i < classwords && pcount < part_read {
-                  let mut z : i32 = r.begin as i32 + pcount as i32 * r.part_size as i32;
-                  let c : i32 = part_classdata[0][class_set as usize][i as usize] as i32;
-                  let b : i32 = r.residue_books[c as usize][pass as usize] as i32;
+                  let mut z = r.begin as i32 + pcount as i32 * r.part_size as i32;
+                  let c = part_classdata[0][class_set as usize][i as usize] as i32;
+                  let b = r.residue_books[c as usize][pass as usize] as i32;
                   if b >= 0 {
                      let book : &Codebook = FORCE_BORROW!( &f.codebooks[b as usize] );
                      if codebook_decode_deinterleave_repeat(f, book, residue_buffers, &mut c_inter, &mut p_inter, n, r.part_size as i32) == false {
@@ -4865,7 +4853,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
              return error(f, InvalidSetup);
          }
          
-         let mut mults : Vec<u16> = Vec::with_capacity(c.lookup_type as usize);
+         let mut mults : Vec<u16> = Vec::with_capacity(c.lookup_values as usize);
          for _ in 0 .. c.lookup_values {
             let q = get_bits(f, c.value_bits as i32);
             if q == EOP as u32 { 
@@ -4916,10 +4904,10 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          } else {
             let mut last = 0.0;
             CHECK!(f);
-            c.multiplicands.resize(c.lookup_values as usize, 0.0);
-            for (j, item) in c.multiplicands.iter_mut().enumerate().take(c.lookup_values as usize){
+            c.multiplicands.reserve(c.lookup_values as usize);
+            for j in 0 .. c.lookup_values as usize {
                let val : f32 = mults[j] as f32 * c.delta_value + c.minimum_value + last;
-               *item = val;
+               c.multiplicands.push(val);
                if c.sequence_p != 0 {
                   last = val;
                }
@@ -5102,7 +5090,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
    let mut max_submaps = 0;
    let mapping_count = get_bits(f,6) as i32 + 1;
    f.mapping.reserve(mapping_count as usize);
-   for i in 0 .. mapping_count as usize {
+   for _ in 0 .. mapping_count as usize {
       let mut m = Mapping::default();
 
       let mapping_type : i32 = get_bits(f,16) as i32;
