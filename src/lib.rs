@@ -446,10 +446,8 @@ pub struct Vorbis
    blocksize_0: usize, blocksize_1: usize,
    codebooks: Vec<Codebook>,
    floor_config: Vec<Floor>,
-   residue_count: i32,
-   residue_types: [u16; 64], // varies
+   residue_types: SmallVec<[u16; 64]>, // varies
    residue_config: Vec<Residue>,
-   mapping_count: i32,
    mapping: Vec<Mapping>,
    mode_config: SmallVec<[Mode; 64]>,  // varies
 
@@ -525,10 +523,8 @@ impl Vorbis {
             blocksize: [0; 2],
             blocksize_0: 0, blocksize_1: 0,
             floor_config: Vec::new(),
-            residue_count: 0,
-            residue_types: [0; 64], // varies
+            residue_types: SmallVec::new(), // varies
             residue_config: Vec::new(),
-            mapping_count: 0,
             mapping: Vec::new(),
             mode_config: SmallVec::new(), // varies
             total_samples: 0,
@@ -1173,7 +1169,10 @@ fn next_segment(f: &mut Vorbis) -> i32
    if f.last_seg == true {return 0;}
    if f.next_seg == -1 {
       f.last_seg_which = f.segment_count-1; // in case start_page fails
-      if start_page(f) == false { f.last_seg = true; return 0; }
+      if start_page(f) == false { 
+          f.last_seg = true; 
+          return 0;
+      }
       if (f.page_flag & PAGEFLAG_CONTINUED_PACKET) == 0 {
           error(f, VorbisError::ContinuedPacketFlagInvalid); 
           return 0;
@@ -2694,7 +2693,7 @@ fn peek_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mut 
    f.bytes_in_seg += bytes_read as u8;
    f.packet_bytes -= bytes_read;
    skip(f, -bytes_read);
-   if f.next_seg == -1{
+   if f.next_seg == -1 {
       f.next_seg = f.segment_count - 1;
    } else {
       f.next_seg -= 1;
@@ -2830,7 +2829,7 @@ fn vorbis_find_page(f: &mut Vorbis) -> Option<(u32, u32)>
             let crc = {
                 let mut crc = 0;
 
-                for &item in header.iter().take(27) {
+                for &item in header.iter() {
                     crc = unsafe { crc32_update(crc, item) };
                 }
 
@@ -3918,11 +3917,11 @@ unsafe fn decode_residue(f: &mut Vorbis, residue_buffers: &mut AudioBufferSlice<
 {
    let ch = residue_buffers.channel_count() as i32;
    let r: &Residue = FORCE_BORROW!( &f.residue_config[rn as usize] );
-   let rtype : i32 = f.residue_types[rn as usize] as i32;
-   let c : i32 = r.classbook as i32;
+   let rtype = f.residue_types[rn as usize] as i32;
+   let c = r.classbook as i32;
    let classwords = f.codebooks[c as usize].dimensions as usize;
-   let n_read : i32 = (r.end - r.begin) as i32;
-   let part_read : i32 = n_read / r.part_size as i32;
+   let n_read = (r.end - r.begin) as i32;
+   let part_read = n_read / r.part_size as i32;
    
    // NOTE(bungcip): optimize?
    let mut part_classdata = Vec::with_capacity(f.channels as usize);
@@ -5034,36 +5033,42 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
    }
 
    // Residue
-   f.residue_count = get_bits(f, 6) as i32 + 1;
-   f.residue_config.resize(f.residue_count as usize, Residue::default());
-   for i in 0 .. f.residue_count as usize {
-      let mut residue_cascade: [u8; 64] = mem::zeroed();
-      let mut r : &mut Residue = FORCE_BORROW_MUT!( &mut f.residue_config[i] );
-      f.residue_types[i] = get_bits(f, 16) as u16;
-      if f.residue_types[i] > 2 {
+   let residue_count = get_bits(f, 6) as i32 + 1;
+   f.residue_config.reserve(residue_count as usize);
+   for _ in 0 .. residue_count as usize {
+      let mut r = Residue::default();
+      
+      let residue_type = get_bits(f, 16) as u16;
+      if residue_type > 2 {
           return error(f, InvalidSetup);
       }
+
       r.begin = get_bits(f, 24);
       r.end = get_bits(f, 24);
       if r.end < r.begin {
           return error(f, InvalidSetup);
       }
-      r.part_size = get_bits(f,24)+1;
+
+      r.part_size = get_bits(f,24) + 1;
       r.classifications = get_bits(f,6) as u8 + 1;
       r.classbook = get_bits(f,8) as u8;
       if r.classbook as i32 >= codebook_count {
           return error(f, InvalidSetup);
       }
-      for item in residue_cascade.iter_mut().take(r.classifications as usize){
+
+      let mut residue_cascade: SmallVec<[u8; 64]> = SmallVec::new();
+      for _ in 0 .. r.classifications {
+         let low_bits: u8 = get_bits(f, 3) as u8;
          let mut high_bits: u8 = 0;
-         let low_bits: u8 = get_bits(f,3) as u8;
-         if get_bits(f,1) != 0 {
-            high_bits = get_bits(f,5) as u8;
+         if get_bits(f, 1) != 0 {
+            high_bits = get_bits(f, 5) as u8;
          }
-         *item = high_bits*8 + low_bits;
+         let item = high_bits * 8 + low_bits;
+         residue_cascade.push(item);
       }
+
       r.residue_books.resize(r.classifications as usize, [0; 8]);
-      for (j, item) in residue_cascade.iter_mut().enumerate().take(r.classifications as usize){
+      for (j, item) in residue_cascade.iter_mut().enumerate(){
          for k in 0usize .. 8 {
             if (*item & (1 << k)) != 0 {
                r.residue_books[j][k] = get_bits(f, 8) as i16;
@@ -5088,13 +5093,18 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
             temp /= r.classifications as i32;
          }
       }
+
+      // push
+      f.residue_config.push(r);
+      f.residue_types.push(residue_type);
    }
 
    let mut max_submaps = 0;
-   f.mapping_count = get_bits(f,6) as i32 +1;
-   f.mapping.resize(f.mapping_count as usize, Mapping::default());
-   for i in 0 .. f.mapping_count as usize {
-      let m : &mut Mapping = FORCE_BORROW_MUT!( &mut f.mapping[i]);
+   let mapping_count = get_bits(f,6) as i32 + 1;
+   f.mapping.reserve(mapping_count as usize);
+   for i in 0 .. mapping_count as usize {
+      let mut m = Mapping::default();
+
       let mapping_type : i32 = get_bits(f,16) as i32;
       if mapping_type != 0 {
           return error(f, InvalidSetup);
@@ -5102,11 +5112,11 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       m.chan.resize(f.channels as usize, MappingChannel::default());
       
-      if get_bits(f,1) != 0 {
-         m.submaps = get_bits(f,4) as u8 + 1;
+      m.submaps = if get_bits(f,1) != 0 {
+         get_bits(f,4) as u8 + 1
       } else {
-         m.submaps = 1;
-      }
+         1
+      };
       max_submaps = std::cmp::max(max_submaps, m.submaps);
       
       if get_bits(f,1) != 0 {
@@ -5148,15 +5158,17 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          m.submap_floor[j] = get_bits(f,8) as u8;
          m.submap_residue[j] = get_bits(f,8) as u8;
          if m.submap_floor[j] as u32 >= floor_count      {return error(f, InvalidSetup);}
-         if m.submap_residue[j] as i32 >= f.residue_count  {return error(f, InvalidSetup);}
+         if m.submap_residue[j] as i32 >= residue_count  {return error(f, InvalidSetup);}
       }
+
+      f.mapping.push(m);
    }
 
    // Modes
    let mode_count = get_bits(f, 6) as i32 + 1;
    f.mode_config.reserve(mode_count as usize);
    for _ in 0 .. mode_count as usize {
-      let mut m: Mode = Mode::default();
+      let mut m = Mode::default();
       
       m.blockflag = get_bits(f,1) as u8;
       m.windowtype = get_bits(f,16) as u16;
@@ -5165,7 +5177,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
 
       if m.windowtype != 0                 {return error(f, InvalidSetup);}
       if m.transformtype != 0              {return error(f, InvalidSetup);}
-      if m.mapping as i32 >= f.mapping_count     {return error(f, InvalidSetup);}
+      if m.mapping as i32 >= mapping_count     {return error(f, InvalidSetup);}
 
       f.mode_config.push(m);
    }
