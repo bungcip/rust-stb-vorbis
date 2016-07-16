@@ -62,18 +62,18 @@ unsafe fn test_decode_frame_pushdata(mut out_file: File, filename: &str) {
     let mut used = 0;
     let mut length : usize = 1;
     let mut v;
-    let mut error = VorbisError::NoError;
     'retry: loop {
-        v = stb_vorbis_open_pushdata(&buffer[0 .. length], &mut used, &mut error);
-        if v.is_none() {
-            if error == VorbisError::NeedMoreData {
+        v = match stb_vorbis_open_pushdata(&buffer[0 .. length], &mut used){
+            Err(why) if why == VorbisError::NeedMoreData => {
                 length += 1;
                 continue; //goto retry;
-            }
-            println!("Error {:?}", error);
-            process::exit(error as i32);
-        }
-
+            },
+            Err(why) => {
+                println!("Error {:?}", why);
+                process::exit(why as i32);
+            },
+            Ok(v) => v,
+        };
         break;
     }
     
@@ -81,7 +81,6 @@ unsafe fn test_decode_frame_pushdata(mut out_file: File, filename: &str) {
     p += used;
 
 
-    let mut v = v.unwrap();
     show_info(&mut v);
 
     'forever: loop {

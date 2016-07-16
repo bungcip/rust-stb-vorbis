@@ -154,7 +154,7 @@ static CHANNEL_POSITION: [[i8; 6]; 7] = [
    [ CP_L, CP_C, CP_R, CP_L, CP_R, CP_C ],
 ];
 
-static OGG_PAGE_HEADER: [u8; 4] = [ 0x4f, 0x67, 0x67, 0x53 ];
+static OGG_PAGE_HEADER: [u8; 4] = [ b'O', b'g', b'g', b'S' ];
 
 
 /// macro to force rust to borrow 
@@ -2891,7 +2891,8 @@ fn get_seek_page_info(f: &mut Vorbis, z: &mut ProbedPage) -> bool
    // parse the header
    let mut header: [u8; 27] = [0; 27];
    getn(f, &mut header[..]);
-   if header[0] != b'O' || header[1] != b'g' || header[2] != b'g' || header[3] != b'S'{
+
+   if header.starts_with(&OGG_PAGE_HEADER) == false {
       return false;
    }
 
@@ -2921,16 +2922,16 @@ fn get_seek_page_info(f: &mut Vorbis, z: &mut ProbedPage) -> bool
 // create a vorbis decoder by passing in the initial data block containing
 //    the ogg&vorbis headers (you don't need to do parse them, just provide
 //    the first N bytes of the file--you're told if it's not enough, see below)
-// on success, returns an stb_vorbis *, does not set error, returns the amount of
+// on success, returns an Vorbis instance, does not set error, returns the amount of
 //    data parsed/consumed on this call in *datablock_memory_consumed_in_bytes;
 // on failure, returns NULL on error and sets *error, does not change *datablock_memory_consumed
 // if returns NULL and *error is NeedMoreData, then the input block was
 //       incomplete and you need to pass in a larger block from the start of the file
 pub fn stb_vorbis_open_pushdata(
          data: &[u8],                      // the memory available for decoding
-         data_used: &mut i32,              // only defined if result is not NULL
-         error: &mut VorbisError)
-         -> Option<Vorbis>
+         data_used: &mut i32               // only defined if result is not NULL
+         )
+         -> Result<Vorbis, VorbisError>
 {
 
    let mut p = Vorbis::new();
@@ -2941,17 +2942,15 @@ pub fn stb_vorbis_open_pushdata(
         p.push_mode  = true;
         if start_decoder(&mut p) == false {
             if p.eof == true {
-                *error = VorbisError::NeedMoreData;
+                return Err(VorbisError::NeedMoreData);
             } else {
-                *error = p.error;
+                return Err(p.error);
             }
-            return None;
         }
    }
    
     *data_used = (p.stream as usize - start_position) as i32;
-    *error = VorbisError::NoError;
-    return Some(p);
+    return Ok(p);
 }
 
 // decode a frame of audio sample data if possible from the passed-in data block
@@ -3012,18 +3011,17 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
    let (len, left, right) = match vorbis_decode_packet(f) {
       Some(result) => result,
       None => {
-        // save the actual error we encountered
-        let error = f.error;
-        if error == VorbisError::BadPacketType {
-            // flush and resynch
-            f.error = VorbisError::NoError;
-            while get8_packet(f) != EOP{
-                if f.eof == true {break;}
-            }
-            *samples = 0;
-            return (f.stream as usize - data.as_ptr() as usize) as i32;
-        }
-        if error == VorbisError::ContinuedPacketFlagInvalid && f.previous_length == 0 {
+        match f.error {
+            VorbisError::BadPacketType => {
+                // flush and resynch
+                f.error = VorbisError::NoError;
+                while get8_packet(f) != EOP{
+                    if f.eof == true {break;}
+                }
+                *samples = 0;
+                return (f.stream as usize - data.as_ptr() as usize) as i32;
+            },
+            VorbisError::ContinuedPacketFlagInvalid if f.previous_length == 0 => {
                 // we may be resynching, in which case it's ok to hit one
                 // of these; just discard the packet
                 f.error = VorbisError::NoError;
@@ -3032,14 +3030,17 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
                 }
                 *samples = 0;
                 return (f.stream as usize - data.as_ptr() as usize) as i32;
+            },
+            error => {
+                // if we get an error while parsing, what to do?
+                // well, it DEFINITELY won't work to continue from where we are!
+                stb_vorbis_flush_pushdata(f);
+                // restore the error that actually made us bail
+                f.error = error;
+                *samples = 0;
+                return 1;
+            }
         }
-        // if we get an error while parsing, what to do?
-        // well, it DEFINITELY won't work to continue from where we are!
-        stb_vorbis_flush_pushdata(f);
-        // restore the error that actually made us bail
-        f.error = error;
-        *samples = 0;
-        return 1;
       }
    };
 
