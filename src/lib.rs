@@ -1,5 +1,3 @@
-#![feature(float_extras)]
-
 /**
  * Rust Stb Vorbis
  * 
@@ -687,16 +685,16 @@ fn square(x: f32) -> f32{
 fn float32_unpack(x: u32) -> f32
 {
    // from the specification
-   let mantissa : u32 = x & 0x1fffff;
-   let sign : u32 = x & 0x80000000;
-   let exp : u32 = (x & 0x7fe00000) >> 21;
-   let res: f64 = if sign != 0 {
+   let mantissa = x & 0x1fffff;
+   let sign     = x & 0x80000000;
+   let exponent = (x & 0x7fe00000) >> 21;
+   let mantissa = if sign != 0 {
      -(mantissa as f64)
    }else{
        mantissa as f64
    };
-   
-   return f64::ldexp(res, (exp as i32 - 788 ) as isize) as f32;
+
+   return (mantissa * (exponent as f64 - 788.0 ).exp2() ) as f32;
 }
 
 // zlib & jpeg huffman tables assume that the output symbols
