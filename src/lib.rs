@@ -1187,28 +1187,21 @@ fn next_segment(f: &mut Vorbis) -> i32
 
 fn vorbis_decode_packet(f: &mut Vorbis) -> Option<(i32, i32, i32)>
 {
-    let mut mode_index = 0;
-    let mut left_end = 0;
-    let mut right_end = 0;
-    
-    let mut len : i32 =  0;
-    let mut p_left : i32 = 0;
-    let mut p_right : i32 = 0;
-
-    // NOTE(bungcip): reduce argument count?
-    if vorbis_decode_initial(f, &mut p_left, &mut left_end, &mut p_right, &mut right_end, &mut mode_index) ==  false {
-        return None;
-    }
+    let (mut p_left_start, _, p_right_start, p_right_end, mode_index) = match vorbis_decode_initial(f){
+        Some(result) => result,
+        None => return None,
+    };
     
     unsafe {
+        let mut len : i32 =  0;
         let mode : &Mode = FORCE_BORROW!( &f.mode_config[mode_index as usize] );
         let result = vorbis_decode_packet_rest(
             f, &mut len, mode, 
-            p_left, p_right, right_end, &mut p_left
+            p_left_start, p_right_start, p_right_end, &mut p_left_start
         );
 
         if result {
-            return Some((len, p_left, p_right));
+            return Some((len, p_left_start, p_right_start));
         }else{
             return None;
         }
@@ -1294,23 +1287,21 @@ pub fn stb_vorbis_open_filename(filename: &Path)-> Result<Vorbis, VorbisError>
 //        has to be the same as frame N+1's left_end-left_start (which they are by
 //        construction)
 
-fn vorbis_decode_initial(f: &mut Vorbis, 
-    p_left_start: &mut i32, p_left_end: &mut i32, 
-    p_right_start: &mut i32, p_right_end: &mut i32, 
-    mode: &mut i32) -> bool
+fn vorbis_decode_initial(f: &mut Vorbis) -> Option<(i32, i32, i32, i32, i32)>
 {
    f.channel_buffer_start = 0;
    f.channel_buffer_end = 0;
 
    loop {
-        if f.eof == true {return false;} 
+        if f.eof == true {return None;} 
         if maybe_start_packet(f) == false {
-            return false; 
+            return None; 
         }
         // check packet type
         if get_bits(f,1) != 0 {
             if f.push_mode {
-                return error(f, VorbisError::BadPacketType);
+                error(f, VorbisError::BadPacketType);
+                return None;
             }
             while EOP != get8_packet(f){}
             continue;
@@ -1322,11 +1313,17 @@ fn vorbis_decode_initial(f: &mut Vorbis,
 
    let mode_count = f.mode_config.len() as i32;
    let x = ilog(mode_count-1);
-   let i : i32 = get_bits(f, x) as i32;
-   if i == EOP {return false;}
-   if i >= mode_count {return false;}
+   let i = get_bits(f, x) as i32;
+   if i == EOP {return None;}
+   if i >= mode_count {return None;}
    
-   *mode = i;
+   let p_left_start : i32;
+   let p_left_end   : i32;
+   let p_right_start: i32;
+   let p_right_end  : i32;
+   let mode : i32;
+
+   mode = i;
 
    // NOTE: hack to forget borrow
    let &mut m : &mut Mode = unsafe { FORCE_BORROW_MUT!(&mut f.mode_config[i as usize])};
@@ -1339,30 +1336,30 @@ fn vorbis_decode_initial(f: &mut Vorbis,
       prev = get_bits(f,1) as i32;
       next = get_bits(f,1) as i32;
    } else {
+      n = f.blocksize_0;
       prev = 0;
       next = 0;
-      n = f.blocksize_0;
    }
 
 // WINDOWING
 
    let window_center = n >> 1;
    if m.blockflag != 0 && prev == 0 {
-      *p_left_start = (n - f.blocksize_0) as i32 >> 2;
-      *p_left_end   = (n + f.blocksize_0) as i32 >> 2;
+      p_left_start = (n - f.blocksize_0) as i32 >> 2;
+      p_left_end   = (n + f.blocksize_0) as i32 >> 2;
    } else {
-      *p_left_start = 0;
-      *p_left_end   = window_center as i32;
+      p_left_start = 0;
+      p_left_end   = window_center as i32;
    }
    if m.blockflag != 0 && next == 0 {
-      *p_right_start = (n*3 - f.blocksize_0) as i32 >> 2;
-      *p_right_end   = (n*3 + f.blocksize_0) as i32 >> 2;
+      p_right_start = (n*3 - f.blocksize_0) as i32 >> 2;
+      p_right_end   = (n*3 + f.blocksize_0) as i32 >> 2;
    } else {
-      *p_right_start = window_center as i32;
-      *p_right_end   = n as i32;
+      p_right_start = window_center as i32;
+      p_right_end   = n as i32;
    }
 
-   return true;
+   return Some((p_left_start, p_left_end, p_right_start, p_right_end, mode));
 }
 
 fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -> i32
@@ -2670,13 +2667,14 @@ fn peek_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mut 
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
-   if vorbis_decode_initial(f, p_left_start, p_left_end, p_right_start, p_right_end, mode) == false {
-      return false;
-   }
+   let (p_left_start, p_left_end, p_right_start, p_right_end, mode) = match vorbis_decode_initial(f) {
+       Some(result) => result,
+       None => return false,
+   };
 
    // either 1 or 2 bytes were read, figure out which so we can rewind
    let mut bits_read = 1 + ilog(f.mode_config.len() as i32 - 1);
-   if f.mode_config[*mode as usize].blockflag != 0 {
+   if f.mode_config[mode as usize].blockflag != 0 {
       bits_read += 2;
    }
    let bytes_read = (bits_read + 7) / 8;
