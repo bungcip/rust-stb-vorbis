@@ -5057,16 +5057,20 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
       }
       // precompute the classifications[] array to avoid inner-loop mod/divide
       // call it 'classdata' since we already have r.classifications
-      // NOTE(bungcip): remove resize?
-      r.classdata.resize(f.codebooks[r.classbook as usize].entries as usize, Vec::new());
-      for j in 0 .. f.codebooks[r.classbook as usize].entries as usize {
+      let r_classdata_size = f.codebooks[r.classbook as usize].entries as usize; 
+      r.classdata.reserve(r_classdata_size);
+
+      for j in 0 .. r_classdata_size {
          let mut temp = j as i32;
-         let classwords_size = f.codebooks[r.classbook as usize].dimensions;
-         r.classdata[j].resize(classwords_size as usize, 0);
-         for item in r.classdata[j].iter_mut().rev() {
+         let classwords_size = f.codebooks[r.classbook as usize].dimensions as usize;
+         let mut class_data = vec![0; classwords_size];
+
+         for item in class_data.iter_mut().rev() {
             *item = (temp % r.classifications as i32) as u8;
             temp /= r.classifications as i32;
          }
+
+        r.classdata.push(class_data);
       }
 
       // push
