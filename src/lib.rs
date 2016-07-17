@@ -1185,33 +1185,22 @@ fn next_segment(f: &mut Vorbis) -> i32
    return len as i32;
 }
 
-fn vorbis_decode_packet(f: &mut Vorbis) -> Option<(i32, i32, i32)>
+fn vorbis_decode_packet(f: &mut Vorbis) -> Result<(i32, i32, i32), VorbisError>
 {
-    let (p_left_start, _, p_right_start, p_right_end, mode_index) = match vorbis_decode_initial(f){
-        Some(result) => result,
-        None => return None,
-    };
-    
+    let (p_left_start, _, p_right_start, p_right_end, mode_index) = try!( vorbis_decode_initial(f) );
     unsafe {
         let mode : &Mode = FORCE_BORROW!( &f.mode_config[mode_index as usize] );
-        
-        match vorbis_decode_packet_rest(f, mode, p_left_start, p_right_start, p_right_end){
-            Err(why) => {
-                error(f, why);
-                return None;
-            },
-            Ok((len, p_left_start)) => {
-                return Some((len, p_left_start, p_right_start));
-            }
-        }
+        let (len, p_left_start) = try!( vorbis_decode_packet_rest(f, mode, p_left_start, p_right_start, p_right_end) );
+        return Ok((len, p_left_start, p_right_start));
     }
 }
 
 
 fn vorbis_pump_first_frame(f: &mut Vorbis)
 {
-    if let Some((len, left, right)) = vorbis_decode_packet(f) {
-        vorbis_finish_frame(f, len, left, right);
+    match vorbis_decode_packet(f){
+        Ok((len, left, right)) => {vorbis_finish_frame(f, len, left, right);},
+        Err(why) => {error(f, why);}
     }
 }
 
@@ -1286,21 +1275,20 @@ pub fn stb_vorbis_open_filename(filename: &Path)-> Result<Vorbis, VorbisError>
 //        has to be the same as frame N+1's left_end-left_start (which they are by
 //        construction)
 
-fn vorbis_decode_initial(f: &mut Vorbis) -> Option<(i32, i32, i32, i32, i32)>
+fn vorbis_decode_initial(f: &mut Vorbis) -> Result<(i32, i32, i32, i32, i32), VorbisError>
 {
    f.channel_buffer_start = 0;
    f.channel_buffer_end = 0;
 
    loop {
-        if f.eof == true {return None;} 
+        if f.eof == true {return Err(f.error);} 
         if maybe_start_packet(f) == false {
-            return None; 
+            return Err(f.error); 
         }
         // check packet type
         if get_bits(f,1) != 0 {
             if f.push_mode {
-                error(f, VorbisError::BadPacketType);
-                return None;
+                return Err(VorbisError::BadPacketType);
             }
             while EOP != get8_packet(f){}
             continue;
@@ -1313,8 +1301,8 @@ fn vorbis_decode_initial(f: &mut Vorbis) -> Option<(i32, i32, i32, i32, i32)>
    let mode_count = f.mode_config.len() as i32;
    let x = ilog(mode_count-1);
    let i = get_bits(f, x) as i32;
-   if i == EOP {return None;}
-   if i >= mode_count {return None;}
+   if i == EOP {return Err(f.error);}
+   if i >= mode_count {return Err(f.error);}
    
    let p_left_start : i32;
    let p_left_end   : i32;
@@ -1358,7 +1346,7 @@ fn vorbis_decode_initial(f: &mut Vorbis) -> Option<(i32, i32, i32, i32, i32)>
       p_right_end   = n as i32;
    }
 
-   return Some((p_left_start, p_left_end, p_right_start, p_right_end, mode));
+   return Ok((p_left_start, p_left_end, p_right_start, p_right_end, mode));
 }
 
 fn vorbis_finish_frame(f: &mut Vorbis, len: i32, left: i32, right: i32) -> i32
@@ -1536,10 +1524,11 @@ pub fn stb_vorbis_get_frame_float(f: &mut Vorbis,
    } 
 
     let (len, left, right) = match vorbis_decode_packet(f) {
-        Some(result) => result,
-        None => {
+        Ok(result) => result,
+        Err(why) => {
             f.channel_buffer_start = 0;
             f.channel_buffer_end = 0;
+            error(f, why);
             return 0;
         }
     };
@@ -2667,8 +2656,11 @@ fn peek_decode_initial(f: &mut Vorbis, p_left_start: &mut i32, p_left_end: &mut 
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
    let (p_left_start, p_left_end, p_right_start, p_right_end, mode) = match vorbis_decode_initial(f) {
-       Some(result) => result,
-       None => return false,
+       Ok(result) => result,
+       Err(why) => {
+           error(f, why);
+           return false;
+       }
    };
 
    // either 1 or 2 bytes were read, figure out which so we can rewind
@@ -3005,40 +2997,36 @@ pub unsafe fn stb_vorbis_decode_frame_pushdata(
       return 0;
    }
 
-   let (len, left, right) = match vorbis_decode_packet(f) {
-      Some(result) => result,
-      None => {
-        match f.error {
-            VorbisError::BadPacketType => {
-                // flush and resynch
-                f.error = VorbisError::NoError;
-                while get8_packet(f) != EOP{
-                    if f.eof == true {break;}
-                }
-                *samples = 0;
-                return (f.stream as usize - data.as_ptr() as usize) as i32;
-            },
-            VorbisError::ContinuedPacketFlagInvalid if f.previous_length == 0 => {
-                // we may be resynching, in which case it's ok to hit one
-                // of these; just discard the packet
-                f.error = VorbisError::NoError;
-                while get8_packet(f) != EOP{
-                    if f.eof == true {break;}
-                }
-                *samples = 0;
-                return (f.stream as usize - data.as_ptr() as usize) as i32;
-            },
-            error => {
-                // if we get an error while parsing, what to do?
-                // well, it DEFINITELY won't work to continue from where we are!
-                stb_vorbis_flush_pushdata(f);
-                // restore the error that actually made us bail
-                f.error = error;
-                *samples = 0;
-                return 1;
+    let (len, left, right) = match vorbis_decode_packet(f) {
+        Ok(result) => result,
+        Err(VorbisError::BadPacketType) => {
+            // flush and resynch
+            f.error = VorbisError::NoError;
+            while get8_packet(f) != EOP{
+                if f.eof == true {break;}
             }
+            *samples = 0;
+            return (f.stream as usize - data.as_ptr() as usize) as i32;
+        },
+        Err(VorbisError::ContinuedPacketFlagInvalid) if f.previous_length == 0 => {
+            // we may be resynching, in which case it's ok to hit one
+            // of these; just discard the packet
+            f.error = VorbisError::NoError;
+            while get8_packet(f) != EOP{
+                if f.eof == true {break;}
+            }
+            *samples = 0;
+            return (f.stream as usize - data.as_ptr() as usize) as i32;
+        },
+        Err(why) => {
+            // if we get an error while parsing, what to do?
+            // well, it DEFINITELY won't work to continue from where we are!
+            stb_vorbis_flush_pushdata(f);
+            // restore the error that actually made us bail
+            f.error = why;
+            *samples = 0;
+            return 1;
         }
-      }
    };
 
    // success!
