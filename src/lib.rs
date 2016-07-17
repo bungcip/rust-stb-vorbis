@@ -301,7 +301,7 @@ pub struct Floor1
    subclass_books: [[i16; 8]; 16], // varies
    xlist: [u16; 31*8+2], // varies
    sorted_order: [u8; 31*8+2],
-   neighbors: [[u8; 2]; 31*8+2],
+   neighbors: [(u8, u8); 31*8+2],
    floor1_multiplier: u8,
    rangebits: u8,
    values: i32,
@@ -926,7 +926,7 @@ fn compute_twiddle_factors(n: i32, a: &mut [f32], b: &mut [f32], c: &mut [f32])
 }
 
 
-fn neighbors(x: &[u16], n: usize) -> (i32, i32)
+fn neighbors(x: &[u16], n: usize) -> (u8, u8)
 {
     let mut low : i32 = -1;
     let mut high : i32 = 65536;
@@ -946,7 +946,7 @@ fn neighbors(x: &[u16], n: usize) -> (i32, i32)
         }
     }
 
-    return (plow as i32, phigh as i32);
+    return (plow as u8, phigh as u8);
 }
 
 
@@ -3677,8 +3677,9 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, m: &Mode,
             step2_flag[0] = 1; 
             step2_flag[1] = 1;
             for j in 2 .. g.values as usize {
-                let low = g.neighbors[j][0] as usize;
-                let high = g.neighbors[j][1] as usize;
+                let (low, high) = g.neighbors[j];
+                let (low, high) = (low as usize, high as usize);
+
                 let pred = predict_point(
                     g.xlist[j] as i32, 
                     g.xlist[low] as i32,
@@ -4991,8 +4992,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
                 // precompute the neighbors
                 for j in 2 .. g.values as usize {
                     let (low, high) = neighbors(&g.xlist, j);
-                    g.neighbors[j][0] = low as u8;
-                    g.neighbors[j][1] = high as u8;
+                    g.neighbors[j] = (low as u8, high as u8);
                 }
 
                 longest_floorlist = std::cmp::max(g.values, longest_floorlist);
