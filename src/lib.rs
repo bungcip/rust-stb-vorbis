@@ -1187,23 +1187,22 @@ fn next_segment(f: &mut Vorbis) -> i32
 
 fn vorbis_decode_packet(f: &mut Vorbis) -> Option<(i32, i32, i32)>
 {
-    let (mut p_left_start, _, p_right_start, p_right_end, mode_index) = match vorbis_decode_initial(f){
+    let (p_left_start, _, p_right_start, p_right_end, mode_index) = match vorbis_decode_initial(f){
         Some(result) => result,
         None => return None,
     };
     
     unsafe {
-        let mut len : i32 =  0;
         let mode : &Mode = FORCE_BORROW!( &f.mode_config[mode_index as usize] );
-        let result = vorbis_decode_packet_rest(
-            f, &mut len, mode, 
-            p_left_start, p_right_start, p_right_end, &mut p_left_start
-        );
-
-        if result {
-            return Some((len, p_left_start, p_right_start));
-        }else{
-            return None;
+        
+        match vorbis_decode_packet_rest(f, mode, p_left_start, p_right_start, p_right_end){
+            Err(why) => {
+                error(f, why);
+                return None;
+            },
+            Ok((len, p_left_start)) => {
+                return Some((len, p_left_start, p_right_start));
+            }
         }
     }
 }
@@ -3611,10 +3610,15 @@ unsafe fn compute_sorted_huffman(c: &mut Codebook, lengths: &mut [u8], values: &
    }
 }
 
-// NOTE(bungcip): reduce parameter count?
-unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode, 
-    mut left_start: i32, right_start: i32, right_end: i32, p_left: &mut i32) -> bool
+unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, m: &Mode, 
+    left_start: i32, right_start: i32, right_end: i32) -> Result<(i32, i32), VorbisError>
 {
+    let mut left_start = left_start;
+
+    let mut len: i32;
+    let mut p_left: i32 = left_start;
+
+
 // WINDOWING
 
     let n = f.blocksize[m.blockflag as usize] as i32;
@@ -3625,18 +3629,18 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
 
    CHECK!(f);
 
-   use VorbisError::*;
+//    use VorbisError::*;
 
-    let mut zero_channel: [bool; 256] = [false; 256];
-    let mut really_zero_channel : [bool; 256] = [false; 256];
+    let mut zero_channel = [false; 256];
+    let mut really_zero_channel  = [false; 256];
 
    for i in 0 .. f.channels as usize {
-      let s: i32 = map.chan[i].mux as i32;
+      let s = map.chan[i].mux as i32;
       zero_channel[i] = false;
-      let floor : i32 = map.submap_floor[s as usize] as i32;
+      let floor = map.submap_floor[s as usize] as i32;
 
       match f.floor_config[floor as usize] {
-          Floor::Type0(_) => return error(f, InvalidStream),
+          Floor::Type0(_) => return Err(VorbisError::InvalidStream),
           Floor::Type1(g) => {
             if get_bits(f, 1) == 0 {
                 zero_channel[i as usize] = true;
@@ -3809,10 +3813,7 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
           std::ptr::write_bytes(f.channel_buffers[i].as_mut_ptr(), 0, n2 as usize);
       } else {
           let n = n as usize;
-          let result = do_floor(&f.floor_config, map, i, n, &mut f.channel_buffers[i], &f.final_y[i]);
-          if let Err(why) = result {
-              return error(f, why);
-          }
+          try!( do_floor(&f.floor_config, map, i, n, &mut f.channel_buffers[i], &f.final_y[i]));
       }
    }
 
@@ -3844,11 +3845,11 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
       if f.discard_samples_deferred >= right_start - left_start {
          f.discard_samples_deferred -= right_start - left_start;
          left_start = right_start;
-         *p_left = left_start;
+         p_left = left_start;
       } else {
          left_start += f.discard_samples_deferred;
-         *p_left = left_start;
          f.discard_samples_deferred = 0;
+         p_left = left_start;
       }
    } else if f.previous_length == 0 && f.current_loc_valid == true {
       // we're recovering from a seek... that means we're going to discard
@@ -3868,16 +3869,18 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
          if current_end < f.current_loc + (right_end-left_start) as u32 {
             if current_end < f.current_loc {
                // negative truncation, that's impossible!
-               *len = 0;
+               len = 0;
             } else {
-               *len = (current_end - f.current_loc) as i32;
+               len = (current_end - f.current_loc) as i32;
             }
-            *len += left_start;
-            if *len > right_end {
-                *len = right_end; // this should never happen
+            len += left_start;
+            if len > right_end {
+                len = right_end; // this should never happen
             }
-            f.current_loc += *len as u32;
-            return true;
+            f.current_loc += len as u32;
+
+            return Ok((len, p_left));
+            // return true;
          }
       }
       // otherwise, just set our sample loc
@@ -3894,10 +3897,11 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, len: &mut i32, m: &Mode,
       f.current_loc = f.current_loc.wrapping_add(temp_1);
    }
 
-   *len = right_end;  // ignore samples after the window goes to 0
+   len = right_end;  // ignore samples after the window goes to 0
    CHECK!(f);
 
-   return true;
+   return Ok((len, p_left));
+//    return true;
 }
 
 
