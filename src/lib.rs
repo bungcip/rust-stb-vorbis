@@ -4757,8 +4757,8 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
          let mut current_entry = 0;
          let mut current_length = (get_bits(f,5) + 1) as i32;
          while current_entry < c.entries {
-            let limit : i32 = c.entries - current_entry;
-            let n : i32 = get_bits(f, ilog(limit)) as i32;
+            let limit = c.entries - current_entry;
+            let n     = get_bits(f, ilog(limit)) as i32;
             if current_entry + n > c.entries as i32 { 
                 return error(f, InvalidSetup);
             }
@@ -4793,19 +4793,14 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
       }
 
       // compute the size of the sorted tables
-      let mut sorted_count: i32;
-      if c.sparse == true {
-         sorted_count = total;
+      c.sorted_entries = if c.sparse == true {
+         total
       } else {
-         sorted_count = 0;
-         for &item in lengths.iter().take(c.entries as usize){
-            if item > STB_FAST_HUFFMAN_LENGTH as u8 && item != NO_CODE {
-               sorted_count += 1;
-            }
-         }
-      }
-
-      c.sorted_entries = sorted_count;
+         lengths.iter()
+            .take(c.entries as usize)
+            .filter(|&item| *item > STB_FAST_HUFFMAN_LENGTH as u8 && *item != NO_CODE)
+            .count() as i32
+      };
       let mut values: Vec<u32> = Vec::new();
 
       CHECK!(f);
@@ -5010,9 +5005,7 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
                     g.neighbors[j][1] = high as u8;
                 }
 
-                if g.values > longest_floorlist{
-                    longest_floorlist = g.values;
-                }
+                longest_floorlist = std::cmp::max(g.values, longest_floorlist);
 
                 // push to floor_config
                 f.floor_config.push(Floor::Type1(g));
