@@ -2287,8 +2287,10 @@ pub fn stb_vorbis_seek_frame(f: &mut Vorbis, sample_number: u32) -> bool
    }
 
    // fast page-level search
-   if seek_to_sample_coarse(f, sample_number) == false {
-      return false;
+   let result = seek_to_sample_coarse(f, sample_number);
+   if result.is_err() {
+       error(f, result.unwrap_err());
+       return false;
    }
 
    assert!(f.current_loc_valid == true);
@@ -2720,7 +2722,7 @@ fn set_file_offset(f: &mut Vorbis, mut loc: u32) -> bool
 // rarely used function to seek back to the preceeding page while finding the
 // start of a packet
 #[allow(unreachable_code, unused_variables)]
-unsafe fn go_to_page_before(f: &mut Vorbis, limit_offset: u32) -> bool
+fn go_to_page_before(f: &mut Vorbis, limit_offset: u32) -> bool
 {
   panic!("EXPECTED PANIC: need ogg sample that will trigger this panic");
 
@@ -3236,11 +3238,9 @@ pub fn stb_vorbis_stream_length_in_samples(f: &mut Vorbis) -> u32
 
 // implements the search logic for finding a page and starting decoding. if
 // the function succeeds, current_loc_valid will be true and current_loc will
-// be less than or equal to the provided sample number (the closer the
-// better).
-fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
+// be less than or equal to the provided sample number (the closer the better).
+fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> Result<(), VorbisError>
 {
-   let mut start_seg_with_known_loc : i32;
    let mut end_pos : i32;
    let mut page_start : i32;
    let mut delta: u32;
@@ -3248,14 +3248,15 @@ fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
    let mut bytes_per_sample : f64 = 0.0;
    let mut probe = 0; 
    
-   use VorbisError::*;
-
    // find the last page and validate the target sample
    let stream_length = stb_vorbis_stream_length_in_samples(f);
-   if stream_length == 0            {return error(f, SeekWithoutLength);}
-   if sample_number > stream_length { return error(f, SeekInvalid);}
+   if stream_length == 0 {
+       return Err(VorbisError::SeekWithoutLength);
+   }
+   if sample_number > stream_length {
+       return Err(VorbisError::SeekInvalid);
+   }
 
-   'error: loop {
    // this is the maximum difference between the window-center (which is the
    // actual granule position value), and the right-start (which the spec
    // indicates should be the granule position (give or take one)).
@@ -3271,9 +3272,9 @@ fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
       // (untested) the first page does not have a 'last_decoded_sample'
       set_file_offset(f, left.page_end);
       if get_seek_page_info(f, &mut left) == false {
-        //   goto error;
-        break 'error;
-        }
+        stb_vorbis_seek_start(f);
+        return Err(VorbisError::SeekFailed);
+      }
    }
 
    let mut right = f.p_last;
@@ -3282,7 +3283,7 @@ fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
    // starting from the start is handled differently
    if sample_number <= left.last_decoded_sample {
       stb_vorbis_seek_start(f);
-      return true;
+      return Ok(());
    }
 
    let mut mid: ProbedPage = ProbedPage::default();
@@ -3324,16 +3325,19 @@ fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
          }
 
          if vorbis_find_page(f) == None {
-            break 'error;
-        }
+            stb_vorbis_seek_start(f);
+            return Err(VorbisError::SeekFailed);
+         }
       }
 
       loop {
          if get_seek_page_info(f, &mut mid) == false {
-            //  goto error;
-            break 'error;
+            stb_vorbis_seek_start(f);
+            return Err(VorbisError::SeekFailed);
          }
-         if mid.last_decoded_sample != !0 {break;}
+         if mid.last_decoded_sample != !0 {
+             break;
+         }
          // (untested) no frames end on this page
          set_file_offset(f, mid.page_end);
          assert!(mid.page_start < right.page_start);
@@ -3357,10 +3361,13 @@ fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
    // seek back to start of the last packet
    page_start = left.page_start as i32;
    set_file_offset(f, page_start as u32);
-   if start_page(f) == false { return error(f, SeekFailed);}
+   if start_page(f) == false {
+       return Err(VorbisError::SeekFailed);
+   }
    end_pos = f.end_seg_with_known_loc;
    assert!(end_pos >= 0);
 
+   let mut start_seg_with_known_loc : i32;
    loop {
        let mut i = end_pos;
        while i > 0 {
@@ -3377,16 +3384,16 @@ fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
       }
 
       // (untested) the final packet begins on an earlier page
-      unsafe{
       if go_to_page_before(f, page_start as u32) == false {
-        break 'error;
-      }
+        stb_vorbis_seek_start(f);
+        return Err(VorbisError::SeekFailed);
       }
 
       page_start = stb_vorbis_get_file_offset(f) as i32;
       if start_page(f) == false {
-        break 'error;
-        }
+        stb_vorbis_seek_start(f);
+        return Err(VorbisError::SeekFailed);
+      }
         
       end_pos = f.segment_count - 1;
    }
@@ -3402,17 +3409,13 @@ fn seek_to_sample_coarse(f: &mut Vorbis, mut sample_number: u32) -> bool
 
    for i in 0 .. start_seg_with_known_loc as usize {
        let seg = f.segments[i] as i32;
-      skip(f, seg);
+       skip(f, seg);
    }
 
    // start decoding (optimizable - this frame is generally discarded)
    vorbis_pump_first_frame(f);
-   return true;
-   } // loop -- 'error
-// error:
-   // try to restore the file to a valid state
-   stb_vorbis_seek_start(f);
-   return error(f, SeekFailed);
+   return Ok(());
+  
 }
 
 #[allow(unreachable_code, unused_variables)]
@@ -3617,10 +3620,8 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, m: &Mode,
 
    CHECK!(f);
 
-//    use VorbisError::*;
-
-    let mut zero_channel = [false; 256];
-    let mut really_zero_channel  = [false; 256];
+    let mut zero_channel = [false; STB_VORBIS_MAX_CHANNELS as usize];
+    let mut really_zero_channel  = [false; STB_VORBIS_MAX_CHANNELS as usize];
 
    for i in 0 .. f.channels as usize {
       let s = map.chan[i].mux as i32;
@@ -3668,7 +3669,6 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, m: &Mode,
             }
 
             if f.valid_bits == INVALID_BITS {
-                // goto error;
                 zero_channel[i as usize] = true;
                 continue;
             } // behavior according to spec
@@ -3731,11 +3731,12 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, m: &Mode,
 
    // re-enable coupled channels if necessary
    CHECK!(f);
-   std::ptr::copy_nonoverlapping(zero_channel.as_ptr(), really_zero_channel.as_mut_ptr(), f.channels as usize);
 
-   for i in 0 .. map.coupling_steps as usize {
-      let magnitude = map.chan[i].magnitude as usize;
-      let angle = map.chan[i].angle as usize;
+   really_zero_channel.clone_from_slice(&zero_channel);
+
+   for &chan in map.chan.iter().take(map.coupling_steps as usize) {
+      let MappingChannel { magnitude, angle, .. } = chan;
+      let (magnitude, angle) = (magnitude as usize, angle as usize);
       
       if zero_channel[magnitude] == false || zero_channel[angle] == false {
          zero_channel[magnitude] = false;
@@ -3890,7 +3891,6 @@ unsafe fn vorbis_decode_packet_rest(f: &mut Vorbis, m: &Mode,
    CHECK!(f);
 
    return Ok((len, p_left));
-//    return true;
 }
 
 
@@ -4667,19 +4667,22 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
    get32(f); // bitrate_nominal
    get32(f); // bitrate_minimum
 
-   let mut x : u8 = get8(f);
    {
-      let log0 : i32 = (x & 15) as i32;
-      let log1 : i32 = (x >> 4) as i32;
+      let x = get8(f);
+      let log0 = (x & 15) as i32;
+      let log1 = (x >> 4) as i32;
       f.blocksize_0 = 1 << log0;
       f.blocksize_1 = 1 << log1;
       if log0 < 6 || log0 > 13                       {return error(f, InvalidSetup);}
       if log1 < 6 || log1 > 13                       {return error(f, InvalidSetup);}
       if log0 > log1                                 {return error(f, InvalidSetup);}
    }
+
    // framing_flag
-   x = get8(f);
-   if (x & 1) == 0                                    {return error(f, InvalidFirstPage);}
+   {
+        let x = get8(f);
+        if (x & 1) == 0                                    {return error(f, InvalidFirstPage);}
+   }
 
    // second packet!
    if start_page(f) == false                              {return false;} 
@@ -4713,21 +4716,19 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
    if vorbis_validate(&header) == false                    {return error(f, InvalidSetup);}
 
    // codebooks
-   let mut y : u8;
-
    let codebook_count = (get_bits(f,8) + 1) as i32;
    f.codebooks.reserve(codebook_count as usize);
    'codebook: for _ in 0 .. codebook_count {
       let mut c : Codebook = Codebook::default();
 
       CHECK!(f);
-      x = get_bits(f, 8) as u8; if x != 0x42            {return error(f, InvalidSetup);}
-      x = get_bits(f, 8) as u8; if x != 0x43            {return error(f, InvalidSetup);}
-      x = get_bits(f, 8) as u8; if x != 0x56            {return error(f, InvalidSetup);}
-      x = get_bits(f, 8) as u8;
+      let x = get_bits(f, 8) as u8; if x != 0x42            {return error(f, InvalidSetup);}
+      let x = get_bits(f, 8) as u8; if x != 0x43            {return error(f, InvalidSetup);}
+      let x = get_bits(f, 8) as u8; if x != 0x56            {return error(f, InvalidSetup);}
+      let x = get_bits(f, 8) as u8;
       c.dimensions = ((get_bits(f, 8) << 8) as i32 + x as i32) as i32;
-      x = get_bits(f, 8) as u8;
-      y = get_bits(f, 8) as u8;
+      let x = get_bits(f, 8) as u8;
+      let y = get_bits(f, 8) as u8;
       c.entries = ((get_bits(f, 8)<<16) + ( (y as u32) <<8) + x as u32) as i32;
       let is_ordered = get_bits(f,1) != 0;
       c.sparse = if is_ordered { false } else { get_bits(f,1) != 0 };
@@ -4911,11 +4912,12 @@ unsafe fn start_decoder(f: &mut Vorbis) -> bool
    } // end of codebook handling
 
    // time domain transfers (notused)
-
-   x = ( get_bits(f, 6) + 1) as u8;
-   for _ in 0 .. x {
-      let z = get_bits(f, 16);
-      if z != 0 { return error(f, InvalidSetup); }
+   {
+        let x = ( get_bits(f, 6) + 1) as u8;
+        for _ in 0 .. x {
+            let z = get_bits(f, 16);
+            if z != 0 { return error(f, InvalidSetup); }
+        }
    }
 
    // Floors
